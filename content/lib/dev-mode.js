@@ -44,6 +44,10 @@ module.exports.register = function ({ config }) {
     const logger = this.getLogger('dev-pages-extension')
       contentCatalog.getComponents().forEach(({ versions }) => {
         versions.forEach(({ name: component, version, navigation: nav, url: defaultUrl }) => {
+          // Ensure nav is an array
+          if (!nav || !Array.isArray(nav)) {
+            return
+          }
           const navEntriesByUrl = getNavEntriesByUrl(nav)
           const unlistedPages = contentCatalog
             .findBy({ component, version, family: 'page' })
