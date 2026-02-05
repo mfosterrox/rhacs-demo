@@ -79,7 +79,7 @@ if [ -n "$CENTRAL_ROUTE" ]; then
         ACS_URL="$CENTRAL_ROUTE"
     fi
     
-    log "✓ Found ACS Central route: $ACS_URL"
+    log "[OK] Found ACS Central route: $ACS_URL"
     
     # Get admin password from secret
     ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
@@ -92,14 +92,14 @@ if [ -n "$CENTRAL_ROUTE" ]; then
         save_to_bashrc "ACS_USERNAME" "$ACS_USERNAME"
         save_to_bashrc "ACS_PASSWORD" "$ACS_PASSWORD"
         
-        log "✓ ACS credentials saved to ~/.bashrc"
+        log "[OK] ACS credentials saved to ~/.bashrc"
         log "  ACS_URL: $ACS_URL"
         log "  ACS_USERNAME: $ACS_USERNAME"
     else
-        warning "Could not retrieve ACS password from secret 'central-htpasswd' in namespace '$RHACS_NAMESPACE'"
+        warning "Could not retrieve ACS password from secret central-htpasswd in namespace $RHACS_NAMESPACE"
     fi
 else
-    warning "Could not find ACS Central route in namespace '$RHACS_NAMESPACE'. ACS credentials will not be configured."
+    warning "Could not find ACS Central route in namespace $RHACS_NAMESPACE. ACS credentials will not be configured."
 fi
 
 # Download roxctl if not already available
@@ -134,13 +134,13 @@ if ! command -v roxctl &>/dev/null; then
             echo 'export PATH="$PATH:/tmp"' >> ~/.bashrc
         fi
         export PATH="$PATH:/tmp"
-        log "✓ roxctl downloaded to /tmp/roxctl"
+        log "[OK] roxctl downloaded to /tmp/roxctl"
     else
         warning "Failed to download roxctl from $ROXCTL_URL"
         warning "You may need to install roxctl manually"
     fi
 else
-    log "✓ roxctl already available in PATH"
+    log "[OK] roxctl already available in PATH"
 fi
 
 echo ""
@@ -163,7 +163,7 @@ for script in "${SCRIPTS[@]}"; do
     
     # Execute the script
     if bash "$script_path"; then
-        log "✓ Completed: $script"
+        log "[OK] Completed: $script"
     else
         error "Failed: $script"
     fi
