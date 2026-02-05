@@ -81,22 +81,25 @@ if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
         SKUPPER_CRDS_INSTALLED=true
         log "[OK] Skupper CRDs already installed"
     else
-        # Try to install Skupper CRDs if installation script exists
-        SKUPPER_INSTALL_SCRIPT="$TUTORIAL_HOME/k8s-deployment-manifests/skupper-online-boutique/00-install-skupper-crds.sh"
-        if [ -f "$SKUPPER_INSTALL_SCRIPT" ]; then
-            log "Skupper CRDs not found. Installing Skupper CRDs..."
-            if bash "$SKUPPER_INSTALL_SCRIPT"; then
+        # Install Skupper CRDs directly
+        log "Skupper CRDs not found. Installing Skupper CRDs..."
+        SKUPPER_VERSION="${SKUPPER_VERSION:-2.1.3}"
+        set +e
+        if oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>/dev/null; then
+            log "Waiting for Skupper CRDs to be available..."
+            oc wait --for=condition=Established crd/sites.skupper.io --timeout=60s >/dev/null 2>&1 || true
+            oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=60s >/dev/null 2>&1 || true
+            if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
                 SKUPPER_CRDS_INSTALLED=true
                 log "[OK] Skupper CRDs installed successfully"
             else
-                warning "Failed to install Skupper CRDs. Skupper resources will be skipped."
-                warning "You can install manually: bash $SKUPPER_INSTALL_SCRIPT"
+                warning "Skupper CRDs installation may have failed. Skupper resources will be skipped."
             fi
         else
-            warning "Skupper CRDs not found and installation script not available."
-            warning "Skupper resources will be skipped."
-            warning "To install Skupper manually: https://skupper.io/start/index.html"
+            warning "Failed to install Skupper CRDs. Skupper resources will be skipped."
+            warning "To install manually: kubectl apply -f https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml"
         fi
+        set -e
     fi
     
     # Deploy all manifests except Skupper if CRDs aren't installed
