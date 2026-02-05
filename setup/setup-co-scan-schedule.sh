@@ -185,6 +185,9 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
     TOKEN_CURL_EXIT_CODE=$?
     set -e
     
+    # Debug: Log the raw response for troubleshooting
+    log "Debug: Token API response (first 500 chars): ${TOKEN_RESPONSE:0:500}"
+    
     if [ $TOKEN_CURL_EXIT_CODE -ne 0 ]; then
         log "API token generation via curl failed, trying roxctl..."
         # Fallback to roxctl
@@ -257,10 +260,13 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
     
     # Verify token is not empty and has reasonable length (RHACS tokens are typically 40+ characters)
     if [ ${#ROX_API_TOKEN} -lt 30 ]; then
+        log "Debug: TOKEN_RESPONSE full: $TOKEN_RESPONSE"
+        log "Debug: TOKEN_OUTPUT full: $TOKEN_OUTPUT"
         error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars). Token preview: ${ROX_API_TOKEN:0:30}..."
     fi
     
     log "✓ API token generated (length: ${#ROX_API_TOKEN} chars)"
+    log "Debug: Token first 20 chars: ${ROX_API_TOKEN:0:20}..."
     
     # Save token to ~/.bashrc
     log "✓ New API token generated"

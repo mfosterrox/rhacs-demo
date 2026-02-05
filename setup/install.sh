@@ -81,15 +81,17 @@ if [ -n "$CENTRAL_ROUTE" ]; then
     
     log "[OK] Found ACS Central route: $ACS_URL"
     
+    # Always save ACS_URL (even if password isn't available yet)
+    save_to_bashrc "ACS_URL" "$ACS_URL"
+    ACS_USERNAME="admin"
+    save_to_bashrc "ACS_USERNAME" "$ACS_USERNAME"
+    
     # Get admin password from secret
     ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
     if [ -n "$ADMIN_PASSWORD_B64" ]; then
         ACS_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
-        ACS_USERNAME="admin"
         
-        # Save to ~/.bashrc
-        save_to_bashrc "ACS_URL" "$ACS_URL"
-        save_to_bashrc "ACS_USERNAME" "$ACS_USERNAME"
+        # Save password to ~/.bashrc
         save_to_bashrc "ACS_PASSWORD" "$ACS_PASSWORD"
         
         log "[OK] ACS credentials saved to ~/.bashrc"
@@ -97,6 +99,8 @@ if [ -n "$CENTRAL_ROUTE" ]; then
         log "  ACS_USERNAME: $ACS_USERNAME"
     else
         warning "Could not retrieve ACS password from secret central-htpasswd in namespace $RHACS_NAMESPACE"
+        warning "ACS_URL and ACS_USERNAME saved, but password will need to be retrieved later"
+        log "[OK] ACS_URL saved to ~/.bashrc: $ACS_URL"
     fi
 else
     warning "Could not find ACS Central route in namespace $RHACS_NAMESPACE. ACS credentials will not be configured."
