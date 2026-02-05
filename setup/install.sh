@@ -164,8 +164,44 @@ if [ -n "$CENTRAL_ROUTE" ]; then
     log "  ACS_USERNAME: $ACS_USERNAME"
     if [ -n "${ACS_PASSWORD:-}" ]; then
         log "  ACS_PASSWORD: [saved to ~/.bashrc]"
+        
+        # Generate and save ROX_API_TOKEN if we have password
+        log "Generating API token..."
+        ROX_ENDPOINT_FOR_API="${CENTRAL_ROUTE}"
+        set +e
+        TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
+            -u "admin:${ACS_PASSWORD}" \
+            -H "Content-Type: application/json" \
+            "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
+            -d '{"name":"install-script-token","roles":["Admin"]}' 2>&1)
+        TOKEN_CURL_EXIT_CODE=$?
+        set -e
+        
+        if [ $TOKEN_CURL_EXIT_CODE -eq 0 ]; then
+            # Extract token from response
+            ROX_API_TOKEN=""
+            if echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
+                ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // empty' 2>/dev/null || echo "")
+            fi
+            
+            if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ]; then
+                ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
+            fi
+            
+            if [ -n "$ROX_API_TOKEN" ] && [ "$ROX_API_TOKEN" != "null" ] && [ ${#ROX_API_TOKEN} -ge 30 ]; then
+                save_to_bashrc "ROX_API_TOKEN" "$ROX_API_TOKEN"
+                log "[OK] ROX_API_TOKEN generated and saved to ~/.bashrc"
+            else
+                warning "Failed to extract valid API token from response"
+                warning "Token generation failed, but installation will continue"
+            fi
+        else
+            warning "Failed to generate API token (curl exit code: $TOKEN_CURL_EXIT_CODE)"
+            warning "Token generation failed, but installation will continue"
+        fi
     else
         log "  ACS_PASSWORD: [not set - use -p flag to provide]"
+        log "  ROX_API_TOKEN: [not generated - password required]"
     fi
 else
     warning "Could not find ACS Central route in namespace $RHACS_NAMESPACE. ACS credentials will not be configured."
