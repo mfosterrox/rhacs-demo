@@ -304,15 +304,21 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
     fi
     
     if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROXCTL_CMD" ]; then
-        # Normalize ROX_ENDPOINT for roxctl (add :443 if no port specified)
+        # Normalize ROX_ENDPOINT for roxctl
+        # roxctl expects format: hostname:port (without https://)
         ROX_ENDPOINT_NORMALIZED="$ROX_ENDPOINT"
+        
+        # Remove https:// or http:// prefix if present
+        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED#https://}"
+        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED#http://}"
+        
+        # Remove trailing slash if present
+        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED%/}"
+        
+        # Add :443 if no port specified
         if [[ ! "$ROX_ENDPOINT_NORMALIZED" =~ :[0-9]+$ ]]; then
             ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED}:443"
         fi
-        
-        # Remove https:// prefix if present
-        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED#https://}"
-        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED#http://}"
         
         # Export ROX_API_TOKEN so roxctl can use it as an environment variable
         export ROX_API_TOKEN
@@ -368,6 +374,8 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
         set +e
         trap '' ERR
         
+        # Try creating auth provider with roxctl
+        # Use --insecure flag for TLS issues, and handle ALPN errors gracefully
         AUTH_PROVIDER_OUTPUT=$(ROX_API_TOKEN="$ROX_API_TOKEN" $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
             central userpki create Prometheus \
             -c tls.crt \
@@ -386,8 +394,26 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
             if echo "$AUTH_PROVIDER_OUTPUT" | grep -qi "already exists\|duplicate"; then
                 warning "Auth provider still exists after deletion attempt. Output: ${AUTH_PROVIDER_OUTPUT:0:300}"
                 warning "You may need to delete it manually: ROX_API_TOKEN=\"\$ROX_API_TOKEN\" roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki list --insecure-skip-tls-verify"
+            elif echo "$AUTH_PROVIDER_OUTPUT" | grep -qi "ALPN\|alpn\|grpc-go\|transport.*authentication handshake"; then
+                # ALPN/gRPC error - this is a known issue with some roxctl/RHACS versions
+                warning "Failed to create UserPKI auth provider due to gRPC/TLS ALPN issue."
+                warning "This is a known compatibility issue between roxctl and RHACS Central versions."
+                warning "Error details: ${AUTH_PROVIDER_OUTPUT:0:400}"
+                warning ""
+                warning "You can create the UserPKI auth provider manually via the RHACS UI:"
+                warning "  1. Go to Platform Configuration > Access Control > Auth Providers"
+                warning "  2. Create a new User Certificate provider named 'Prometheus'"
+                warning "  3. Upload the certificate from: oc get secret sample-rhacs-operator-prometheus-tls -n $NAMESPACE -o jsonpath='{.data.tls\.crt}' | base64 -d"
+                warning ""
+                warning "Or try manually with roxctl:"
+                warning "  ROX_API_TOKEN=\"\$ROX_API_TOKEN\" roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki create Prometheus -c tls.crt -r Admin --insecure-skip-tls-verify"
+                warning ""
+                warning "Continuing with installation (monitoring will work once auth provider is created)..."
             else
-                error "Failed to create UserPKI auth provider. Exit code: $AUTH_PROVIDER_EXIT_CODE. Output: ${AUTH_PROVIDER_OUTPUT:0:500}"
+                warning "Failed to create UserPKI auth provider. Exit code: $AUTH_PROVIDER_EXIT_CODE."
+                warning "Output: ${AUTH_PROVIDER_OUTPUT:0:500}"
+                warning "You may need to create it manually via RHACS UI or roxctl."
+                warning "Continuing with installation..."
             fi
         fi
     fi

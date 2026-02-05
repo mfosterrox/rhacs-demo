@@ -81,25 +81,73 @@ if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
         SKUPPER_CRDS_INSTALLED=true
         log "[OK] Skupper CRDs already installed"
     else
-        # Install Skupper CRDs directly
-        log "Skupper CRDs not found. Installing Skupper CRDs..."
-        SKUPPER_VERSION="${SKUPPER_VERSION:-2.1.3}"
-        set +e
-        if oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>/dev/null; then
-            log "Waiting for Skupper CRDs to be available..."
-            oc wait --for=condition=Established crd/sites.skupper.io --timeout=60s >/dev/null 2>&1 || true
-            oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=60s >/dev/null 2>&1 || true
-            if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
-                SKUPPER_CRDS_INSTALLED=true
-                log "[OK] Skupper CRDs installed successfully"
+        # Try to install Skupper CRDs using the installation script if it exists
+        SKUPPER_INSTALL_SCRIPT="$TUTORIAL_HOME/k8s-deployment-manifests/skupper-online-boutique/00-install-skupper-crds.sh"
+        if [ -f "$SKUPPER_INSTALL_SCRIPT" ]; then
+            log "Skupper CRDs not found. Installing using $SKUPPER_INSTALL_SCRIPT..."
+            set +e
+            # Use bash to run the script and capture output
+            if bash "$SKUPPER_INSTALL_SCRIPT" 2>&1 | tee /tmp/skupper-install.log; then
+                log "Waiting for Skupper CRDs to be established..."
+                sleep 5  # Give CRDs a moment to register
+                oc wait --for=condition=Established crd/sites.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                oc wait --for=condition=Established crd/connectors.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                oc wait --for=condition=Established crd/listeners.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                
+                # Verify CRDs are actually available
+                if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                    SKUPPER_CRDS_INSTALLED=true
+                    log "[OK] Skupper CRDs installed and verified successfully"
+                else
+                    warning "Skupper CRDs installation completed but CRDs not yet available. Will retry check..."
+                    # Give it more time and check again
+                    sleep 10
+                    if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                        SKUPPER_CRDS_INSTALLED=true
+                        log "[OK] Skupper CRDs now available"
+                    else
+                        warning "Skupper CRDs still not available after installation. Skupper resources will be skipped."
+                    fi
+                fi
             else
-                warning "Skupper CRDs installation may have failed. Skupper resources will be skipped."
+                warning "Skupper CRD installation script failed. Trying direct installation..."
+                # Fall back to direct installation
+                SKUPPER_VERSION="${SKUPPER_VERSION:-2.1.3}"
+                if oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>&1; then
+                    log "Waiting for Skupper CRDs to be established..."
+                    sleep 5
+                    oc wait --for=condition=Established crd/sites.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                    oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                    if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                        SKUPPER_CRDS_INSTALLED=true
+                        log "[OK] Skupper CRDs installed successfully via direct method"
+                    fi
+                fi
             fi
+            set -e
         else
-            warning "Failed to install Skupper CRDs. Skupper resources will be skipped."
-            warning "To install manually: kubectl apply -f https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml"
+            # Install Skupper CRDs directly if script doesn't exist
+            log "Skupper CRDs not found. Installing Skupper CRDs directly..."
+            SKUPPER_VERSION="${SKUPPER_VERSION:-2.1.3}"
+            set +e
+            if oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>&1; then
+                log "Waiting for Skupper CRDs to be established..."
+                sleep 5
+                oc wait --for=condition=Established crd/sites.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=120s >/dev/null 2>&1 || true
+                if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                    SKUPPER_CRDS_INSTALLED=true
+                    log "[OK] Skupper CRDs installed successfully"
+                else
+                    warning "Skupper CRDs installation may have failed. Skupper resources will be skipped."
+                fi
+            else
+                warning "Failed to install Skupper CRDs. Skupper resources will be skipped."
+                warning "To install manually: kubectl apply -f https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml"
+            fi
+            set -e
         fi
-        set -e
     fi
     
     # Deploy all manifests except Skupper if CRDs aren't installed
