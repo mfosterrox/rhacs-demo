@@ -900,9 +900,21 @@ if [ -n "$SUBSCRIPTION_CONDITIONS" ]; then
 fi
 
 # Check for any error messages in subscription status
-SUBSCRIPTION_ERROR=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="CatalogSourcesUnhealthy")].message}' 2>/dev/null || echo "")
-if [ -n "$SUBSCRIPTION_ERROR" ]; then
-    warning "Subscription has catalog source issues: $SUBSCRIPTION_ERROR"
+# Only report if CatalogSourcesUnhealthy condition status is "True" (meaning unhealthy)
+SUBSCRIPTION_ERROR_STATUS=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="CatalogSourcesUnhealthy")].status}' 2>/dev/null || echo "")
+SUBSCRIPTION_ERROR_MSG=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="CatalogSourcesUnhealthy")].message}' 2>/dev/null || echo "")
+
+# Only report as warning if the condition status is "True" (meaning unhealthy)
+# If status is "False" or message says "healthy", that's good news, not an error
+if [ "$SUBSCRIPTION_ERROR_STATUS" = "True" ] && [ -n "$SUBSCRIPTION_ERROR_MSG" ]; then
+    # Check if message actually indicates a problem (not a positive message)
+    if echo "$SUBSCRIPTION_ERROR_MSG" | grep -qi "healthy"; then
+        log "✓ Catalog sources are healthy"
+    else
+        warning "Subscription has catalog source issues: $SUBSCRIPTION_ERROR_MSG"
+    fi
+elif [ "$SUBSCRIPTION_ERROR_STATUS" = "False" ] && [ -n "$SUBSCRIPTION_ERROR_MSG" ]; then
+    log "✓ Catalog sources status: $SUBSCRIPTION_ERROR_MSG"
 fi
 
 # Check currentCSV and installedCSV
@@ -1012,9 +1024,19 @@ while ! oc get csv -n $OPERATOR_NAMESPACE 2>/dev/null | grep -q cluster-observab
             fi
             
             # Check for error conditions
-            ERROR_CONDITION=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.status=="True" && @.type=="CatalogSourcesUnhealthy")].message}' 2>/dev/null || echo "")
-            if [ -n "$ERROR_CONDITION" ]; then
-                warning "  Subscription error: $ERROR_CONDITION"
+            # Only report if CatalogSourcesUnhealthy condition status is "True" (meaning unhealthy)
+            ERROR_CONDITION_STATUS=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="CatalogSourcesUnhealthy")].status}' 2>/dev/null || echo "")
+            ERROR_CONDITION_MSG=$(oc get subscription.operators.coreos.com cluster-observability-operator -n $OPERATOR_NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="CatalogSourcesUnhealthy")].message}' 2>/dev/null || echo "")
+            
+            if [ "$ERROR_CONDITION_STATUS" = "True" ] && [ -n "$ERROR_CONDITION_MSG" ]; then
+                # Check if message actually indicates a problem (not a positive message)
+                if echo "$ERROR_CONDITION_MSG" | grep -qi "healthy"; then
+                    log "  ✓ Catalog sources are healthy"
+                else
+                    warning "  Subscription error: $ERROR_CONDITION_MSG"
+                fi
+            elif [ "$ERROR_CONDITION_STATUS" = "False" ] && [ -n "$ERROR_CONDITION_MSG" ]; then
+                log "  ✓ Catalog sources: $ERROR_CONDITION_MSG"
             fi
             
             # Check for InstallPlan
@@ -1123,23 +1145,51 @@ fi
 
 # Check operator pods
 log "Checking operator pods..."
-POD_STATUS=$(oc get pods -n $OPERATOR_NAMESPACE -l name=cluster-observability-operator -o jsonpath='{.items[*].status.phase}' || echo "")
+# Try multiple label selectors and name patterns for COO pods
+POD_STATUS=""
+POD_NAME=""
+
+# Try label selectors first
+POD_STATUS=$(oc get pods -n $OPERATOR_NAMESPACE -l name=cluster-observability-operator -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo "")
 if [ -z "$POD_STATUS" ]; then
-    # Try alternative label selector
-    POD_STATUS=$(oc get pods -n $OPERATOR_NAMESPACE -l app=cluster-observability-operator -o jsonpath='{.items[*].status.phase}' || echo "")
+    POD_STATUS=$(oc get pods -n $OPERATOR_NAMESPACE -l app=cluster-observability-operator -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo "")
 fi
+if [ -z "$POD_STATUS" ]; then
+    POD_STATUS=$(oc get pods -n $OPERATOR_NAMESPACE -l control-plane=controller-manager -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo "")
+fi
+
+# If no pods found with labels, try finding by name pattern (observability-operator-*)
+if [ -z "$POD_STATUS" ]; then
+    POD_NAME=$(oc get pods -n $OPERATOR_NAMESPACE -o jsonpath='{.items[?(@.metadata.name=~"observability-operator.*")].metadata.name}' 2>/dev/null | awk '{print $1}' || echo "")
+    if [ -n "$POD_NAME" ]; then
+        POD_STATUS=$(oc get pod "$POD_NAME" -n $OPERATOR_NAMESPACE -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    fi
+fi
+
+# Display pods
 if [ -n "$POD_STATUS" ]; then
-    oc get pods -n $OPERATOR_NAMESPACE -l name=cluster-observability-operator 2>/dev/null || oc get pods -n $OPERATOR_NAMESPACE -l app=cluster-observability-operator
+    if [ -n "$POD_NAME" ]; then
+        oc get pod "$POD_NAME" -n $OPERATOR_NAMESPACE
+    else
+        oc get pods -n $OPERATOR_NAMESPACE -l name=cluster-observability-operator 2>/dev/null || \
+        oc get pods -n $OPERATOR_NAMESPACE -l app=cluster-observability-operator 2>/dev/null || \
+        oc get pods -n $OPERATOR_NAMESPACE -l control-plane=controller-manager 2>/dev/null || \
+        oc get pods -n $OPERATOR_NAMESPACE | grep observability-operator
+    fi
 else
     warning "No Cluster Observability Operator pods found with standard labels. Checking all pods in namespace..."
     oc get pods -n $OPERATOR_NAMESPACE
 fi
 
 # Verify pods are running
-if [ -n "$POD_STATUS" ] && echo "$POD_STATUS" | grep -qv "Running"; then
-    warning "Some Cluster Observability Operator pods are not Running. Current status: $POD_STATUS"
+if [ -n "$POD_STATUS" ]; then
+    if echo "$POD_STATUS" | grep -q "Running"; then
+        log "✓ Cluster Observability Operator pod is Running"
+    else
+        warning "Cluster Observability Operator pod status: $POD_STATUS (expected Running)"
+    fi
 else
-    log "✓ All Cluster Observability Operator pods are Running"
+    warning "Could not determine Cluster Observability Operator pod status"
 fi
 
 # Check CSV (ClusterServiceVersion)

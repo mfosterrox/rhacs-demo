@@ -626,7 +626,7 @@ fi
 
 log ""
 
-# Always delete existing acs-catch-all scan configuration before creating a new one
+# Check for existing acs-catch-all scan configuration and validate it before recreating
 log "Checking for existing 'acs-catch-all' scan configuration..."
 set +e
 EXISTING_CONFIGS=$(curl -k -s --connect-timeout 15 --max-time 120 -X GET \
@@ -649,39 +649,68 @@ if ! echo "$EXISTING_CONFIGS" | jq . >/dev/null 2>&1; then
 fi
 
 EXISTING_SCAN=$(echo "$EXISTING_CONFIGS" | jq -r '.configurations[] | select(.scanName == "acs-catch-all") | .id' 2>/dev/null || echo "")
-    
-if [ -n "$EXISTING_SCAN" ] && [ "$EXISTING_SCAN" != "null" ]; then
+EXISTING_SCAN_CONFIG=$(echo "$EXISTING_CONFIGS" | jq '.configurations[] | select(.scanName == "acs-catch-all")' 2>/dev/null || echo "")
+
+NEED_RECREATE=true
+SCAN_CONFIG_ID=""
+
+if [ -n "$EXISTING_SCAN" ] && [ "$EXISTING_SCAN" != "null" ] && [ -n "$EXISTING_SCAN_CONFIG" ]; then
     log "Found existing scan configuration 'acs-catch-all' (ID: $EXISTING_SCAN)"
-    log "Deleting existing scan configuration..."
     
-    set +e
-    DELETE_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X DELETE \
-        -H "Authorization: Bearer $ROX_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        "$ROX_ENDPOINT/v2/compliance/scan/configurations/$EXISTING_SCAN" 2>&1)
-    DELETE_EXIT_CODE=$?
-    DELETE_HTTP_CODE=$(echo "$DELETE_RESPONSE" | grep -oE '[0-9]{3}' | tail -1 || echo "")
-    set -e
+    # Check if configuration is valid and matches expected settings
+    EXISTING_ONE_TIME=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.scanConfig.oneTimeScan // false' 2>/dev/null || echo "false")
+    EXISTING_SCHEDULE_TYPE=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.scanConfig.scanSchedule.intervalType // "none"' 2>/dev/null || echo "none")
+    EXISTING_CLUSTERS=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.clusters[]?' 2>/dev/null | tr '\n' ' ' || echo "")
     
-    if [ $DELETE_EXIT_CODE -ne 0 ]; then
-        warning "Failed to delete existing scan configuration (exit code: $DELETE_EXIT_CODE). Response: ${DELETE_RESPONSE:0:500}"
-        warning "Will attempt to create new configuration anyway..."
-    elif [ -n "$DELETE_HTTP_CODE" ] && [ "$DELETE_HTTP_CODE" -ge 200 ] && [ "$DELETE_HTTP_CODE" -lt 300 ]; then
-        log "✓ Successfully deleted existing scan configuration"
-        # Wait a moment for deletion to complete
-        sleep 2
-    elif [ -n "$DELETE_HTTP_CODE" ] && [ "$DELETE_HTTP_CODE" -eq 404 ]; then
-        log "Scan configuration already deleted or not found (HTTP 404)"
+    # Check if it's a scheduled scan (not one-time) and includes our cluster
+    if [ "$EXISTING_ONE_TIME" = "false" ] && [ "$EXISTING_SCHEDULE_TYPE" != "none" ]; then
+        if echo "$EXISTING_CLUSTERS" | grep -q "$PRODUCTION_CLUSTER_ID"; then
+            log "✓ Existing configuration is valid: scheduled scan with correct cluster"
+            log "  Schedule: $EXISTING_SCHEDULE_TYPE"
+            log "  Cluster: $PRODUCTION_CLUSTER_ID"
+            log "Using existing scan configuration (ID: $EXISTING_SCAN)"
+            NEED_RECREATE=false
+            SCAN_CONFIG_ID="$EXISTING_SCAN"
+        else
+            log "Existing configuration found but cluster mismatch. Will recreate..."
+        fi
     else
-        warning "Unexpected response when deleting scan configuration (HTTP ${DELETE_HTTP_CODE:-unknown}). Response: ${DELETE_RESPONSE:0:500}"
-        warning "Will attempt to create new configuration anyway..."
+        log "Existing configuration is a one-time scan or missing schedule. Will recreate..."
     fi
-else
-    log "No existing 'acs-catch-all' scan configuration found"
 fi
 
-# Create compliance scan configuration (always recreate)
-log "Creating compliance scan configuration 'acs-catch-all'..."
+if [ "$NEED_RECREATE" = true ]; then
+    if [ -n "$EXISTING_SCAN" ] && [ "$EXISTING_SCAN" != "null" ]; then
+        log "Deleting existing scan configuration before creating new one..."
+        
+        set +e
+        DELETE_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X DELETE \
+            -H "Authorization: Bearer $ROX_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$ROX_ENDPOINT/v2/compliance/scan/configurations/$EXISTING_SCAN" 2>&1)
+        DELETE_EXIT_CODE=$?
+        DELETE_HTTP_CODE=$(echo "$DELETE_RESPONSE" | grep -oE '[0-9]{3}' | tail -1 || echo "")
+        set -e
+        
+        if [ $DELETE_EXIT_CODE -ne 0 ]; then
+            warning "Failed to delete existing scan configuration (exit code: $DELETE_EXIT_CODE). Response: ${DELETE_RESPONSE:0:500}"
+            warning "Will attempt to create new configuration anyway..."
+        elif [ -n "$DELETE_HTTP_CODE" ] && [ "$DELETE_HTTP_CODE" -ge 200 ] && [ "$DELETE_HTTP_CODE" -lt 300 ]; then
+            log "✓ Successfully deleted existing scan configuration"
+            # Wait a moment for deletion to complete
+            sleep 2
+        elif [ -n "$DELETE_HTTP_CODE" ] && [ "$DELETE_HTTP_CODE" -eq 404 ]; then
+            log "Scan configuration already deleted or not found (HTTP 404)"
+        else
+            warning "Unexpected response when deleting scan configuration (HTTP ${DELETE_HTTP_CODE:-unknown}). Response: ${DELETE_RESPONSE:0:500}"
+            warning "Will attempt to create new configuration anyway..."
+        fi
+    else
+        log "No existing 'acs-catch-all' scan configuration found"
+    fi
+    
+    # Create compliance scan configuration
+    log "Creating compliance scan configuration 'acs-catch-all'..."
 set +e
 SCAN_CONFIG_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X POST \
         -H "Authorization: Bearer $ROX_API_TOKEN" \
@@ -718,56 +747,61 @@ SCAN_CONFIG_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X POST \
         ]
     }" \
     "$ROX_ENDPOINT/v2/compliance/scan/configurations" 2>&1)
-SCAN_CREATE_EXIT_CODE=$?
-set -e
-
-if [ $SCAN_CREATE_EXIT_CODE -ne 0 ]; then
-    error "Failed to create compliance scan configuration (exit code: $SCAN_CREATE_EXIT_CODE). Response: ${SCAN_CONFIG_RESPONSE:0:500}"
-fi
-
-if [ -z "$SCAN_CONFIG_RESPONSE" ]; then
-    error "Empty response from scan configuration creation API"
-fi
-
-# Log response for debugging (first 500 chars)
-log "API Response: ${SCAN_CONFIG_RESPONSE:0:500}"
-
-# Check for ProfileBundle processing error
-if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle.*still being processed"; then
-    warning "Scan creation failed: ProfileBundle is still being processed"
-    log ""
-    log "This means the Compliance Operator is still processing profile bundles."
-    log "Please wait for ProfileBundles to be ready and retry."
-    log ""
-    log "To check ProfileBundle status:"
-    log "  oc get profilebundle -n openshift-compliance"
-    log "  oc describe profilebundle ocp4 -n openshift-compliance"
-    log ""
-    log "Wait for dataStreamStatus to show 'Valid' before retrying."
-    log ""
-    error "Cannot create scan: ProfileBundles are still being processed. Wait and retry."
-fi
-
-if ! echo "$SCAN_CONFIG_RESPONSE" | jq . >/dev/null 2>&1; then
-    # Check if it's an error message about ProfileBundle
-    if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle"; then
-        warning "Scan creation failed with ProfileBundle-related error:"
-        echo "$SCAN_CONFIG_RESPONSE" | head -20
-        log ""
-        log "Check ProfileBundle status: oc get profilebundle -n openshift-compliance"
-        error "ProfileBundle error detected. See above for details."
-    else
-        error "Invalid JSON response from scan configuration creation API. Response: ${SCAN_CONFIG_RESPONSE:0:300}"
+    SCAN_CREATE_EXIT_CODE=$?
+    set -e
+    
+    if [ $SCAN_CREATE_EXIT_CODE -ne 0 ]; then
+        error "Failed to create compliance scan configuration (exit code: $SCAN_CREATE_EXIT_CODE). Response: ${SCAN_CONFIG_RESPONSE:0:500}"
+    fi
+    
+        if [ -z "$SCAN_CONFIG_RESPONSE" ]; then
+            error "Empty response from scan configuration creation API"
+        fi
+        
+        # Log response for debugging (first 500 chars)
+        log "API Response: ${SCAN_CONFIG_RESPONSE:0:500}"
+        
+        # Check for ProfileBundle processing error
+        if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle.*still being processed"; then
+            warning "Scan creation failed: ProfileBundle is still being processed"
+            log ""
+            log "This means the Compliance Operator is still processing profile bundles."
+            log "Please wait for ProfileBundles to be ready and retry."
+            log ""
+            log "To check ProfileBundle status:"
+            log "  oc get profilebundle -n openshift-compliance"
+            log "  oc describe profilebundle ocp4 -n openshift-compliance"
+            log ""
+            log "Wait for dataStreamStatus to show 'Valid' before retrying."
+            log ""
+            error "Cannot create scan: ProfileBundles are still being processed. Wait and retry."
+        fi
+        
+        if ! echo "$SCAN_CONFIG_RESPONSE" | jq . >/dev/null 2>&1; then
+            # Check if it's an error message about ProfileBundle
+            if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle"; then
+                warning "Scan creation failed with ProfileBundle-related error:"
+                echo "$SCAN_CONFIG_RESPONSE" | head -20
+                log ""
+                log "Check ProfileBundle status: oc get profilebundle -n openshift-compliance"
+                error "ProfileBundle error detected. See above for details."
+            else
+                error "Invalid JSON response from scan configuration creation API. Response: ${SCAN_CONFIG_RESPONSE:0:300}"
+            fi
+        fi
+        
+        log "✓ Compliance scan configuration created successfully"
+        
+        # Get the scan configuration ID from the response - try multiple possible response structures
+        SCAN_CONFIG_ID=$(echo "$SCAN_CONFIG_RESPONSE" | jq -r '.id // .configuration.id // empty' 2>/dev/null)
     fi
 fi
 
-log "✓ Compliance scan configuration created successfully"
-
-# Get the scan configuration ID from the response - try multiple possible response structures
-SCAN_CONFIG_ID=$(echo "$SCAN_CONFIG_RESPONSE" | jq -r '.id // .configuration.id // empty' 2>/dev/null)
-
+# Get scan configuration ID for schedule creation (if not already set from existing config)
 if [ -z "$SCAN_CONFIG_ID" ] || [ "$SCAN_CONFIG_ID" = "null" ]; then
-    log "Could not extract scan configuration ID from response, waiting a moment and trying to get it from configurations list..."
+
+    if [ -z "$SCAN_CONFIG_ID" ] || [ "$SCAN_CONFIG_ID" = "null" ]; then
+        log "Could not extract scan configuration ID from response, waiting a moment and trying to get it from configurations list..."
     log "Full response: $SCAN_CONFIG_RESPONSE"
     
     # Wait a moment for the configuration to be available
@@ -820,12 +854,15 @@ if [ -z "$SCAN_CONFIG_ID" ] || [ "$SCAN_CONFIG_ID" = "null" ]; then
         RETRY_COUNT=$((RETRY_COUNT + 1))
     done
     
-    if [ -z "$SCAN_CONFIG_ID" ] || [ "$SCAN_CONFIG_ID" = "null" ]; then
-        # Final attempt - show full response for debugging
-        log "Final configurations response: $CONFIGS_RESPONSE"
-        error "Could not find 'acs-catch-all' configuration after $MAX_RETRIES attempts. Available configurations: $(echo "$CONFIGS_RESPONSE" | jq -r '.configurations[]? | .scanName' 2>/dev/null | tr '\n' ' ' || echo "none")"
+        if [ -z "$SCAN_CONFIG_ID" ] || [ "$SCAN_CONFIG_ID" = "null" ]; then
+            # Final attempt - show full response for debugging
+            log "Final configurations response: $CONFIGS_RESPONSE"
+            error "Could not find 'acs-catch-all' configuration after $MAX_RETRIES attempts. Available configurations: $(echo "$CONFIGS_RESPONSE" | jq -r '.configurations[]? | .scanName' 2>/dev/null | tr '\n' ' ' || echo "none")"
+        fi
     fi
-else
+fi
+
+if [ -n "$SCAN_CONFIG_ID" ] && [ "$SCAN_CONFIG_ID" != "null" ]; then
     log "✓ Scan configuration ID: $SCAN_CONFIG_ID"
 fi
 
