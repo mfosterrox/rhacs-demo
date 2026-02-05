@@ -75,30 +75,46 @@ fi
 if [ "$NEEDS_NEW_TOKEN" = true ]; then
     log "Generating new API token..."
     
-    # Get ADMIN_PASSWORD from secret
+    # Get ADMIN_PASSWORD from secret with retry logic
     # Try different possible keys in the secret (password is most common, but htpasswd might be used)
     ADMIN_PASSWORD_B64=""
-    if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
-        # Try password key first (most common)
-        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-        # If not found, try htpasswd key
-        if [ -z "$ADMIN_PASSWORD_B64" ]; then
-            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+    MAX_RETRIES=5
+    RETRY_COUNT=0
+    
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$ADMIN_PASSWORD_B64" ]; do
+        if [ $RETRY_COUNT -gt 0 ]; then
+            log "Retrying to get admin password from secret (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+            sleep 3
         fi
-        # If still not found, try to get all keys and use the first one
-        if [ -z "$ADMIN_PASSWORD_B64" ]; then
-            # Get all data keys and try the first one
-            ALL_KEYS=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | grep -o '"[^"]*":' | tr -d '":' | head -1 || echo "")
-            if [ -n "$ALL_KEYS" ]; then
-                ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath="{.data.$ALL_KEYS}" 2>/dev/null || echo "")
-                log "Using key '$ALL_KEYS' from central-htpasswd secret"
+        
+        if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
+            # Try password key first (most common)
+            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+            # If not found, try htpasswd key
+            if [ -z "$ADMIN_PASSWORD_B64" ]; then
+                ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+            fi
+            # If still not found, try to get all keys and use the first one
+            if [ -z "$ADMIN_PASSWORD_B64" ]; then
+                # Get all data keys and try the first one
+                ALL_KEYS=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | grep -o '"[^"]*":' | tr -d '":' | head -1 || echo "")
+                if [ -n "$ALL_KEYS" ]; then
+                    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath="{.data.$ALL_KEYS}" 2>/dev/null || echo "")
+                    if [ -n "$ADMIN_PASSWORD_B64" ]; then
+                        log "Using key '$ALL_KEYS' from central-htpasswd secret"
+                    fi
+                fi
             fi
         fi
-        if [ -z "$ADMIN_PASSWORD_B64" ]; then
-            error "Admin password secret 'central-htpasswd' exists in namespace '$RHACS_OPERATOR_NAMESPACE' but no password data found. Check: oc get secret central-htpasswd -n $RHACS_OPERATOR_NAMESPACE -o yaml"
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    done
+    
+    if [ -z "$ADMIN_PASSWORD_B64" ]; then
+        if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
+            error "Admin password secret 'central-htpasswd' exists in namespace '$RHACS_OPERATOR_NAMESPACE' but no password data found after $MAX_RETRIES attempts. Check: oc get secret central-htpasswd -n $RHACS_OPERATOR_NAMESPACE -o yaml"
+        else
+            error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
         fi
-    else
-        error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
     fi
     
     ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
