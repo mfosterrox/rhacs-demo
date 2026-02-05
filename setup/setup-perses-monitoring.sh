@@ -320,8 +320,10 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
             ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED}:443"
         fi
         
-        # Export ROX_API_TOKEN so roxctl can use it as an environment variable
+        # Export environment variables for roxctl
         export ROX_API_TOKEN
+        # Disable ALPN enforcement to fix gRPC/TLS compatibility issues
+        export GRPC_ENFORCE_ALPN_ENABLED=false
         
         # Always delete existing auth provider to avoid certificate mixups
         log "Deleting existing UserPKI auth provider 'Prometheus' if it exists..."
@@ -331,7 +333,7 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
         # Use printf to send "y\n" (yes with newline) to answer the interactive confirmation prompt
         # Use timeout to prevent hanging if the command doesn't respond
         # Add || true to prevent non-zero exit code from causing issues
-        DELETE_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; printf 'y\n' | $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
+        DELETE_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; export GRPC_ENFORCE_ALPN_ENABLED=false; printf 'y\n' | $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
             central userpki delete Prometheus \
             --insecure-skip-tls-verify 2>&1" 2>&1 || true)
         DELETE_EXIT_CODE=$?
@@ -376,7 +378,7 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
         
         # Try creating auth provider with roxctl
         # Use --insecure flag for TLS issues, and handle ALPN errors gracefully
-        AUTH_PROVIDER_OUTPUT=$(ROX_API_TOKEN="$ROX_API_TOKEN" $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
+        AUTH_PROVIDER_OUTPUT=$(GRPC_ENFORCE_ALPN_ENABLED=false ROX_API_TOKEN="$ROX_API_TOKEN" $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
             central userpki create Prometheus \
             -c tls.crt \
             -r Admin \

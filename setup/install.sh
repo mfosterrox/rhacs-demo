@@ -94,6 +94,11 @@ if [ ! -f ~/.bashrc ]; then
     touch ~/.bashrc
 fi
 
+# Set GRPC_ENFORCE_ALPN_ENABLED to false to fix ALPN/gRPC compatibility issues
+log "Configuring GRPC environment variable..."
+save_to_bashrc "GRPC_ENFORCE_ALPN_ENABLED" "false"
+log "[OK] GRPC_ENFORCE_ALPN_ENABLED=false saved to ~/.bashrc"
+
 # Download roxctl and configure ACS credentials
 log "Setting up roxctl and ACS credentials..."
 RHACS_NAMESPACE="stackrox"
