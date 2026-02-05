@@ -241,16 +241,59 @@ if [ -n "$ROX_ENDPOINT" ]; then
     
     # Only proceed if we have a password and ROX_ENDPOINT is still set
     if [ -n "$ADMIN_PASSWORD" ] && [ -n "$ROX_ENDPOINT" ]; then
-            # Generate API token
+            # Check if API token already exists
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT#https://}"
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT_FOR_API#http://}"
+            TOKEN_NAME="perses-monitoring-script-token"
             
+            log "Checking for existing API token '$TOKEN_NAME'..."
+            set +e
+            EXISTING_TOKENS=$(curl -k -s --connect-timeout 15 --max-time 60 -X GET \
+                -u "admin:${ADMIN_PASSWORD}" \
+                -H "Content-Type: application/json" \
+                "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens" 2>&1)
+            TOKEN_LIST_EXIT_CODE=$?
+            set -e
+            
+            TOKEN_EXISTS=false
+            if [ $TOKEN_LIST_EXIT_CODE -eq 0 ] && echo "$EXISTING_TOKENS" | jq . >/dev/null 2>&1; then
+                # Check if token with our name exists
+                if echo "$EXISTING_TOKENS" | jq -r --arg name "$TOKEN_NAME" '.tokens[]? | select(.name == $name) | .name' 2>/dev/null | grep -q "^${TOKEN_NAME}$"; then
+                    TOKEN_EXISTS=true
+                    log "✓ Found existing API token '$TOKEN_NAME'"
+                fi
+            fi
+            
+            if [ "$TOKEN_EXISTS" = true ]; then
+                log "API token '$TOKEN_NAME' already exists. Skipping creation to avoid duplicates."
+                log "Note: If you need a new token, delete the existing one first using the RHACS UI or API."
+                # We can't retrieve the token value once created, so we'll need to generate a new one
+                # But first, let's try to delete the old one and create a new one
+                log "Deleting existing token to create a fresh one..."
+                set +e
+                TOKEN_ID=$(echo "$EXISTING_TOKENS" | jq -r --arg name "$TOKEN_NAME" '.tokens[]? | select(.name == $name) | .id' 2>/dev/null | head -1)
+                if [ -n "$TOKEN_ID" ] && [ "$TOKEN_ID" != "null" ]; then
+                    DELETE_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X DELETE \
+                        -u "admin:${ADMIN_PASSWORD}" \
+                        -H "Content-Type: application/json" \
+                        "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/${TOKEN_ID}" 2>&1)
+                    if [ $? -eq 0 ]; then
+                        log "✓ Deleted existing token (ID: $TOKEN_ID)"
+                    else
+                        warning "Failed to delete existing token. Will attempt to create new one anyway."
+                    fi
+                fi
+                set -e
+            fi
+            
+            # Generate API token (either new or after deleting old one)
+            log "Generating API token '$TOKEN_NAME'..."
             set +e
             TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
                 -u "admin:${ADMIN_PASSWORD}" \
                 -H "Content-Type: application/json" \
                 "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
-                -d '{"name":"perses-monitoring-script-token","roles":["Admin"]}' 2>&1)
+                -d "{\"name\":\"${TOKEN_NAME}\",\"roles\":[\"Admin\"]}" 2>&1)
             TOKEN_CURL_EXIT_CODE=$?
             set -e
             
@@ -271,7 +314,13 @@ if [ -n "$ROX_ENDPOINT" ]; then
                     log "✓ API token generated (length: ${#ROX_API_TOKEN} chars)"
                 fi
             else
-                warning "Failed to generate API token. curl exit code: $TOKEN_CURL_EXIT_CODE. Skipping auth provider creation."
+                # Check if error is because token already exists
+                if echo "$TOKEN_RESPONSE" | grep -qi "already exists\|duplicate"; then
+                    warning "API token '$TOKEN_NAME' already exists. Please delete it manually if you need a new one."
+                    warning "Skipping auth provider creation."
+                else
+                    warning "Failed to generate API token. curl exit code: $TOKEN_CURL_EXIT_CODE. Skipping auth provider creation."
+                fi
                 ROX_ENDPOINT=""
             fi
     fi
