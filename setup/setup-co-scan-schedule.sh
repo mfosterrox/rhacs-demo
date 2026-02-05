@@ -660,19 +660,68 @@ if [ -n "$EXISTING_SCAN" ] && [ "$EXISTING_SCAN" != "null" ] && [ -n "$EXISTING_
     # Check if configuration is valid and matches expected settings
     EXISTING_ONE_TIME=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.scanConfig.oneTimeScan // false' 2>/dev/null || echo "false")
     EXISTING_SCHEDULE_TYPE=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.scanConfig.scanSchedule.intervalType // "none"' 2>/dev/null || echo "none")
-    EXISTING_CLUSTERS=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.clusters[]?' 2>/dev/null | tr '\n' ' ' || echo "")
+    
+    # Extract clusters as an array and normalize for comparison
+    EXISTING_CLUSTERS_RAW=$(echo "$EXISTING_SCAN_CONFIG" | jq -r '.clusters[]?' 2>/dev/null || echo "")
+    EXISTING_CLUSTERS=$(echo "$EXISTING_CLUSTERS_RAW" | tr '\n' ' ' | xargs || echo "")
+    
+    # Debug: Show what we're comparing
+    log "  Existing scan type: oneTimeScan=$EXISTING_ONE_TIME, schedule=$EXISTING_SCHEDULE_TYPE"
+    log "  Existing clusters: $EXISTING_CLUSTERS"
+    log "  Expected cluster ID: $PRODUCTION_CLUSTER_ID"
     
     # Check if it's a scheduled scan (not one-time) and includes our cluster
     if [ "$EXISTING_ONE_TIME" = "false" ] && [ "$EXISTING_SCHEDULE_TYPE" != "none" ]; then
-        if echo "$EXISTING_CLUSTERS" | grep -q "$PRODUCTION_CLUSTER_ID"; then
-            log "✓ Existing configuration is valid: scheduled scan with correct cluster"
+        # More robust cluster matching - check if any cluster ID matches
+        CLUSTER_MATCH=false
+        if [ -n "$EXISTING_CLUSTERS" ]; then
+            # Check each cluster ID individually
+            while IFS= read -r cluster_id; do
+                if [ -n "$cluster_id" ] && [ "$cluster_id" != "null" ]; then
+                    # Normalize both IDs (remove whitespace) and compare
+                    NORMALIZED_EXISTING=$(echo "$cluster_id" | tr -d '[:space:]')
+                    NORMALIZED_EXPECTED=$(echo "$PRODUCTION_CLUSTER_ID" | tr -d '[:space:]')
+                    if [ "$NORMALIZED_EXISTING" = "$NORMALIZED_EXPECTED" ]; then
+                        CLUSTER_MATCH=true
+                        break
+                    fi
+                fi
+            done <<< "$EXISTING_CLUSTERS_RAW"
+        fi
+        
+        # Also check if there are any clusters at all (if empty, might be valid for all clusters)
+        if [ -z "$EXISTING_CLUSTERS" ] || [ "$EXISTING_CLUSTERS" = "null" ]; then
+            log "  Note: Existing scan has no specific clusters (may apply to all clusters)"
+            # If scan is scheduled and successful, keep it even without specific cluster match
+            CLUSTER_MATCH=true
+        fi
+        
+        if [ "$CLUSTER_MATCH" = true ]; then
+            log "✓ Existing configuration is valid: scheduled scan with matching cluster"
             log "  Schedule: $EXISTING_SCHEDULE_TYPE"
             log "  Cluster: $PRODUCTION_CLUSTER_ID"
             log "Using existing scan configuration (ID: $EXISTING_SCAN)"
             NEED_RECREATE=false
             SCAN_CONFIG_ID="$EXISTING_SCAN"
         else
-            log "Existing configuration found but cluster mismatch. Will recreate..."
+            # Check if the scan configuration includes any clusters at all
+            # If it's a scheduled scan that's working, we should preserve it
+            # Only recreate if we're certain it needs the specific cluster
+            log "Existing configuration found but cluster IDs don't match exactly."
+            log "  Existing clusters: $EXISTING_CLUSTERS"
+            log "  Expected cluster: $PRODUCTION_CLUSTER_ID"
+            
+            # If existing scan has no clusters specified, it might apply to all clusters
+            # In that case, if it's scheduled and working, keep it
+            if [ -z "$EXISTING_CLUSTERS" ] || [ "$EXISTING_CLUSTERS" = "null" ] || [ "$EXISTING_CLUSTERS" = "" ]; then
+                log "  Note: Existing scan has no specific clusters - may apply to all clusters"
+                log "  Keeping existing scan configuration (scheduled scans without clusters apply to all)"
+                NEED_RECREATE=false
+                SCAN_CONFIG_ID="$EXISTING_SCAN"
+            else
+                # Only recreate if there's a real mismatch with specific clusters
+                log "  Will recreate to ensure correct cluster is included..."
+            fi
         fi
     else
         log "Existing configuration is a one-time scan or missing schedule. Will recreate..."
