@@ -211,18 +211,25 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
         fi
     else
         # Extract token from API response
-        if echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
-            ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // empty' 2>/dev/null || echo "")
+        # First try jq to parse JSON response
+        if command -v jq >/dev/null 2>&1 && echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
+            ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // .data // empty' 2>/dev/null || echo "")
+            # If we got a JSON object, try to extract token from it
+            if [ -n "$ROX_API_TOKEN" ] && [ "$ROX_API_TOKEN" != "null" ] && echo "$ROX_API_TOKEN" | jq . >/dev/null 2>&1; then
+                ROX_API_TOKEN=$(echo "$ROX_API_TOKEN" | jq -r '.token // empty' 2>/dev/null || echo "")
+            fi
         fi
         
-        if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ]; then
-            # Try to extract token from response text
-            ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
+        # If jq extraction failed, try regex patterns
+        if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+            # Look for tokens that are at least 30 characters (RHACS tokens are typically 40+ chars)
+            ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{30,}' | head -1 || echo "")
         fi
         
-        if [ -z "$ROX_API_TOKEN" ]; then
-            log "Failed to extract token from API response, trying roxctl fallback..."
-            log "API Response: ${TOKEN_RESPONSE:0:300}"
+        # If still no valid token, try roxctl
+        if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+            log "Failed to extract valid token from API response, trying roxctl..."
+            log "API Response preview: ${TOKEN_RESPONSE:0:200}"
             # Fallback to roxctl
             set +e
             TOKEN_OUTPUT=$($ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
@@ -233,21 +240,24 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
             set -e
             
             if [ $TOKEN_EXIT_CODE -eq 0 ]; then
-                ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
-                if [ -z "$ROX_API_TOKEN" ]; then
-                    ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | tail -1 | tr -d '[:space:]' || echo "")
+                # Extract token from roxctl output - look for long alphanumeric strings
+                ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{30,}' | head -1 || echo "")
+                # If that fails, roxctl might output just the token on a line
+                if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    # Get the last line that looks like a token
+                    ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -E '^[a-zA-Z0-9_-]{30,}$' | tail -1 || echo "")
                 fi
             fi
         fi
         
-        if [ -z "$ROX_API_TOKEN" ]; then
-            error "Failed to extract API token. API Response: ${TOKEN_RESPONSE:0:500}"
+        if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+            error "Failed to extract valid API token. Token length: ${#ROX_API_TOKEN}. API Response: ${TOKEN_RESPONSE:0:500}"
         fi
     fi
     
-    # Verify token is not empty and has reasonable length
-    if [ ${#ROX_API_TOKEN} -lt 20 ]; then
-        error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars). Token: ${ROX_API_TOKEN:0:20}..."
+    # Verify token is not empty and has reasonable length (RHACS tokens are typically 40+ characters)
+    if [ ${#ROX_API_TOKEN} -lt 30 ]; then
+        error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars). Token preview: ${ROX_API_TOKEN:0:30}..."
     fi
     
     log "✓ API token generated (length: ${#ROX_API_TOKEN} chars)"
@@ -376,26 +386,37 @@ while [ $RETRY_COUNT -le $MAX_RETRIES ]; do
                     error "Failed to generate API token. roxctl output: ${TOKEN_OUTPUT:0:500}"
                 fi
                 
-                ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
-                if [ -z "$ROX_API_TOKEN" ]; then
-                    ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | tail -1 | tr -d '[:space:]' || echo "")
+                # Extract token from roxctl output - look for long alphanumeric strings (30+ chars)
+                ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{30,}' | head -1 || echo "")
+                # If that fails, roxctl might output just the token on a line
+                if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -E '^[a-zA-Z0-9_-]{30,}$' | tail -1 || echo "")
                 fi
                 
-                if [ -z "$ROX_API_TOKEN" ]; then
-                    error "Failed to extract API token from roxctl output. Output: ${TOKEN_OUTPUT:0:500}"
+                if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    error "Failed to extract valid API token from roxctl output. Token length: ${#ROX_API_TOKEN}. Output: ${TOKEN_OUTPUT:0:500}"
                 fi
             else
                 # Extract token from API response
-                if echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
-                    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // empty' 2>/dev/null || echo "")
+                # First try jq to parse JSON response
+                if command -v jq >/dev/null 2>&1 && echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
+                    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // .data // empty' 2>/dev/null || echo "")
+                    # If we got a JSON object, try to extract token from it
+                    if [ -n "$ROX_API_TOKEN" ] && [ "$ROX_API_TOKEN" != "null" ] && echo "$ROX_API_TOKEN" | jq . >/dev/null 2>&1; then
+                        ROX_API_TOKEN=$(echo "$ROX_API_TOKEN" | jq -r '.token // empty' 2>/dev/null || echo "")
+                    fi
                 fi
                 
-                if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ]; then
-                    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
+                # If jq extraction failed, try regex patterns
+                if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    # Look for tokens that are at least 30 characters
+                    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{30,}' | head -1 || echo "")
                 fi
                 
-                if [ -z "$ROX_API_TOKEN" ]; then
-                    log "Failed to extract token from API response, trying roxctl fallback..."
+                # If still no valid token, try roxctl
+                if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    log "Failed to extract valid token from API response, trying roxctl fallback..."
+                    log "API Response preview: ${TOKEN_RESPONSE:0:200}"
                     set +e
                     TOKEN_OUTPUT=$($ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
                         central token generate \
@@ -405,21 +426,21 @@ while [ $RETRY_COUNT -le $MAX_RETRIES ]; do
                     set -e
                     
                     if [ $TOKEN_EXIT_CODE -eq 0 ]; then
-                        ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
-                        if [ -z "$ROX_API_TOKEN" ]; then
-                            ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | tail -1 | tr -d '[:space:]' || echo "")
+                        ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oE '[a-zA-Z0-9_-]{30,}' | head -1 || echo "")
+                        if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                            ROX_API_TOKEN=$(echo "$TOKEN_OUTPUT" | grep -E '^[a-zA-Z0-9_-]{30,}$' | tail -1 || echo "")
                         fi
                     fi
                 fi
                 
-                if [ -z "$ROX_API_TOKEN" ]; then
-                    error "Failed to extract API token. API Response: ${TOKEN_RESPONSE:0:500}"
+                if [ -z "$ROX_API_TOKEN" ] || [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                    error "Failed to extract valid API token. Token length: ${#ROX_API_TOKEN}. API Response: ${TOKEN_RESPONSE:0:500}"
                 fi
             fi
             
-            # Verify token is not empty and has reasonable length
-            if [ ${#ROX_API_TOKEN} -lt 20 ]; then
-                error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars)"
+            # Verify token is not empty and has reasonable length (RHACS tokens are typically 40+ characters)
+            if [ ${#ROX_API_TOKEN} -lt 30 ]; then
+                error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars). Token preview: ${ROX_API_TOKEN:0:30}..."
             fi
             
             log "✓ API token generated (length: ${#ROX_API_TOKEN} chars)"
