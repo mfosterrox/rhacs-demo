@@ -212,17 +212,35 @@ ROX_API_TOKEN=""
 if [ -n "$ROX_ENDPOINT" ]; then
     log "Generating API token..."
     
-    # Get ADMIN_PASSWORD from secret
-    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        warning "Admin password secret 'central-htpasswd' not found in namespace '$NAMESPACE'. Skipping auth provider creation."
-        ROX_ENDPOINT=""
-    else
-        ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
-        if [ -z "$ADMIN_PASSWORD" ]; then
-            warning "Failed to decode admin password from secret. Skipping auth provider creation."
+    # Get ADMIN_PASSWORD - first check ~/.bashrc (from install.sh -p flag), then try secret
+    ADMIN_PASSWORD=""
+    
+    # Check if password is in ~/.bashrc (from install.sh -p flag)
+    if [ -f ~/.bashrc ] && grep -q "^export ACS_PASSWORD=" ~/.bashrc; then
+        ADMIN_PASSWORD=$(grep "^export ACS_PASSWORD=" ~/.bashrc | head -1 | sed -E 's/^export ACS_PASSWORD=["'\'']?//; s/["'\'']?$//')
+    fi
+    
+    # If not in ~/.bashrc, try to get from secret
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+        fi
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            warning "Admin password not found. Skipping auth provider creation."
+            warning "Run: ./install.sh -p YOUR_PASSWORD to set password"
             ROX_ENDPOINT=""
         else
+            ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+            if [ -z "$ADMIN_PASSWORD" ]; then
+                warning "Failed to decode admin password from secret. Skipping auth provider creation."
+                ROX_ENDPOINT=""
+            fi
+        fi
+    fi
+    
+    # Only proceed if we have a password and ROX_ENDPOINT is still set
+    if [ -n "$ADMIN_PASSWORD" ] && [ -n "$ROX_ENDPOINT" ]; then
             # Generate API token
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT#https://}"
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT_FOR_API#http://}"
@@ -256,7 +274,6 @@ if [ -n "$ROX_ENDPOINT" ]; then
                 warning "Failed to generate API token. curl exit code: $TOKEN_CURL_EXIT_CODE. Skipping auth provider creation."
                 ROX_ENDPOINT=""
             fi
-        fi
     fi
 fi
 

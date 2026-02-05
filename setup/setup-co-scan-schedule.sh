@@ -75,51 +75,57 @@ fi
 if [ "$NEEDS_NEW_TOKEN" = true ]; then
     log "Generating new API token..."
     
-    # Get ADMIN_PASSWORD from secret with retry logic
-    # Try different possible keys in the secret (password is most common, but htpasswd might be used)
-    ADMIN_PASSWORD_B64=""
-    MAX_RETRIES=5
-    RETRY_COUNT=0
+    # Get ADMIN_PASSWORD - first check ~/.bashrc, then try secret
+    ADMIN_PASSWORD=""
     
-    while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$ADMIN_PASSWORD_B64" ]; do
-        if [ $RETRY_COUNT -gt 0 ]; then
-            log "Retrying to get admin password from secret (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
-            sleep 3
-        fi
-        
-        if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
-            # Try password key first (most common)
-            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-            # If not found, try htpasswd key
-            if [ -z "$ADMIN_PASSWORD_B64" ]; then
-                ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
-            fi
-            # If still not found, try to get all keys and use the first one
-            if [ -z "$ADMIN_PASSWORD_B64" ]; then
-                # Get all data keys and try the first one
-                ALL_KEYS=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | grep -o '"[^"]*":' | tr -d '":' | head -1 || echo "")
-                if [ -n "$ALL_KEYS" ]; then
-                    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath="{.data.$ALL_KEYS}" 2>/dev/null || echo "")
-                    if [ -n "$ADMIN_PASSWORD_B64" ]; then
-                        log "Using key '$ALL_KEYS' from central-htpasswd secret"
-                    fi
-                fi
-            fi
-        fi
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-    done
-    
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
-            error "Admin password secret 'central-htpasswd' exists in namespace '$RHACS_OPERATOR_NAMESPACE' but no password data found after $MAX_RETRIES attempts. Check: oc get secret central-htpasswd -n $RHACS_OPERATOR_NAMESPACE -o yaml"
-        else
-            error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
+    # Check if password is in ~/.bashrc (from install.sh -p flag)
+    if [ -f ~/.bashrc ] && grep -q "^export ACS_PASSWORD=" ~/.bashrc; then
+        ADMIN_PASSWORD=$(grep "^export ACS_PASSWORD=" ~/.bashrc | head -1 | sed -E 's/^export ACS_PASSWORD=["'\'']?//; s/["'\'']?$//')
+        if [ -n "$ADMIN_PASSWORD" ]; then
+            log "Using password from ~/.bashrc (set via install.sh -p flag)"
         fi
     fi
     
-    ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+    # If not in ~/.bashrc, try to get from secret (may contain hash, not plaintext)
     if [ -z "$ADMIN_PASSWORD" ]; then
-        error "Failed to decode admin password from secret"
+        log "Password not in ~/.bashrc, attempting to get from secret..."
+        ADMIN_PASSWORD_B64=""
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$ADMIN_PASSWORD_B64" ]; do
+            if [ $RETRY_COUNT -gt 0 ]; then
+                log "Retrying to get admin password from secret (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+                sleep 2
+            fi
+            
+            if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
+                # Try password key first
+                ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+                # If not found, try htpasswd key (this is what RHACS actually uses)
+                if [ -z "$ADMIN_PASSWORD_B64" ]; then
+                    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+                fi
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+        done
+        
+        if [ -n "$ADMIN_PASSWORD_B64" ]; then
+            HTPASSWD_CONTENT=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+            # Check if it's a hash (starts with $2a$, $2y$, etc.)
+            if echo "$HTPASSWD_CONTENT" | grep -q "^admin:\$2"; then
+                warning "Secret contains htpasswd hash, not plaintext password."
+                warning "Cannot extract password from hash. Please run: ./install.sh -p YOUR_PASSWORD"
+                error "Password required but not available. Run install.sh with -p flag to set password."
+            else
+                # Might be plaintext or different format
+                ADMIN_PASSWORD=$(echo "$HTPASSWD_CONTENT" | cut -d: -f2- | head -1)
+            fi
+        fi
+    fi
+    
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        error "Admin password not found. Please run: ./install.sh -p YOUR_PASSWORD"
     fi
     
     # Normalize ROX_ENDPOINT for roxctl (add :443 if no port)

@@ -1,11 +1,40 @@
 #!/bin/bash
 # RHACS Demo Installation Script
 # Executes all setup scripts in the correct order
+#
+# Usage: ./install.sh [-p PASSWORD]
+#   -p PASSWORD: RHACS admin password (will be saved to ~/.bashrc)
 
 # Exit immediately on error, show exact error message
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parse command line arguments
+ACS_PASSWORD_PROVIDED=""
+while getopts "p:h" opt; do
+    case $opt in
+        p)
+            ACS_PASSWORD_PROVIDED="$OPTARG"
+            ;;
+        h)
+            echo "Usage: $0 [-p PASSWORD]"
+            echo ""
+            echo "Options:"
+            echo "  -p PASSWORD    RHACS admin password (will be saved to ~/.bashrc)"
+            echo "  -h             Show this help message"
+            echo ""
+            echo "If -p is not provided, the script will attempt to retrieve the password"
+            echo "from the central-htpasswd secret, but this may not work if the secret"
+            echo "contains only a hash."
+            exit 0
+            ;;
+        \?)
+            error "Invalid option: -$OPTARG. Use -h for help."
+            ;;
+    esac
+done
+shift $((OPTIND-1))
 
 # Colors
 RED='\033[0;31m'
@@ -81,26 +110,57 @@ if [ -n "$CENTRAL_ROUTE" ]; then
     
     log "[OK] Found ACS Central route: $ACS_URL"
     
-    # Always save ACS_URL (even if password isn't available yet)
+    # Always save ACS_URL
     save_to_bashrc "ACS_URL" "$ACS_URL"
     ACS_USERNAME="admin"
     save_to_bashrc "ACS_USERNAME" "$ACS_USERNAME"
     
-    # Get admin password from secret
-    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-    if [ -n "$ADMIN_PASSWORD_B64" ]; then
-        ACS_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
-        
-        # Save password to ~/.bashrc
+    # Handle password - use provided password or try to get from secret
+    if [ -n "$ACS_PASSWORD_PROVIDED" ]; then
+        # Use password provided via -p flag
+        ACS_PASSWORD="$ACS_PASSWORD_PROVIDED"
         save_to_bashrc "ACS_PASSWORD" "$ACS_PASSWORD"
-        
-        log "[OK] ACS credentials saved to ~/.bashrc"
-        log "  ACS_URL: $ACS_URL"
-        log "  ACS_USERNAME: $ACS_USERNAME"
+        log "[OK] Using provided password (saved to ~/.bashrc)"
     else
-        warning "Could not retrieve ACS password from secret central-htpasswd in namespace $RHACS_NAMESPACE"
-        warning "ACS_URL and ACS_USERNAME saved, but password will need to be retrieved later"
-        log "[OK] ACS_URL saved to ~/.bashrc: $ACS_URL"
+        # Try to get password from secret (may contain hash, not plaintext)
+        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            # Try htpasswd key
+            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+        fi
+        
+        if [ -n "$ADMIN_PASSWORD_B64" ]; then
+            HTPASSWD_CONTENT=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+            # Check if it's a hash (starts with $2a$, $2y$, etc.) or might be plaintext
+            if echo "$HTPASSWD_CONTENT" | grep -q "^admin:\$2"; then
+                warning "Secret contains htpasswd hash, not plaintext password."
+                warning "Password cannot be extracted from hash. Please provide password with -p flag:"
+                warning "  ./install.sh -p YOUR_PASSWORD"
+                warning "ACS_URL and ACS_USERNAME saved, but password not available."
+            else
+                # Might be plaintext or different format - try to extract
+                ACS_PASSWORD=$(echo "$HTPASSWD_CONTENT" | cut -d: -f2- | head -1)
+                if [ -n "$ACS_PASSWORD" ] && [ ${#ACS_PASSWORD} -lt 200 ]; then
+                    save_to_bashrc "ACS_PASSWORD" "$ACS_PASSWORD"
+                    log "[OK] Password extracted from secret and saved to ~/.bashrc"
+                else
+                    warning "Could not extract usable password from secret."
+                    warning "Please provide password with -p flag: ./install.sh -p YOUR_PASSWORD"
+                fi
+            fi
+        else
+            warning "Could not retrieve ACS password from secret central-htpasswd in namespace $RHACS_NAMESPACE"
+            warning "Please provide password with -p flag: ./install.sh -p YOUR_PASSWORD"
+        fi
+    fi
+    
+    log "[OK] ACS credentials configuration:"
+    log "  ACS_URL: $ACS_URL"
+    log "  ACS_USERNAME: $ACS_USERNAME"
+    if [ -n "${ACS_PASSWORD:-}" ]; then
+        log "  ACS_PASSWORD: [saved to ~/.bashrc]"
+    else
+        log "  ACS_PASSWORD: [not set - use -p flag to provide]"
     fi
 else
     warning "Could not find ACS Central route in namespace $RHACS_NAMESPACE. ACS credentials will not be configured."

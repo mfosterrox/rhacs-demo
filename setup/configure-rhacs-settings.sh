@@ -45,17 +45,33 @@ fi
 ROX_ENDPOINT="$CENTRAL_ROUTE"
 log "✓ Extracted ROX_ENDPOINT: $ROX_ENDPOINT"
 
-# Get ADMIN_PASSWORD from secret (needed for token generation)
-log "Extracting admin password from secret..."
-ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-if [ -z "$ADMIN_PASSWORD_B64" ]; then
-    error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
+# Get ADMIN_PASSWORD - first check ~/.bashrc (from install.sh -p flag), then try secret
+log "Extracting admin password..."
+ADMIN_PASSWORD=""
+
+# Check if password is in ~/.bashrc (from install.sh -p flag)
+if [ -f ~/.bashrc ] && grep -q "^export ACS_PASSWORD=" ~/.bashrc; then
+    ADMIN_PASSWORD=$(grep "^export ACS_PASSWORD=" ~/.bashrc | head -1 | sed -E 's/^export ACS_PASSWORD=["'\'']?//; s/["'\'']?$//')
+    if [ -n "$ADMIN_PASSWORD" ]; then
+        log "✓ Using password from ~/.bashrc (set via install.sh -p flag)"
+    fi
 fi
-ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+
+# If not in ~/.bashrc, try to get from secret
 if [ -z "$ADMIN_PASSWORD" ]; then
-    error "Failed to decode admin password from secret"
+    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+    if [ -z "$ADMIN_PASSWORD_B64" ]; then
+        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+    fi
+    if [ -z "$ADMIN_PASSWORD_B64" ]; then
+        error "Admin password not found. Please run: ./install.sh -p YOUR_PASSWORD"
+    fi
+    ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        error "Failed to decode admin password from secret"
+    fi
+    log "✓ Admin password extracted from secret"
 fi
-log "✓ Admin password extracted"
 
 # Generate ROX_API_TOKEN
 log "Generating API token..."
