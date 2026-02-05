@@ -43,54 +43,54 @@ log "Checking OpenShift CLI connection..."
 if ! oc whoami; then
     error "OpenShift CLI not connected. Please login first with: oc login"
 fi
-log "✓ OpenShift CLI connected as: $(oc whoami)"
+log "[OK] OpenShift CLI connected as: $(oc whoami)"
 log "Prerequisites validated successfully"
 
-# Clone demo apps repository
-log "Cloning demo apps repository..."
-if [ ! -d "demo-apps" ]; then
-    if ! git clone -b acs-demo-apps https://github.com/SeanRickerd/demo-apps demo-apps; then
-        error "Failed to clone demo-apps repository. Check network connectivity and repository access."
+# Clone demo applications repository
+log "Cloning demo applications repository..."
+if [ ! -d "demo-applications" ]; then
+    if ! git clone https://github.com/mfosterrox/demo-applications demo-applications; then
+        error "Failed to clone demo-applications repository. Check network connectivity and repository access."
     fi
-    log "✓ Demo apps repository cloned successfully"
+    log "[OK] Demo applications repository cloned successfully"
 else
-    log "Demo apps repository already exists, skipping clone"
+    log "Demo applications repository already exists, skipping clone"
 fi
 
 # Set TUTORIAL_HOME environment variable
 log "Setting TUTORIAL_HOME environment variable..."
-TUTORIAL_HOME="$(pwd)/demo-apps"
+TUTORIAL_HOME="$(pwd)/demo-applications"
 if [ ! -d "$TUTORIAL_HOME" ]; then
     error "TUTORIAL_HOME directory does not exist: $TUTORIAL_HOME"
 fi
-sed -i '/^export TUTORIAL_HOME=/d' ~/.bashrc
+sed -i '/^export TUTORIAL_HOME=/d' ~/.bashrc 2>/dev/null || true
 echo "export TUTORIAL_HOME=\"$TUTORIAL_HOME\"" >> ~/.bashrc
 export TUTORIAL_HOME="$TUTORIAL_HOME"
-log "✓ TUTORIAL_HOME set to: $TUTORIAL_HOME"
+log "[OK] TUTORIAL_HOME set to: $TUTORIAL_HOME"
 
 # Deploy applications
 log "Deploying applications from $TUTORIAL_HOME..."
 
-# Deploy kubernetes-manifests
-if [ -d "$TUTORIAL_HOME/kubernetes-manifests" ]; then
-    log "Deploying kubernetes-manifests..."
-    if ! oc apply -f "$TUTORIAL_HOME/kubernetes-manifests/" --recursive; then
-        error "Failed to deploy kubernetes-manifests. Check manifests: ls -la $TUTORIAL_HOME/kubernetes-manifests/"
+# Deploy k8s-deployment-manifests
+if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
+    log "Deploying k8s-deployment-manifests..."
+    if ! oc apply -R -f "$TUTORIAL_HOME/k8s-deployment-manifests/"; then
+        error "Failed to deploy k8s-deployment-manifests. Check manifests: ls -la $TUTORIAL_HOME/k8s-deployment-manifests/"
     fi
-    log "✓ kubernetes-manifests deployed successfully"
+    log "[OK] k8s-deployment-manifests deployed successfully"
 else
-    error "kubernetes-manifests directory not found at: $TUTORIAL_HOME/kubernetes-manifests"
+    error "k8s-deployment-manifests directory not found at: $TUTORIAL_HOME/k8s-deployment-manifests"
 fi
 
 # Deploy skupper-demo
 if [ -d "$TUTORIAL_HOME/skupper-demo" ]; then
     log "Deploying skupper-demo..."
-    if ! oc apply -f "$TUTORIAL_HOME/skupper-demo/" --recursive; then
+    if ! oc apply -R -f "$TUTORIAL_HOME/skupper-demo/"; then
         error "Failed to deploy skupper-demo. Check manifests: ls -la $TUTORIAL_HOME/skupper-demo/"
     fi
-    log "✓ skupper-demo deployed successfully"
+    log "[OK] skupper-demo deployed successfully"
 else
-    error "skupper-demo directory not found at: $TUTORIAL_HOME/skupper-demo"
+    warning "skupper-demo directory not found at: $TUTORIAL_HOME/skupper-demo, skipping"
 fi
 
 # Wait for deployments to be ready
@@ -129,7 +129,7 @@ for namespace in $NAMESPACES; do
             DEPLOYMENT_STATUS=$(oc get deployment "$deployment" -n "$namespace" -o jsonpath='{.status.conditions[?(@.type=="Available")].message}' || echo "unknown")
             error "Deployment $deployment in namespace $namespace failed to become Available after 5 minutes. Status: $DEPLOYMENT_STATUS. Check: oc describe deployment $deployment -n $namespace"
         fi
-        log "✓ Deployment $deployment in namespace $namespace is Available"
+        log "[OK] Deployment $deployment in namespace $namespace is Available"
     done
 done
 
