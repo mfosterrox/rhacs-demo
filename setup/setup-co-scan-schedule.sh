@@ -711,8 +711,8 @@ if [ "$NEED_RECREATE" = true ]; then
     
     # Create compliance scan configuration
     log "Creating compliance scan configuration 'acs-catch-all'..."
-set +e
-SCAN_CONFIG_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X POST \
+    set +e
+    SCAN_CONFIG_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X POST \
         -H "Authorization: Bearer $ROX_API_TOKEN" \
         -H "Content-Type: application/json" \
         --data-raw "{
@@ -754,47 +754,46 @@ SCAN_CONFIG_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 120 -X POST \
         error "Failed to create compliance scan configuration (exit code: $SCAN_CREATE_EXIT_CODE). Response: ${SCAN_CONFIG_RESPONSE:0:500}"
     fi
     
-        if [ -z "$SCAN_CONFIG_RESPONSE" ]; then
-            error "Empty response from scan configuration creation API"
-        fi
-        
-        # Log response for debugging (first 500 chars)
-        log "API Response: ${SCAN_CONFIG_RESPONSE:0:500}"
-        
-        # Check for ProfileBundle processing error
-        if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle.*still being processed"; then
-            warning "Scan creation failed: ProfileBundle is still being processed"
-            log ""
-            log "This means the Compliance Operator is still processing profile bundles."
-            log "Please wait for ProfileBundles to be ready and retry."
-            log ""
-            log "To check ProfileBundle status:"
-            log "  oc get profilebundle -n openshift-compliance"
-            log "  oc describe profilebundle ocp4 -n openshift-compliance"
-            log ""
-            log "Wait for dataStreamStatus to show 'Valid' before retrying."
-            log ""
-            error "Cannot create scan: ProfileBundles are still being processed. Wait and retry."
-        fi
-        
-        if ! echo "$SCAN_CONFIG_RESPONSE" | jq . >/dev/null 2>&1; then
-            # Check if it's an error message about ProfileBundle
-            if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle"; then
-                warning "Scan creation failed with ProfileBundle-related error:"
-                echo "$SCAN_CONFIG_RESPONSE" | head -20
-                log ""
-                log "Check ProfileBundle status: oc get profilebundle -n openshift-compliance"
-                error "ProfileBundle error detected. See above for details."
-            else
-                error "Invalid JSON response from scan configuration creation API. Response: ${SCAN_CONFIG_RESPONSE:0:300}"
-            fi
-        fi
-        
-        log "✓ Compliance scan configuration created successfully"
-        
-        # Get the scan configuration ID from the response - try multiple possible response structures
-        SCAN_CONFIG_ID=$(echo "$SCAN_CONFIG_RESPONSE" | jq -r '.id // .configuration.id // empty' 2>/dev/null)
+    if [ -z "$SCAN_CONFIG_RESPONSE" ]; then
+        error "Empty response from scan configuration creation API"
     fi
+    
+    # Log response for debugging (first 500 chars)
+    log "API Response: ${SCAN_CONFIG_RESPONSE:0:500}"
+    
+    # Check for ProfileBundle processing error
+    if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle.*still being processed"; then
+        warning "Scan creation failed: ProfileBundle is still being processed"
+        log ""
+        log "This means the Compliance Operator is still processing profile bundles."
+        log "Please wait for ProfileBundles to be ready and retry."
+        log ""
+        log "To check ProfileBundle status:"
+        log "  oc get profilebundle -n openshift-compliance"
+        log "  oc describe profilebundle ocp4 -n openshift-compliance"
+        log ""
+        log "Wait for dataStreamStatus to show 'Valid' before retrying."
+        log ""
+        error "Cannot create scan: ProfileBundles are still being processed. Wait and retry."
+    fi
+    
+    if ! echo "$SCAN_CONFIG_RESPONSE" | jq . >/dev/null 2>&1; then
+        # Check if it's an error message about ProfileBundle
+        if echo "$SCAN_CONFIG_RESPONSE" | grep -qi "ProfileBundle"; then
+            warning "Scan creation failed with ProfileBundle-related error:"
+            echo "$SCAN_CONFIG_RESPONSE" | head -20
+            log ""
+            log "Check ProfileBundle status: oc get profilebundle -n openshift-compliance"
+            error "ProfileBundle error detected. See above for details."
+        else
+            error "Invalid JSON response from scan configuration creation API. Response: ${SCAN_CONFIG_RESPONSE:0:300}"
+        fi
+    fi
+    
+    log "✓ Compliance scan configuration created successfully"
+    
+    # Get the scan configuration ID from the response - try multiple possible response structures
+    SCAN_CONFIG_ID=$(echo "$SCAN_CONFIG_RESPONSE" | jq -r '.id // .configuration.id // empty' 2>/dev/null)
 fi
 
 # Get scan configuration ID for schedule creation (if not already set from existing config)
