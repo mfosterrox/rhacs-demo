@@ -31,8 +31,13 @@ info() {
 # Set namespace (default to stackrox)
 NAMESPACE="${NAMESPACE:-stackrox}"
 SECRET_NAME="sample-rhacs-operator-prometheus-tls"
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+
+# Create a persistent directory for certificate files (won't be auto-deleted)
+# This allows manual testing after script completion
+TEMP_DIR="/tmp/perses-monitoring-diagnose-$$"
+mkdir -p "$TEMP_DIR"
+# Clean up old temp directories on script start (older than 1 hour)
+find /tmp -maxdepth 1 -type d -name "perses-monitoring-diagnose-*" -mmin +60 -exec rm -rf {} + 2>/dev/null || true
 
 log "========================================================="
 log "Perses Monitoring Diagnostic Script"
@@ -298,6 +303,16 @@ log "Certificate and key files are available at:"
 log "  Certificate: $TEMP_DIR/tls.crt"
 log "  Private key: $TEMP_DIR/tls.key"
 log ""
-log "To test manually, run:"
-log "  curl https://$CENTRAL_ROUTE/v1/auth/status --cert $TEMP_DIR/tls.crt --key $TEMP_DIR/tls.key -k"
+
+# Verify files still exist before showing manual test command
+if [ -f "$TEMP_DIR/tls.crt" ] && [ -f "$TEMP_DIR/tls.key" ]; then
+    log "To test manually, run:"
+    log "  curl https://$CENTRAL_ROUTE/v1/auth/status --cert $TEMP_DIR/tls.crt --key $TEMP_DIR/tls.key -k"
+    log ""
+    log "Files are preserved in: $TEMP_DIR"
+    log "To clean up later, run: rm -rf $TEMP_DIR"
+    log "(Old temp directories are automatically cleaned up after 1 hour)"
+else
+    warning "Certificate files not found at expected location"
+fi
 log ""
