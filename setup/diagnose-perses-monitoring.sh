@@ -150,54 +150,147 @@ if [ "$HTTP_CODE" = "200" ]; then
     else
         echo "$RESPONSE_BODY"
     fi
+    AUTH_SUCCESS=true
 elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-    error "Authentication failed (HTTP $HTTP_CODE). The certificate may not be registered as a UserPKI auth provider in RHACS."
+    warning "Authentication failed (HTTP $HTTP_CODE). The certificate may not be registered as a UserPKI auth provider in RHACS."
+    log ""
+    log "Response body:"
+    echo "$RESPONSE_BODY"
+    log ""
+    AUTH_SUCCESS=false
 elif [ "$HTTP_CODE" = "404" ]; then
     warning "Endpoint not found (HTTP 404). Check if the API path is correct."
     info "Response: $RESPONSE_BODY"
+    AUTH_SUCCESS=false
 else
     warning "Unexpected HTTP status code: $HTTP_CODE"
     info "Response: $RESPONSE_BODY"
+    AUTH_SUCCESS=false
 fi
 
 log ""
 log "========================================================="
-log "Diagnostic complete"
+if [ "${AUTH_SUCCESS:-false}" = "true" ]; then
+    log "Diagnostic complete - Authentication successful!"
+else
+    log "Diagnostic complete - Issues found"
+fi
 log "========================================================="
 
 # Additional diagnostics
 log ""
+log "========================================================="
 log "Additional diagnostic information:"
+log "========================================================="
 log ""
 
 # Check if UserPKI auth provider exists
-log "Checking for UserPKI auth provider 'Prometheus'..."
-if command -v roxctl &>/dev/null; then
-    # Try to get ROX_API_TOKEN from environment or ~/.bashrc
-    ROX_API_TOKEN=""
-    if [ -f ~/.bashrc ] && grep -q "^export ROX_API_TOKEN=" ~/.bashrc; then
-        ROX_API_TOKEN=$(grep "^export ROX_API_TOKEN=" ~/.bashrc | head -1 | sed -E 's/^export ROX_API_TOKEN=["'\'']?//; s/["'\'']?$//')
+log "Step 5: Checking for UserPKI auth provider 'Prometheus'..."
+
+# Try to get ROX_API_TOKEN from environment or ~/.bashrc
+ROX_API_TOKEN=""
+if [ -f ~/.bashrc ] && grep -q "^export ROX_API_TOKEN=" ~/.bashrc; then
+    ROX_API_TOKEN=$(grep "^export ROX_API_TOKEN=" ~/.bashrc | head -1 | sed -E 's/^export ROX_API_TOKEN=["'\'']?//; s/["'\'']?$//')
+fi
+
+# Also check environment
+if [ -z "$ROX_API_TOKEN" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
+    ROX_API_TOKEN="$ROX_API_TOKEN"
+fi
+
+if [ -z "$ROX_API_TOKEN" ]; then
+    warning "ROX_API_TOKEN not found in ~/.bashrc or environment."
+    log "Attempting to generate API token..."
+    
+    # Get ADMIN_PASSWORD
+    ADMIN_PASSWORD=""
+    if [ -f ~/.bashrc ] && grep -q "^export ACS_PASSWORD=" ~/.bashrc; then
+        ADMIN_PASSWORD=$(grep "^export ACS_PASSWORD=" ~/.bashrc | head -1 | sed -E 's/^export ACS_PASSWORD=["'\'']?//; s/["'\'']?$//')
     fi
     
-    if [ -n "$ROX_API_TOKEN" ]; then
-        export ROX_API_TOKEN
-        export GRPC_ENFORCE_ALPN_ENABLED=false
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
+        fi
+        if [ -n "$ADMIN_PASSWORD_B64" ]; then
+            ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
+        fi
+    fi
+    
+    if [ -n "$ADMIN_PASSWORD" ]; then
+        ROX_ENDPOINT_FOR_API="${CENTRAL_ROUTE}"
         set +e
-        AUTH_PROVIDERS=$(roxctl -e "$API_ENDPOINT" central userpki list --insecure-skip-tls-verify 2>&1)
+        TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
+            -u "admin:${ADMIN_PASSWORD}" \
+            -H "Content-Type: application/json" \
+            "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
+            -d '{"name":"diagnose-script-token","roles":["Admin"]}' 2>&1)
         set -e
-        if echo "$AUTH_PROVIDERS" | grep -q "Prometheus"; then
+        
+        if echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
+            ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // empty' 2>/dev/null || echo "")
+        fi
+        
+        if [ -n "$ROX_API_TOKEN" ] && [ "$ROX_API_TOKEN" != "null" ]; then
+            log "✓ API token generated successfully"
+        fi
+    fi
+fi
+
+if [ -n "$ROX_API_TOKEN" ] && command -v roxctl &>/dev/null; then
+    export ROX_API_TOKEN
+    export GRPC_ENFORCE_ALPN_ENABLED=false
+    set +e
+    AUTH_PROVIDERS=$(roxctl -e "$API_ENDPOINT" central userpki list --insecure-skip-tls-verify 2>&1)
+    ROXCTL_EXIT=$?
+    set -e
+    
+    if [ $ROXCTL_EXIT -eq 0 ]; then
+        if echo "$AUTH_PROVIDERS" | grep -qi "Prometheus"; then
             log "✓ UserPKI auth provider 'Prometheus' found"
+            log ""
+            log "List of UserPKI auth providers:"
+            echo "$AUTH_PROVIDERS"
         else
-            warning "UserPKI auth provider 'Prometheus' not found"
-            info "You may need to create it using:"
-            info "  roxctl -e $API_ENDPOINT central userpki create Prometheus -c $TEMP_DIR/tls.crt -r Admin --insecure-skip-tls-verify"
+            warning "UserPKI auth provider 'Prometheus' NOT found"
+            log ""
+            log "Current UserPKI auth providers:"
+            echo "$AUTH_PROVIDERS"
+            log ""
+            warning "You need to create the UserPKI auth provider."
+            log ""
+            log "To create it, run:"
+            log "  export ROX_API_TOKEN=\"\$ROX_API_TOKEN\""
+            log "  export GRPC_ENFORCE_ALPN_ENABLED=false"
+            log "  roxctl -e $API_ENDPOINT central userpki create Prometheus \\"
+            log "    -c $TEMP_DIR/tls.crt \\"
+            log "    -r Admin \\"
+            log "    --insecure-skip-tls-verify"
+            log ""
+            log "Or run the setup script:"
+            log "  ./setup/setup-perses-monitoring.sh"
         fi
     else
-        warning "ROX_API_TOKEN not found. Cannot check UserPKI auth providers."
-        info "Set ROX_API_TOKEN or run: ./install.sh -p YOUR_PASSWORD"
+        warning "Failed to list UserPKI auth providers (roxctl exit code: $ROXCTL_EXIT)"
+        info "roxctl output: $AUTH_PROVIDERS"
     fi
-else
+elif [ -z "$ROX_API_TOKEN" ]; then
+    warning "ROX_API_TOKEN not available. Cannot check UserPKI auth providers."
+    log ""
+    log "To get an API token, run:"
+    log "  ./setup/install.sh -p YOUR_PASSWORD"
+    log ""
+    log "Or manually create the UserPKI auth provider using:"
+    log "  roxctl -e $API_ENDPOINT central userpki create Prometheus \\"
+    log "    -c $TEMP_DIR/tls.crt \\"
+    log "    -r Admin \\"
+    log "    --insecure-skip-tls-verify"
+elif ! command -v roxctl &>/dev/null; then
     warning "roxctl not found. Cannot check UserPKI auth providers."
+    log ""
+    log "Install roxctl or run the setup script:"
+    log "  ./setup/setup-perses-monitoring.sh"
 fi
 
 log ""
