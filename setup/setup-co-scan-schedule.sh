@@ -76,21 +76,31 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
     log "Generating new API token..."
     
     # Get ADMIN_PASSWORD from secret
-    # Try different possible keys in the secret
-    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        # Try alternative key names
-        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
-    fi
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        # Check if secret exists and show available keys for debugging
-        if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
-            SECRET_KEYS=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | jq -r 'keys[]' 2>/dev/null || echo "")
-            error "Admin password secret 'central-htpasswd' found but 'password' key not found in namespace '$RHACS_OPERATOR_NAMESPACE'. Available keys: $SECRET_KEYS"
-        else
-            error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
+    # Try different possible keys in the secret (password is most common, but htpasswd might be used)
+    ADMIN_PASSWORD_B64=""
+    if oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" >/dev/null 2>&1; then
+        # Try password key first (most common)
+        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+        # If not found, try htpasswd key
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data.htpasswd}' 2>/dev/null || echo "")
         fi
+        # If still not found, try to get all keys and use the first one
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            # Get all data keys and try the first one
+            ALL_KEYS=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath='{.data}' 2>/dev/null | grep -o '"[^"]*":' | tr -d '":' | head -1 || echo "")
+            if [ -n "$ALL_KEYS" ]; then
+                ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_OPERATOR_NAMESPACE" -o jsonpath="{.data.$ALL_KEYS}" 2>/dev/null || echo "")
+                log "Using key '$ALL_KEYS' from central-htpasswd secret"
+            fi
+        fi
+        if [ -z "$ADMIN_PASSWORD_B64" ]; then
+            error "Admin password secret 'central-htpasswd' exists in namespace '$RHACS_OPERATOR_NAMESPACE' but no password data found. Check: oc get secret central-htpasswd -n $RHACS_OPERATOR_NAMESPACE -o yaml"
+        fi
+    else
+        error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_OPERATOR_NAMESPACE'"
     fi
+    
     ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d)
     if [ -z "$ADMIN_PASSWORD" ]; then
         error "Failed to decode admin password from secret"
