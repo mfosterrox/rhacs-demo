@@ -178,16 +178,47 @@ if [ "$NEEDS_NEW_TOKEN" = true ]; then
     # Generate API token using roxctl
     log "Generating API token with roxctl..."
     # Generate token using API directly with basic auth (more reliable than roxctl)
-    log "Generating API token using Central API..."
     ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT#https://}"
     ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT_FOR_API#http://}"
+    TOKEN_NAME="script-generated-token"
     
+    # Check if API token already exists and delete it
+    log "Checking for existing API token '$TOKEN_NAME'..."
+    set +e
+    EXISTING_TOKENS=$(curl -k -s --connect-timeout 15 --max-time 60 -X GET \
+        -u "admin:${ADMIN_PASSWORD}" \
+        -H "Content-Type: application/json" \
+        "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens" 2>&1)
+    TOKEN_LIST_EXIT_CODE=$?
+    set -e
+    
+    TOKEN_EXISTS=false
+    if [ $TOKEN_LIST_EXIT_CODE -eq 0 ] && echo "$EXISTING_TOKENS" | jq . >/dev/null 2>&1; then
+        if echo "$EXISTING_TOKENS" | jq -r --arg name "$TOKEN_NAME" '.tokens[]? | select(.name == $name) | .name' 2>/dev/null | grep -q "^${TOKEN_NAME}$"; then
+            TOKEN_EXISTS=true
+            log "Found existing API token '$TOKEN_NAME', deleting it..."
+            TOKEN_ID=$(echo "$EXISTING_TOKENS" | jq -r --arg name "$TOKEN_NAME" '.tokens[]? | select(.name == $name) | .id' 2>/dev/null | head -1)
+            if [ -n "$TOKEN_ID" ] && [ "$TOKEN_ID" != "null" ]; then
+                set +e
+                DELETE_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X DELETE \
+                    -u "admin:${ADMIN_PASSWORD}" \
+                    -H "Content-Type: application/json" \
+                    "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/${TOKEN_ID}" 2>&1)
+                if [ $? -eq 0 ]; then
+                    log "✓ Deleted existing token (ID: $TOKEN_ID)"
+                fi
+                set -e
+            fi
+        fi
+    fi
+    
+    log "Generating API token '$TOKEN_NAME' using Central API..."
     set +e
     TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
         -u "admin:${ADMIN_PASSWORD}" \
         -H "Content-Type: application/json" \
         "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
-        -d '{"name":"script-generated-token","roles":["Admin"]}' 2>&1)
+        -d "{\"name\":\"${TOKEN_NAME}\",\"roles\":[\"Admin\"]}" 2>&1)
     TOKEN_CURL_EXIT_CODE=$?
     set -e
     
@@ -374,13 +405,42 @@ while [ $RETRY_COUNT -le $MAX_RETRIES ]; do
             # Generate token using API directly with basic auth (more reliable than roxctl)
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT#https://}"
             ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT_FOR_API#http://}"
+            TOKEN_NAME_RETRY="script-generated-token-retry"
+            
+            # Check if retry token already exists and delete it
+            log "Checking for existing API token '$TOKEN_NAME_RETRY'..."
+            set +e
+            EXISTING_TOKENS_RETRY=$(curl -k -s --connect-timeout 15 --max-time 60 -X GET \
+                -u "admin:${ADMIN_PASSWORD}" \
+                -H "Content-Type: application/json" \
+                "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens" 2>&1)
+            TOKEN_LIST_EXIT_CODE_RETRY=$?
+            set -e
+            
+            if [ $TOKEN_LIST_EXIT_CODE_RETRY -eq 0 ] && echo "$EXISTING_TOKENS_RETRY" | jq . >/dev/null 2>&1; then
+                if echo "$EXISTING_TOKENS_RETRY" | jq -r --arg name "$TOKEN_NAME_RETRY" '.tokens[]? | select(.name == $name) | .name' 2>/dev/null | grep -q "^${TOKEN_NAME_RETRY}$"; then
+                    log "Found existing API token '$TOKEN_NAME_RETRY', deleting it..."
+                    TOKEN_ID_RETRY=$(echo "$EXISTING_TOKENS_RETRY" | jq -r --arg name "$TOKEN_NAME_RETRY" '.tokens[]? | select(.name == $name) | .id' 2>/dev/null | head -1)
+                    if [ -n "$TOKEN_ID_RETRY" ] && [ "$TOKEN_ID_RETRY" != "null" ]; then
+                        set +e
+                        DELETE_RESPONSE_RETRY=$(curl -k -s --connect-timeout 15 --max-time 60 -X DELETE \
+                            -u "admin:${ADMIN_PASSWORD}" \
+                            -H "Content-Type: application/json" \
+                            "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/${TOKEN_ID_RETRY}" 2>&1)
+                        if [ $? -eq 0 ]; then
+                            log "✓ Deleted existing retry token (ID: $TOKEN_ID_RETRY)"
+                        fi
+                        set -e
+                    fi
+                fi
+            fi
             
             set +e
             TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
                 -u "admin:${ADMIN_PASSWORD}" \
                 -H "Content-Type: application/json" \
                 "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
-                -d '{"name":"script-generated-token-retry","roles":["Admin"]}' 2>&1)
+                -d "{\"name\":\"${TOKEN_NAME_RETRY}\",\"roles\":[\"Admin\"]}" 2>&1)
             TOKEN_CURL_EXIT_CODE=$?
             set -e
             
