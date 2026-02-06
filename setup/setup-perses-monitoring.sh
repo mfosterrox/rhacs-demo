@@ -450,37 +450,75 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
         export GRPC_ENFORCE_ALPN_ENABLED=false
         
         # Always delete existing auth provider to avoid certificate mixups
-        log "Deleting existing UserPKI auth provider 'Prometheus' if it exists..."
-        # Temporarily disable ERR trap since delete may fail if provider doesn't exist (which is okay)
+        log "Checking for existing UserPKI auth provider 'Prometheus'..."
+        
+        # Temporarily disable ERR trap for deletion attempts
         set +e
         trap '' ERR
-        # Use printf to send "y\n" (yes with newline) to answer the interactive confirmation prompt
-        # Use timeout to prevent hanging if the command doesn't respond
-        # Add || true to prevent non-zero exit code from causing issues
-        DELETE_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; export GRPC_ENFORCE_ALPN_ENABLED=false; printf 'y\n' | $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
-            central userpki delete Prometheus \
+        
+        # First, check if provider exists
+        LIST_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; export GRPC_ENFORCE_ALPN_ENABLED=false; $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
+            central userpki list \
             --insecure-skip-tls-verify 2>&1" 2>&1 || true)
-        DELETE_EXIT_CODE=$?
+        
+        PROVIDER_EXISTS=false
+        if echo "$LIST_OUTPUT" | grep -qi "Prometheus"; then
+            PROVIDER_EXISTS=true
+            log "Found existing UserPKI auth provider 'Prometheus'"
+        else
+            log "No existing UserPKI auth provider 'Prometheus' found"
+        fi
+        
+        # If provider exists, delete it with retries
+        if [ "$PROVIDER_EXISTS" = true ]; then
+            MAX_DELETE_RETRIES=3
+            DELETE_RETRY=0
+            DELETE_SUCCESS=false
+            
+            while [ $DELETE_RETRY -lt $MAX_DELETE_RETRIES ] && [ "$DELETE_SUCCESS" = false ]; do
+                DELETE_RETRY=$((DELETE_RETRY + 1))
+                log "Deleting UserPKI auth provider 'Prometheus' (attempt $DELETE_RETRY/$MAX_DELETE_RETRIES)..."
+                
+                # Use printf to send "y\n" (yes with newline) to answer the interactive confirmation prompt
+                DELETE_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; export GRPC_ENFORCE_ALPN_ENABLED=false; printf 'y\n' | $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
+                    central userpki delete Prometheus \
+                    --insecure-skip-tls-verify 2>&1" 2>&1 || true)
+                DELETE_EXIT_CODE=$?
+                
+                # Wait a moment for deletion to propagate
+                sleep 2
+                
+                # Verify deletion by checking if provider still exists
+                VERIFY_OUTPUT=$(timeout 30 bash -c "export ROX_API_TOKEN=\"$ROX_API_TOKEN\"; export GRPC_ENFORCE_ALPN_ENABLED=false; $ROXCTL_CMD -e \"$ROX_ENDPOINT_NORMALIZED\" \
+                    central userpki list \
+                    --insecure-skip-tls-verify 2>&1" 2>&1 || true)
+                
+                if ! echo "$VERIFY_OUTPUT" | grep -qi "Prometheus"; then
+                    DELETE_SUCCESS=true
+                    log "✓ Successfully deleted UserPKI auth provider 'Prometheus'"
+                else
+                    if [ $DELETE_RETRY -lt $MAX_DELETE_RETRIES ]; then
+                        warning "Deletion attempt $DELETE_RETRY failed. Retrying..."
+                        sleep 2
+                    else
+                        error "Failed to delete UserPKI auth provider 'Prometheus' after $MAX_DELETE_RETRIES attempts."
+                        error "Delete output: ${DELETE_OUTPUT:0:300}"
+                        error "Please delete it manually: ROX_API_TOKEN=\"\$ROX_API_TOKEN\" roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki delete Prometheus --insecure-skip-tls-verify"
+                    fi
+                fi
+            done
+            
+            if [ "$DELETE_SUCCESS" = false ]; then
+                # Re-enable ERR trap before exiting
+                trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
+                set -e
+                error "Cannot proceed with creation - provider deletion failed"
+            fi
+        fi
+        
         # Re-enable ERR trap
         trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
         set -e
-        
-        # Check if deletion was successful
-        # Note: "context canceled" error is actually a false alarm - deletion succeeds despite this error
-        if echo "$DELETE_OUTPUT" | grep -qi "context canceled\|Canceled"; then
-            # Context canceled error means deletion actually succeeded
-            log "✓ Deleted existing UserPKI auth provider 'Prometheus' (context canceled is expected)"
-        elif echo "$DELETE_OUTPUT" | grep -qi "deleted\|success\|Deleting provider"; then
-            log "✓ Deleted existing UserPKI auth provider 'Prometheus'"
-        elif echo "$DELETE_OUTPUT" | grep -qi "not found\|does not exist\|No user certificate providers"; then
-            log "No existing UserPKI auth provider 'Prometheus' found (this is okay)"
-        elif [ $DELETE_EXIT_CODE -eq 0 ]; then
-            log "✓ Delete command completed successfully"
-        else
-            # Even if exit code is non-zero, check if provider was actually deleted
-            log "Delete command completed with exit code $DELETE_EXIT_CODE. Output: ${DELETE_OUTPUT:0:200}"
-            log "Continuing with creation (provider may have been deleted anyway)..."
-        fi
         
         # Create new auth provider
         log "Creating UserPKI auth provider 'Prometheus' with Admin role..."
