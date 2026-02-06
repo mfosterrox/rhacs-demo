@@ -202,13 +202,23 @@ else
 fi
 
 # Generate certificate with Subject Alternative Names (SANs) for all possible service names
-CERT_CN="central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local"
-CERT_SANS="DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local,DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc,DNS:central.$CENTRAL_SERVICE_NAMESPACE,DNS:central"
+# Always include stackrox namespace SANs since scrape-config.yaml uses central.stackrox.svc.cluster.local
+CERT_CN="central.stackrox.svc.cluster.local"
+CERT_SANS="DNS:central.stackrox.svc.cluster.local,DNS:central.stackrox.svc,DNS:central.stackrox,DNS:central"
 
-log "Certificate will be valid for:"
+# Also include the detected namespace if it's different from stackrox
+if [ "$CENTRAL_SERVICE_NAMESPACE" != "stackrox" ]; then
+    CERT_SANS="$CERT_SANS,DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local,DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc,DNS:central.$CENTRAL_SERVICE_NAMESPACE"
+    log "Certificate will be valid for (detected namespace):"
+    log "  - central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local"
+    log "  - central.$CENTRAL_SERVICE_NAMESPACE.svc"
+    log "  - central.$CENTRAL_SERVICE_NAMESPACE"
+fi
+
+log "Certificate will be valid for (scrape-config target):"
 log "  - $CERT_CN"
-log "  - central.$CENTRAL_SERVICE_NAMESPACE.svc"
-log "  - central.$CENTRAL_SERVICE_NAMESPACE"
+log "  - central.stackrox.svc"
+log "  - central.stackrox"
 log "  - central"
 
 # Create openssl config file for SANs
