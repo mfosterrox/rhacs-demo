@@ -224,21 +224,14 @@ if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
                 error "Failed to deploy k8s-deployment-manifests. Error: ${DEPLOY_OUTPUT:0:500}"
             fi
         fi
-                if ! oc apply -R -f "$dir"; then
-                    warning "Failed to deploy $(basename "$dir"), continuing..."
-                fi
-            fi
-        done
-        
-        # Also deploy namespace files
-        if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests/-namespaces" ]; then
-            log "Deploying namespace definitions..."
-            if ! oc apply -f "$TUTORIAL_HOME/k8s-deployment-manifests/-namespaces/"; then
-                warning "Failed to deploy some namespace definitions, continuing..."
-            fi
+    fi
+    
+    # Deploy namespace files (regardless of Skupper CRD status)
+    if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests/-namespaces" ]; then
+        log "Deploying namespace definitions..."
+        if ! oc apply -f "$TUTORIAL_HOME/k8s-deployment-manifests/-namespaces/"; then
+            warning "Failed to deploy some namespace definitions, continuing..."
         fi
-        
-        warning "Skipped skupper-online-boutique (Skupper CRDs not installed)"
     fi
     
     log "[OK] k8s-deployment-manifests deployed successfully"
