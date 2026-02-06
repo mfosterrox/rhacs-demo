@@ -199,8 +199,12 @@ if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
         # If not, we'll get a clear error and can skip just that part
         log "Attempting to deploy all resources (including Skupper)..."
         set +e
+        # Temporarily disable ERR trap to allow controlled error handling
+        trap '' ERR
         DEPLOY_OUTPUT=$(oc apply -R -f "$TUTORIAL_HOME/k8s-deployment-manifests/" 2>&1)
         DEPLOY_EXIT_CODE=$?
+        # Re-enable ERR trap
+        trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
         set -e
         
         if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
