@@ -61,12 +61,12 @@ trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
 
 # Array of scripts to execute in order
 SCRIPTS=(
-    "compliance-operator-install.sh"
-    "deploy-applications.sh"
-    "setup-co-scan-schedule.sh"
-    "trigger-compliance-scan.sh"
-    "configure-rhacs-settings.sh"
-    "setup-perses-monitoring.sh"
+    "01-compliance-operator-install.sh"
+    "02-deploy-applications.sh"
+    "03-setup-co-scan-schedule.sh"
+    "04-trigger-compliance-scan.sh"
+    "05-configure-rhacs-settings.sh"
+    # "06-setup-perses-monitoring.sh"  # Script not found - uncomment when available
 )
 
 log "Starting RHACS Demo installation..."
