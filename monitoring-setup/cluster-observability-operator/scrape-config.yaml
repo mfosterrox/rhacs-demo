@@ -1,12 +1,12 @@
 apiVersion: monitoring.rhobs/v1alpha1
 kind: ScrapeConfig
 metadata:
-  name: sample-rhacs-operator-scrape-config
+  name: sample-stackrox-scrape-config
   namespace: stackrox
   labels:
     app: central
 spec:
-  jobName: sample-rhacs-operator-metrics
+  jobName: sample-stackrox-metrics
   scheme: HTTPS
   staticConfigs:
     - targets:
@@ -19,7 +19,7 @@ spec:
     cert:
       secret:
         key: tls.crt
-        name: sample-rhacs-operator-prometheus-tls
+        name: sample-stackrox-prometheus-tls
     keySecret:
       key: tls.key
-      name: sample-rhacs-operator-prometheus-tls
+      name: sample-stackrox-prometheus-tls

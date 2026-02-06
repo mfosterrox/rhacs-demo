@@ -246,12 +246,12 @@ else
 fi
 
 # Always delete existing TLS secret to avoid certificate mixups
-log "Deleting existing TLS secret 'sample-rhacs-operator-prometheus-tls' if it exists..."
-oc delete secret sample-rhacs-operator-prometheus-tls -n "$NAMESPACE" 2>/dev/null && log "  Deleted existing secret" || log "  No existing secret found"
+log "Deleting existing TLS secret 'sample-stackrox-prometheus-tls' if it exists..."
+oc delete secret sample-stackrox-prometheus-tls -n "$NAMESPACE" 2>/dev/null && log "  Deleted existing secret" || log "  No existing secret found"
 
 # Create TLS secret in the namespace
-log "Creating TLS secret 'sample-rhacs-operator-prometheus-tls' in namespace '$NAMESPACE'..."
-if oc create secret tls sample-rhacs-operator-prometheus-tls --cert=tls.crt --key=tls.key -n "$NAMESPACE" 2>/dev/null; then
+log "Creating TLS secret 'sample-stackrox-prometheus-tls' in namespace '$NAMESPACE'..."
+if oc create secret tls sample-stackrox-prometheus-tls --cert=tls.crt --key=tls.key -n "$NAMESPACE" 2>/dev/null; then
     log "✓ TLS secret created successfully"
 else
     error "Failed to create TLS secret"
@@ -519,7 +519,7 @@ if [ -n "$ROX_ENDPOINT" ] && [ -n "$ROX_API_TOKEN" ]; then
                 warning "You can create the UserPKI auth provider manually via the RHACS UI:"
                 warning "  1. Go to Platform Configuration > Access Control > Auth Providers"
                 warning "  2. Create a new User Certificate provider named 'Prometheus'"
-                warning "  3. Upload the certificate from: oc get secret sample-rhacs-operator-prometheus-tls -n $NAMESPACE -o jsonpath='{.data.tls\.crt}' | base64 -d"
+                warning "  3. Upload the certificate from: oc get secret sample-stackrox-prometheus-tls -n $NAMESPACE -o jsonpath='{.data.tls\.crt}' | base64 -d"
                 warning ""
                 warning "Or try manually with roxctl:"
                 warning "  ROX_API_TOKEN=\"\$ROX_API_TOKEN\" roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki create Prometheus -c tls.crt -r Admin --insecure-skip-tls-verify"

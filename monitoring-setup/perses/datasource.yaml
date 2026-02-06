@@ -1,7 +1,7 @@
 apiVersion: perses.dev/v1alpha1
 kind: PersesDatasource
 metadata:
-  name: sample-rhacs-operator-datasource
+  name: sample-stackrox-datasource
   namespace: stackrox
 spec:
   client:

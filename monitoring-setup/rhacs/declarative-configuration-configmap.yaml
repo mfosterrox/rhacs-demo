@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: sample-rhacs-operator-prometheus-declarative-configuration
+  name: sample-stackrox-prometheus-declarative-configuration
   namespace: stackrox
 data:
   prometheus.yaml: |

@@ -32,13 +32,13 @@ info() {
 NAMESPACE="${NAMESPACE:-stackrox}"
 # Try both possible secret names
 SECRET_NAME=""
-if oc get secret sample-rhacs-operator-prometheus-tls -n "$NAMESPACE" &>/dev/null; then
-    SECRET_NAME="sample-rhacs-operator-prometheus-tls"
+if oc get secret sample-stackrox-prometheus-tls -n "$NAMESPACE" &>/dev/null; then
+    SECRET_NAME="sample-stackrox-prometheus-tls"
 elif oc get secret rhacs-prometheus-tls -n "$NAMESPACE" &>/dev/null; then
     SECRET_NAME="rhacs-prometheus-tls"
 else
     # Will error out in Step 2 if neither exists
-    SECRET_NAME="sample-rhacs-operator-prometheus-tls"
+    SECRET_NAME="sample-stackrox-prometheus-tls"
 fi
 
 # Create a persistent directory for certificate files (won't be auto-deleted)
@@ -287,9 +287,9 @@ log ""
 
 # Check ScrapeConfig target matches certificate SANs
 log "Checking ScrapeConfig configuration..."
-SCRAPE_CONFIG_NAMESPACE="rhacs-operator"
-if oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" >/dev/null 2>&1; then
-    SCRAPE_TARGET=$(oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
+SCRAPE_CONFIG_NAMESPACE="stackrox"
+if oc get scrapeconfig sample-stackrox-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" >/dev/null 2>&1; then
+    SCRAPE_TARGET=$(oc get scrapeconfig sample-stackrox-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
     if [ -n "$SCRAPE_TARGET" ]; then
         log "  ScrapeConfig target: $SCRAPE_TARGET"
         
@@ -314,9 +314,9 @@ if oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$SCRAPE_CONFIG_NA
 else
     # Try other possible namespaces
     for ns in "$NAMESPACE" "stackrox" "tssc-acs"; do
-        if oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$ns" >/dev/null 2>&1; then
+        if oc get scrapeconfig sample-stackrox-scrape-config -n "$ns" >/dev/null 2>&1; then
             SCRAPE_CONFIG_NAMESPACE="$ns"
-            SCRAPE_TARGET=$(oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$ns" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
+            SCRAPE_TARGET=$(oc get scrapeconfig sample-stackrox-scrape-config -n "$ns" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
             if [ -n "$SCRAPE_TARGET" ]; then
                 log "  Found ScrapeConfig in namespace: $ns"
                 log "  ScrapeConfig target: $SCRAPE_TARGET"
