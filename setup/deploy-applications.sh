@@ -131,37 +131,99 @@ if [ -d "$TUTORIAL_HOME/k8s-deployment-manifests" ]; then
             log "Skupper CRDs not found. Installing Skupper CRDs directly..."
             SKUPPER_VERSION="${SKUPPER_VERSION:-2.1.3}"
             set +e
-            if oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>&1; then
+            INSTALL_OUTPUT=$(oc apply -f "https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml" 2>&1)
+            INSTALL_EXIT_CODE=$?
+            set -e
+            
+            if [ $INSTALL_EXIT_CODE -eq 0 ]; then
                 log "Waiting for Skupper CRDs to be established..."
                 sleep 5
-                oc wait --for=condition=Established crd/sites.skupper.io --timeout=120s >/dev/null 2>&1 || true
-                oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=120s >/dev/null 2>&1 || true
-                if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
-                    SKUPPER_CRDS_INSTALLED=true
-                    log "[OK] Skupper CRDs installed successfully"
-                else
-                    warning "Skupper CRDs installation may have failed. Skupper resources will be skipped."
+                
+                # Wait for CRDs with retries
+                MAX_RETRIES=3
+                RETRY_COUNT=0
+                CRDS_READY=false
+                
+                while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$CRDS_READY" = false ]; do
+                    # Wait for CRDs to be established
+                    oc wait --for=condition=Established crd/sites.skupper.io --timeout=60s >/dev/null 2>&1 || true
+                    oc wait --for=condition=Established crd/serviceexports.skupper.io --timeout=60s >/dev/null 2>&1 || true
+                    oc wait --for=condition=Established crd/connectors.skupper.io --timeout=60s >/dev/null 2>&1 || true
+                    oc wait --for=condition=Established crd/listeners.skupper.io --timeout=60s >/dev/null 2>&1 || true
+                    
+                    # Verify CRDs are actually available
+                    if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                        CRDS_READY=true
+                        SKUPPER_CRDS_INSTALLED=true
+                        log "[OK] Skupper CRDs installed and verified successfully"
+                    else
+                        RETRY_COUNT=$((RETRY_COUNT + 1))
+                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                            log "CRDs not yet available, retrying in 10 seconds... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+                            sleep 10
+                        fi
+                    fi
+                done
+                
+                if [ "$CRDS_READY" = false ]; then
+                    # Final check - maybe CRDs are there but just not established yet
+                    if oc get crd sites.skupper.io >/dev/null 2>&1 && oc get crd serviceexports.skupper.io >/dev/null 2>&1; then
+                        SKUPPER_CRDS_INSTALLED=true
+                        log "[OK] Skupper CRDs found (may still be establishing)"
+                    else
+                        warning "Skupper CRDs installation completed but CRDs not yet available."
+                        warning "This may be normal - CRDs can take time to be established."
+                        warning "If Skupper resources deploy successfully, the CRDs are working."
+                        warning "To verify manually: oc get crd | grep skupper"
+                    fi
                 fi
             else
-                warning "Failed to install Skupper CRDs. Skupper resources will be skipped."
+                warning "Failed to install Skupper CRDs (exit code: $INSTALL_EXIT_CODE)."
+                warning "Output: ${INSTALL_OUTPUT:0:200}"
+                warning "Skupper resources will be skipped."
                 warning "To install manually: kubectl apply -f https://github.com/skupperproject/skupper/releases/download/${SKUPPER_VERSION}/skupper-cluster-scope.yaml"
             fi
-            set -e
         fi
     fi
     
-    # Deploy all manifests except Skupper if CRDs aren't installed
+    # Deploy all manifests - try Skupper even if CRD check was uncertain
+    # The actual deployment will fail gracefully if CRDs aren't ready
     if [ "$SKUPPER_CRDS_INSTALLED" = "true" ]; then
         # Deploy everything including Skupper
-        if ! oc apply -R -f "$TUTORIAL_HOME/k8s-deployment-manifests/"; then
+        log "Deploying all resources including Skupper..."
+        if ! oc apply -R -f "$TUTORIAL_HOME/k8s-deployment-manifests/" 2>&1; then
             error "Failed to deploy k8s-deployment-manifests. Check manifests: ls -la $TUTORIAL_HOME/k8s-deployment-manifests/"
         fi
     else
-        # Deploy everything except Skupper resources
-        log "Deploying non-Skupper resources..."
-        for dir in "$TUTORIAL_HOME/k8s-deployment-manifests"/*; do
-            if [ -d "$dir" ] && [ "$(basename "$dir")" != "skupper-online-boutique" ]; then
-                log "Deploying $(basename "$dir")..."
+        # Try deploying Skupper anyway - if CRDs are actually there, it will work
+        # If not, we'll get a clear error and can skip just that part
+        log "Attempting to deploy all resources (including Skupper)..."
+        set +e
+        DEPLOY_OUTPUT=$(oc apply -R -f "$TUTORIAL_HOME/k8s-deployment-manifests/" 2>&1)
+        DEPLOY_EXIT_CODE=$?
+        set -e
+        
+        if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
+            log "[OK] All resources deployed successfully (including Skupper)"
+        else
+            # Check if the error is specifically about Skupper CRDs
+            if echo "$DEPLOY_OUTPUT" | grep -qi "no matches for kind.*skupper\|unable to recognize.*skupper"; then
+                warning "Skupper CRDs not available. Deploying non-Skupper resources only..."
+                # Deploy everything except Skupper resources
+                for dir in "$TUTORIAL_HOME/k8s-deployment-manifests"/*; do
+                    if [ -d "$dir" ] && [ "$(basename "$dir")" != "skupper-online-boutique" ]; then
+                        log "Deploying $(basename "$dir")..."
+                        if ! oc apply -R -f "$dir" 2>&1; then
+                            warning "Failed to deploy $(basename "$dir")"
+                        fi
+                    fi
+                done
+                warning "Skipped skupper-online-boutique (Skupper CRDs not available)"
+            else
+                # Some other error occurred
+                error "Failed to deploy k8s-deployment-manifests. Error: ${DEPLOY_OUTPUT:0:500}"
+            fi
+        fi
                 if ! oc apply -R -f "$dir"; then
                     warning "Failed to deploy $(basename "$dir"), continuing..."
                 fi

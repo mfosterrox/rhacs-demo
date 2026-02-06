@@ -2,7 +2,7 @@ apiVersion: perses.dev/v1alpha1
 kind: PersesDashboard
 metadata:
   name: sample-rhacs-operator-dashboard
-  namespace: rhacs-operator
+  namespace: stackrox
 spec:
   display:
     name: Advanced Cluster Security / Overview

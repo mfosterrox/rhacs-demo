@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: sample-rhacs-operator-prometheus-additional-scrape-configs
-  namespace: rhacs-operator
+  namespace: stackrox
 stringData:
   prometheus-additional.yaml: |
     - job_name: 'sample-rhacs-operator-metrics'
@@ -12,4 +12,4 @@ stringData:
       tls_config:
         insecure_skip_verify: true
       static_configs:
-      - targets: ['central.rhacs-operator.svc:443']
+      - targets: ['central.stackrox.svc:443']

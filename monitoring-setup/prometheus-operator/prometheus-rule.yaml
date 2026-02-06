@@ -2,7 +2,7 @@ apiVersion: monitoring.rhobs/v1
 kind: PrometheusRule
 metadata:
   name: rhacs-health-alerts
-  namespace: rhacs-operator
+  namespace: stackrox
   labels:
     app: central
 spec:

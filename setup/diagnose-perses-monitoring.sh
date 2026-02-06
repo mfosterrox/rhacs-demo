@@ -30,7 +30,16 @@ info() {
 
 # Set namespace (default to stackrox)
 NAMESPACE="${NAMESPACE:-stackrox}"
-SECRET_NAME="sample-rhacs-operator-prometheus-tls"
+# Try both possible secret names
+SECRET_NAME=""
+if oc get secret sample-rhacs-operator-prometheus-tls -n "$NAMESPACE" &>/dev/null; then
+    SECRET_NAME="sample-rhacs-operator-prometheus-tls"
+elif oc get secret rhacs-prometheus-tls -n "$NAMESPACE" &>/dev/null; then
+    SECRET_NAME="rhacs-prometheus-tls"
+else
+    # Will error out in Step 2 if neither exists
+    SECRET_NAME="sample-rhacs-operator-prometheus-tls"
+fi
 
 # Create a persistent directory for certificate files (won't be auto-deleted)
 # This allows manual testing after script completion
@@ -98,8 +107,35 @@ log "✓ Private key extracted to temporary file"
 # Verify certificate details
 CERT_CN=$(openssl x509 -in "$TEMP_DIR/tls.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN=\([^,]*\).*/\1/p' || echo "")
 CERT_EXPIRY=$(openssl x509 -in "$TEMP_DIR/tls.crt" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+CERT_SANS=$(openssl x509 -in "$TEMP_DIR/tls.crt" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/^[[:space:]]*//' || echo "None")
 log "  Certificate CN: $CERT_CN"
 log "  Certificate expires: $CERT_EXPIRY"
+log "  Subject Alternative Names (SANs): $CERT_SANS"
+log ""
+
+# Check if certificate includes the expected Central service names
+# First, try to find where Central service actually is
+CENTRAL_NAMESPACE="$NAMESPACE"
+CENTRAL_NS_FOUND=$(oc get svc --all-namespaces -o jsonpath='{range .items[?(@.metadata.name=="central")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || echo "")
+if [ -n "$CENTRAL_NS_FOUND" ] && [ "$CENTRAL_NS_FOUND" != "null" ]; then
+    CENTRAL_NAMESPACE="$CENTRAL_NS_FOUND"
+fi
+
+CENTRAL_SERVICE_CHECK=false
+EXPECTED_SANS="central.$CENTRAL_NAMESPACE.svc.cluster.local, central.$CENTRAL_NAMESPACE.svc, central.$CENTRAL_NAMESPACE, central"
+if echo "$CERT_SANS" | grep -qi "central.*svc.*cluster\.local\|DNS:central"; then
+    # Check if it includes the full FQDN
+    if echo "$CERT_SANS" | grep -qi "central.*\.svc\.cluster\.local"; then
+        CENTRAL_SERVICE_CHECK=true
+        log "✓ Certificate includes Central service FQDN (.svc.cluster.local)"
+    else
+        warning "Certificate includes Central service names but may be missing full FQDN"
+        warning "Expected: central.$CENTRAL_NAMESPACE.svc.cluster.local"
+    fi
+else
+    warning "Certificate may not include all required Central service names"
+    warning "Expected SANs should include: $EXPECTED_SANS"
+fi
 log ""
 
 # Step 3: Get Central API endpoint
@@ -175,6 +211,66 @@ fi
 
 log ""
 log "========================================================="
+log "Step 5: Testing metrics endpoint with certificate"
+log "========================================================="
+log ""
+
+# Test the /metrics endpoint which Prometheus will scrape
+log "Testing metrics endpoint: ${API_ENDPOINT}/metrics"
+log ""
+
+set +e
+METRICS_RESPONSE=$(curl -s -w "\n%{http_code}" \
+    --cert "$TEMP_DIR/tls.crt" \
+    --key "$TEMP_DIR/tls.key" \
+    -k \
+    --connect-timeout 10 \
+    --max-time 30 \
+    "${API_ENDPOINT}/metrics" 2>&1)
+METRICS_CURL_EXIT_CODE=$?
+set -e
+
+# Extract HTTP status code (last line)
+METRICS_HTTP_CODE=$(echo "$METRICS_RESPONSE" | tail -n1)
+# Extract response body (all but last line)
+METRICS_BODY=$(echo "$METRICS_RESPONSE" | sed '$d')
+
+log "  curl exit code: $METRICS_CURL_EXIT_CODE"
+log "  HTTP status code: $METRICS_HTTP_CODE"
+log ""
+
+if [ $METRICS_CURL_EXIT_CODE -ne 0 ]; then
+    warning "curl failed for metrics endpoint (exit code: $METRICS_CURL_EXIT_CODE)"
+    warning "Check network connectivity and certificate validity."
+elif [ "$METRICS_HTTP_CODE" = "200" ]; then
+    log "✓ Metrics endpoint accessible with certificate!"
+    
+    # Check if response contains actual metrics data
+    METRICS_LINES=$(echo "$METRICS_BODY" | wc -l)
+    if [ "$METRICS_LINES" -gt 10 ]; then
+        log "✓ Metrics data received ($METRICS_LINES lines)"
+        log ""
+        log "Sample metrics (first 10 lines):"
+        echo "$METRICS_BODY" | head -10 | sed 's/^/  /'
+        log ""
+        log "This confirms the certificate works for Prometheus scraping."
+    else
+        warning "Metrics endpoint returned HTTP 200 but response seems empty or invalid"
+        info "Response: ${METRICS_BODY:0:200}"
+    fi
+elif [ "$METRICS_HTTP_CODE" = "401" ] || [ "$METRICS_HTTP_CODE" = "403" ]; then
+    warning "Metrics endpoint authentication failed (HTTP $METRICS_HTTP_CODE)"
+    warning "The certificate may not be registered as a UserPKI auth provider in RHACS."
+elif [ "$METRICS_HTTP_CODE" = "404" ]; then
+    warning "Metrics endpoint not found (HTTP 404)"
+    info "The /metrics endpoint may not be enabled or the path is incorrect."
+else
+    warning "Unexpected HTTP status code for metrics: $METRICS_HTTP_CODE"
+    info "Response preview: ${METRICS_BODY:0:200}"
+fi
+
+log ""
+log "========================================================="
 if [ "${AUTH_SUCCESS:-false}" = "true" ]; then
     log "Diagnostic complete - Authentication successful!"
 else
@@ -185,12 +281,63 @@ log "========================================================="
 # Additional diagnostics
 log ""
 log "========================================================="
+log "Step 6: Validating monitoring configuration"
+log "========================================================="
+log ""
+
+# Check ScrapeConfig target matches certificate SANs
+log "Checking ScrapeConfig configuration..."
+SCRAPE_CONFIG_NAMESPACE="rhacs-operator"
+if oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" >/dev/null 2>&1; then
+    SCRAPE_TARGET=$(oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$SCRAPE_CONFIG_NAMESPACE" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
+    if [ -n "$SCRAPE_TARGET" ]; then
+        log "  ScrapeConfig target: $SCRAPE_TARGET"
+        
+        # Extract namespace from target (e.g., central.tssc-acs.svc.cluster.local:443 -> tssc-acs)
+        TARGET_NS=$(echo "$SCRAPE_TARGET" | sed -n 's/central\.\([^.]*\)\.svc.*/\1/p')
+        if [ -n "$TARGET_NS" ]; then
+            log "  Target namespace: $TARGET_NS"
+            
+            # Check if certificate includes this namespace
+            if echo "$CERT_SANS" | grep -qi "central\.$TARGET_NS\.svc\.cluster\.local\|central\.$TARGET_NS\.svc"; then
+                log "✓ Certificate SANs match ScrapeConfig target"
+            else
+                warning "Certificate SANs may not match ScrapeConfig target"
+                warning "  Target uses: central.$TARGET_NS.svc.cluster.local"
+                warning "  Certificate SANs: $CERT_SANS"
+                warning "  Certificate may need to be regenerated with correct namespace"
+            fi
+        fi
+    else
+        warning "Could not extract target from ScrapeConfig"
+    fi
+else
+    # Try other possible namespaces
+    for ns in "$NAMESPACE" "stackrox" "tssc-acs"; do
+        if oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$ns" >/dev/null 2>&1; then
+            SCRAPE_CONFIG_NAMESPACE="$ns"
+            SCRAPE_TARGET=$(oc get scrapeconfig sample-rhacs-operator-scrape-config -n "$ns" -o jsonpath='{.spec.staticConfigs[0].targets[0]}' 2>/dev/null || echo "")
+            if [ -n "$SCRAPE_TARGET" ]; then
+                log "  Found ScrapeConfig in namespace: $ns"
+                log "  ScrapeConfig target: $SCRAPE_TARGET"
+                break
+            fi
+        fi
+    done
+    
+    if [ -z "$SCRAPE_TARGET" ]; then
+        warning "ScrapeConfig not found. Monitoring may not be configured."
+    fi
+fi
+
+log ""
+log "========================================================="
 log "Additional diagnostic information:"
 log "========================================================="
 log ""
 
 # Check if UserPKI auth provider exists
-log "Step 5: Checking for UserPKI auth provider 'Prometheus'..."
+log "Step 7: Checking for UserPKI auth provider 'Prometheus'..."
 
 # Try to get ROX_API_TOKEN from environment or ~/.bashrc
 ROX_API_TOKEN=""
@@ -304,10 +451,15 @@ log "  Certificate: $TEMP_DIR/tls.crt"
 log "  Private key: $TEMP_DIR/tls.key"
 log ""
 
-# Verify files still exist before showing manual test command
+# Verify files still exist before showing manual test commands
 if [ -f "$TEMP_DIR/tls.crt" ] && [ -f "$TEMP_DIR/tls.key" ]; then
     log "To test manually, run:"
-    log "  curl https://$CENTRAL_ROUTE/v1/auth/status --cert $TEMP_DIR/tls.crt --key $TEMP_DIR/tls.key -k"
+    log ""
+    log "1. Test authentication endpoint:"
+    log "   curl https://$CENTRAL_ROUTE/v1/auth/status --cert $TEMP_DIR/tls.crt --key $TEMP_DIR/tls.key -k"
+    log ""
+    log "2. Test metrics endpoint (for Prometheus):"
+    log "   curl https://$CENTRAL_ROUTE/metrics --cert $TEMP_DIR/tls.crt --key $TEMP_DIR/tls.key -k"
     log ""
     log "Files are preserved in: $TEMP_DIR"
     log "To clean up later, run: rm -rf $TEMP_DIR"

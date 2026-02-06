@@ -2,7 +2,7 @@ apiVersion: perses.dev/v1alpha1
 kind: PersesDatasource
 metadata:
   name: sample-rhacs-operator-datasource
-  namespace: rhacs-operator
+  namespace: stackrox
 spec:
   client:
     tls:
@@ -20,4 +20,4 @@ spec:
         proxy:
           kind: HTTPProxy
           spec:
-            url: 'http://prometheus-operated.rhacs-operator.svc.cluster.local:9090'
+            url: 'http://prometheus-operated.stackrox.svc.cluster.local:9090'

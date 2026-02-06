@@ -170,13 +170,78 @@ log "✓ Namespace '$NAMESPACE' exists"
 
 # Generate a private key and certificate
 log "Generating TLS private key and certificate..."
-CERT_CN="sample-rhacs-operator-prometheus.$NAMESPACE.svc"
+
+# Get the actual Central service name and namespace
+CENTRAL_SERVICE_NAME="central"
+CENTRAL_SERVICE_NAMESPACE="$NAMESPACE"
+
+# Check if Central service exists in the namespace
+if ! oc get svc "$CENTRAL_SERVICE_NAME" -n "$CENTRAL_SERVICE_NAMESPACE" >/dev/null 2>&1; then
+    # Try to find Central service in other namespaces
+    CENTRAL_SERVICE_NAMESPACE=$(oc get svc --all-namespaces -o jsonpath='{range .items[?(@.metadata.name=="central")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || echo "")
+    if [ -z "$CENTRAL_SERVICE_NAMESPACE" ] || [ "$CENTRAL_SERVICE_NAMESPACE" = "null" ]; then
+        # Try common RHACS namespaces
+        for ns in "rhacs-operator" "stackrox" "tssc-acs" "$NAMESPACE"; do
+            if oc get svc "$CENTRAL_SERVICE_NAME" -n "$ns" >/dev/null 2>&1; then
+                CENTRAL_SERVICE_NAMESPACE="$ns"
+                break
+            fi
+        done
+        if [ -z "$CENTRAL_SERVICE_NAMESPACE" ] || [ "$CENTRAL_SERVICE_NAMESPACE" = "null" ]; then
+            CENTRAL_SERVICE_NAMESPACE="$NAMESPACE"
+            warning "Central service not found. Using namespace '$NAMESPACE' for certificate generation."
+            warning "Certificate may need to be regenerated if Central is in a different namespace."
+        else
+            log "Found Central service in namespace: $CENTRAL_SERVICE_NAMESPACE"
+        fi
+    else
+        log "Found Central service in namespace: $CENTRAL_SERVICE_NAMESPACE"
+    fi
+else
+    log "Found Central service in namespace: $CENTRAL_SERVICE_NAMESPACE"
+fi
+
+# Generate certificate with Subject Alternative Names (SANs) for all possible service names
+CERT_CN="central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local"
+CERT_SANS="DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local,DNS:central.$CENTRAL_SERVICE_NAMESPACE.svc,DNS:central.$CENTRAL_SERVICE_NAMESPACE,DNS:central"
+
+log "Certificate will be valid for:"
+log "  - $CERT_CN"
+log "  - central.$CENTRAL_SERVICE_NAMESPACE.svc"
+log "  - central.$CENTRAL_SERVICE_NAMESPACE"
+log "  - central"
+
+# Create openssl config file for SANs
+OPENSSL_CNF=$(mktemp)
+cat > "$OPENSSL_CNF" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = $CERT_CN
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = $CERT_SANS
+EOF
+
 if openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-        -subj "/CN=$CERT_CN" \
+        -config "$OPENSSL_CNF" \
+        -extensions v3_req \
         -keyout tls.key -out tls.crt 2>/dev/null; then
     log "✓ TLS certificate generated successfully"
     log "  Subject: $CERT_CN"
+    # Verify SANs were included
+    CERT_SANS_VERIFY=$(openssl x509 -in tls.crt -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | tail -1 || echo "")
+    if [ -n "$CERT_SANS_VERIFY" ]; then
+        log "  SANs: $CERT_SANS_VERIFY"
+    fi
+    rm -f "$OPENSSL_CNF"
 else
+    rm -f "$OPENSSL_CNF"
     error "Failed to generate TLS certificate"
 fi
 
@@ -1308,16 +1373,28 @@ apply_yaml_with_namespace() {
     fi
     
     log "Installing $description..."
-    # Replace namespace in YAML file:
-    # - namespace: tssc-acs -> namespace: $NAMESPACE
-    # - namespace: "tssc-acs" -> namespace: "$NAMESPACE"
-    # - .tssc-acs.svc -> .$NAMESPACE.svc (for service references)
-    # - .tssc-acs.svc.cluster.local -> .$NAMESPACE.svc.cluster.local
-    sed "s/namespace: tssc-acs/namespace: $NAMESPACE/g; \
-         s/namespace: \"tssc-acs\"/namespace: \"$NAMESPACE\"/g; \
-         s/\\.tssc-acs\\.svc\\.cluster\\.local/\\.$NAMESPACE\\.svc\\.cluster\\.local/g; \
-         s/\\.tssc-acs\\.svc/\\.$NAMESPACE\\.svc/g" "$yaml_file" | \
-        oc apply -f - || error "Failed to apply $yaml_file"
+    
+    # Detect Central service namespace if not already set
+    if [ -z "${CENTRAL_SERVICE_NAMESPACE:-}" ]; then
+        CENTRAL_SERVICE_NAMESPACE="$NAMESPACE"
+        if ! oc get svc central -n "$CENTRAL_SERVICE_NAMESPACE" >/dev/null 2>&1; then
+            CENTRAL_SERVICE_NAMESPACE=$(oc get svc --all-namespaces -o jsonpath='{range .items[?(@.metadata.name=="central")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || echo "$NAMESPACE")
+        fi
+    fi
+    
+    # Files now use 'stackrox' as default namespace
+    # Only replace if namespace differs from expected or Central is in different namespace
+    if [ "$NAMESPACE" != "stackrox" ] || [ "$CENTRAL_SERVICE_NAMESPACE" != "stackrox" ]; then
+        sed "s/namespace: stackrox/namespace: $NAMESPACE/g; \
+             s/namespace: \"stackrox\"/namespace: \"$NAMESPACE\"/g; \
+             s/central\.stackrox\.svc/central.$CENTRAL_SERVICE_NAMESPACE.svc/g; \
+             s/central\.stackrox\.svc\.cluster\.local/central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local/g; \
+             s/prometheus-operated\.stackrox\.svc\.cluster\.local/prometheus-operated.$NAMESPACE.svc.cluster.local/g" \
+             "$yaml_file" | oc apply -f - || error "Failed to apply $description"
+    else
+        # Everything matches, apply as-is
+        oc apply -f "$yaml_file" || error "Failed to apply $description"
+    fi
     log "✓ $description installed successfully"
 }
 
@@ -1463,16 +1540,28 @@ if ! type apply_yaml_with_namespace &>/dev/null; then
         fi
         
         log "Installing $description..."
-        # Replace namespace in YAML file:
-        # - namespace: tssc-acs -> namespace: $NAMESPACE
-        # - namespace: "tssc-acs" -> namespace: "$NAMESPACE"
-        # - .tssc-acs.svc -> .$NAMESPACE.svc (for service references)
-        # - .tssc-acs.svc.cluster.local -> .$NAMESPACE.svc.cluster.local
-        sed "s/namespace: tssc-acs/namespace: $NAMESPACE/g; \
-             s/namespace: \"tssc-acs\"/namespace: \"$NAMESPACE\"/g; \
-             s/\\.tssc-acs\\.svc\\.cluster\\.local/\\.$NAMESPACE\\.svc\\.cluster\\.local/g; \
-             s/\\.tssc-acs\\.svc/\\.$NAMESPACE\\.svc/g" "$yaml_file" | \
-            oc apply -f - || error "Failed to apply $yaml_file"
+        
+        # Detect Central service namespace if not already set
+        if [ -z "${CENTRAL_SERVICE_NAMESPACE:-}" ]; then
+            CENTRAL_SERVICE_NAMESPACE="$NAMESPACE"
+            if ! oc get svc central -n "$CENTRAL_SERVICE_NAMESPACE" >/dev/null 2>&1; then
+                CENTRAL_SERVICE_NAMESPACE=$(oc get svc --all-namespaces -o jsonpath='{range .items[?(@.metadata.name=="central")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || echo "$NAMESPACE")
+            fi
+        fi
+        
+        # Files now use 'stackrox' as default namespace
+        # Only replace if namespace differs from expected or Central is in different namespace
+        if [ "$NAMESPACE" != "stackrox" ] || [ "$CENTRAL_SERVICE_NAMESPACE" != "stackrox" ]; then
+            sed "s/namespace: stackrox/namespace: $NAMESPACE/g; \
+                 s/namespace: \"stackrox\"/namespace: \"$NAMESPACE\"/g; \
+                 s/central\.stackrox\.svc/central.$CENTRAL_SERVICE_NAMESPACE.svc/g; \
+                 s/central\.stackrox\.svc\.cluster\.local/central.$CENTRAL_SERVICE_NAMESPACE.svc.cluster.local/g; \
+                 s/prometheus-operated\.stackrox\.svc\.cluster\.local/prometheus-operated.$NAMESPACE.svc.cluster.local/g" \
+                 "$yaml_file" | oc apply -f - || error "Failed to apply $yaml_file"
+        else
+            # Everything matches, apply as-is
+            oc apply -f "$yaml_file" || error "Failed to apply $yaml_file"
+        fi
         log "✓ $description installed successfully"
     }
 fi

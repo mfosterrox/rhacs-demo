@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
   name: sample-rhacs-operator-prometheus-server
-  namespace: rhacs-operator
+  namespace: stackrox
 spec:
   serviceAccountName: sample-rhacs-operator-prometheus-server
   serviceMonitorSelector: {}
