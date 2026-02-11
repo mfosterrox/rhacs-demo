@@ -92,7 +92,7 @@ add_bashrc_vars_from_cluster() {
             echo "export RHACS_VERSION=\"${version}\"" >> ~/.bashrc
             print_info "Added RHACS_VERSION to ~/.bashrc"
         else
-            echo 'export RHACS_VERSION="4.5.0"' >> ~/.bashrc
+            echo 'export RHACS_VERSION="4.9.2"' >> ~/.bashrc
             print_info "Added RHACS_VERSION to ~/.bashrc (default)"
         fi
     fi
@@ -157,7 +157,7 @@ main() {
     if ! check_variable "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
-    if ! check_variable "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)"; then
+    if ! check_variable "RHACS_VERSION" "Desired RHACS version (e.g., 4.9.2)"; then
         print_warn "RHACS_VERSION not set - will use latest stable"
     fi
     
