@@ -125,6 +125,14 @@ get_central_url() {
     return 0
 }
 
+# Check if cert-manager is installed
+check_cert_manager() {
+    if oc get crd certificates.cert-manager.io >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
 # Generate TLS certificate for Prometheus
 generate_prometheus_certificate() {
     print_step "Generating TLS certificate for Prometheus..."
@@ -132,68 +140,130 @@ generate_prometheus_certificate() {
     # Check if certificate already exists
     if oc get secret "${CERT_SECRET_NAME}" -n "${MONITORING_NAMESPACE}" >/dev/null 2>&1; then
         print_info "Certificate secret '${CERT_SECRET_NAME}' already exists"
-        
-        # Ask if user wants to regenerate
-        print_warn "Regenerating certificate will require updating RHACS auth provider"
         return 0
     fi
     
-    # Create temporary directory for certificate generation
-    local temp_dir=$(mktemp -d)
-    trap "rm -rf ${temp_dir}" EXIT
-    
-    cd "${temp_dir}"
-    
-    # Generate private key and certificate
-    print_info "Generating RSA private key and self-signed certificate..."
-    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-        -subj "/CN=${PROMETHEUS_CN}" \
-        -keyout tls.key -out tls.crt >/dev/null 2>&1
-    
-    if [ ! -f tls.key ] || [ ! -f tls.crt ]; then
-        print_error "Failed to generate certificate"
+    # Check if cert-manager is available
+    if check_cert_manager; then
+        print_info "Using cert-manager to generate certificate..."
+        
+        # Create Certificate resource
+        cat <<EOF | oc apply -f - >/dev/null 2>&1
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: stackrox-prometheus-cert
+  namespace: ${MONITORING_NAMESPACE}
+spec:
+  secretName: ${CERT_SECRET_NAME}
+  duration: 8760h  # 365 days
+  renewBefore: 720h  # 30 days
+  subject:
+    organizations:
+      - Red Hat Advanced Cluster Security
+  commonName: ${PROMETHEUS_CN}
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+  issuerRef:
+    name: stackrox-prometheus-issuer
+    kind: Issuer
+EOF
+        
+        # Create self-signed Issuer
+        cat <<EOF | oc apply -f - >/dev/null 2>&1
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: stackrox-prometheus-issuer
+  namespace: ${MONITORING_NAMESPACE}
+spec:
+  selfSigned: {}
+EOF
+        
+        print_info "Waiting for certificate to be ready..."
+        local max_wait=60
+        local waited=0
+        while [ ${waited} -lt ${max_wait} ]; do
+            if oc get secret "${CERT_SECRET_NAME}" -n "${MONITORING_NAMESPACE}" >/dev/null 2>&1; then
+                print_info "✓ Certificate generated successfully via cert-manager"
+                print_info "  Secret: ${CERT_SECRET_NAME}"
+                print_info "  Common Name: ${PROMETHEUS_CN}"
+                print_info "  Validity: 365 days (auto-renewal enabled)"
+                return 0
+            fi
+            sleep 2
+            waited=$((waited + 2))
+        done
+        
+        print_error "Timeout waiting for certificate to be generated"
         return 1
+    else
+        print_info "cert-manager not found, using openssl..."
+        
+        # Create temporary directory for certificate generation
+        local temp_dir=$(mktemp -d)
+        trap "rm -rf ${temp_dir}" EXIT
+        
+        cd "${temp_dir}"
+        
+        # Generate private key and certificate
+        print_info "Generating RSA private key and self-signed certificate..."
+        openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+            -subj "/CN=${PROMETHEUS_CN}" \
+            -keyout tls.key -out tls.crt >/dev/null 2>&1
+        
+        if [ ! -f tls.key ] || [ ! -f tls.crt ]; then
+            print_error "Failed to generate certificate"
+            return 1
+        fi
+        
+        # Create TLS secret in the monitoring namespace
+        print_info "Creating TLS secret in namespace '${MONITORING_NAMESPACE}'..."
+        oc create secret tls "${CERT_SECRET_NAME}" \
+            --cert=tls.crt \
+            --key=tls.key \
+            -n "${MONITORING_NAMESPACE}" >/dev/null 2>&1
+        
+        print_info "✓ TLS certificate generated successfully"
+        print_info "  Secret: ${CERT_SECRET_NAME}"
+        print_info "  Common Name: ${PROMETHEUS_CN}"
+        print_info "  Validity: 365 days"
+        
+        return 0
     fi
-    
-    # Create TLS secret in the monitoring namespace
-    print_info "Creating TLS secret in namespace '${MONITORING_NAMESPACE}'..."
-    oc create secret tls "${CERT_SECRET_NAME}" \
-        --cert=tls.crt \
-        --key=tls.key \
-        -n "${MONITORING_NAMESPACE}" >/dev/null 2>&1
-    
-    print_info "✓ TLS certificate generated successfully"
-    print_info "  Secret: ${CERT_SECRET_NAME}"
-    print_info "  Common Name: ${PROMETHEUS_CN}"
-    print_info "  Validity: 365 days"
-    
-    return 0
 }
 
 # Configure RHACS User Certificate auth provider
 configure_rhacs_auth_provider() {
-    print_step "Configuring RHACS User Certificate authentication..."
+    print_step "Configuring RHACS User Certificate authentication..." >&2
     
     if [ -z "${ROX_PASSWORD:-}" ]; then
-        print_error "ROX_PASSWORD is not set"
-        print_error "Please provide the password as an argument to install.sh"
+        print_error "ROX_PASSWORD is not set" >&2
+        print_error "Please provide the password as an argument to install.sh" >&2
         return 1
     fi
     
     local central_url=$(get_central_url)
     if [ -z "${central_url}" ]; then
-        print_error "Could not determine Central URL"
+        print_error "Could not determine Central URL" >&2
         return 1
     fi
     
-    print_info "Central URL: ${central_url}"
+    print_info "Central URL: ${central_url}" >&2
     
     # Extract the certificate from the secret
     local cert_pem
     cert_pem=$(oc get secret "${CERT_SECRET_NAME}" -n "${MONITORING_NAMESPACE}" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d)
     
     if [ -z "${cert_pem}" ]; then
-        print_error "Could not extract certificate from secret"
+        print_error "Could not extract certificate from secret" >&2
+        print_error "Secret: ${CERT_SECRET_NAME} in namespace ${MONITORING_NAMESPACE}" >&2
         return 1
     fi
     
@@ -210,33 +280,37 @@ configure_rhacs_auth_provider() {
     local provider_id=$(echo "${existing_providers}" | jq -r '.authProviders[] | select(.name == "Prometheus User Certificate") | .id' 2>/dev/null || echo "")
     
     if [ -n "${provider_id}" ] && [ "${provider_id}" != "null" ]; then
-        print_info "User Certificate auth provider already exists (ID: ${provider_id})"
-        print_info "Skipping auth provider creation"
+        print_info "User Certificate auth provider already exists (ID: ${provider_id})" >&2
+        print_info "Skipping auth provider creation" >&2
         return 0
     fi
     
-    # Create auth provider JSON payload
+    # Create auth provider JSON payload using jq to properly escape the certificate
     local temp_file=$(mktemp)
-    cat > "${temp_file}" <<EOF
-{
-  "name": "Prometheus User Certificate",
-  "type": "userpki",
-  "uiEndpoint": "${central_url}",
-  "enabled": true,
-  "config": {
-    "keys": ["${cert_pem}"]
-  }
-}
-EOF
+    jq -n \
+        --arg name "Prometheus User Certificate" \
+        --arg type "userpki" \
+        --arg endpoint "${central_url}" \
+        --arg cert "${cert_pem}" \
+        '{
+          name: $name,
+          type: $type,
+          uiEndpoint: $endpoint,
+          enabled: true,
+          config: {
+            keys: [$cert]
+          }
+        }' > "${temp_file}"
     
     # Validate JSON
     if ! jq . "${temp_file}" >/dev/null 2>&1; then
-        print_error "Generated invalid JSON payload"
+        print_error "Generated invalid JSON payload" >&2
+        print_error "Debug: Check certificate format" >&2
         rm -f "${temp_file}"
         return 1
     fi
     
-    print_info "Creating User Certificate auth provider..."
+    print_info "Creating User Certificate auth provider..." >&2
     
     local response
     response=$(curl -k -s -w "\n%{http_code}" \
@@ -252,12 +326,13 @@ EOF
     local body=$(echo "${response}" | sed '$d')
     
     if [ "${http_code}" != "200" ] && [ "${http_code}" != "201" ]; then
-        print_error "Failed to create auth provider (HTTP ${http_code})"
-        print_error "Response: ${body:0:500}"
+        print_error "Failed to create auth provider (HTTP ${http_code})" >&2
+        print_error "URL: https://${api_host}/v1/authProviders" >&2
+        print_error "Response: ${body:0:500}" >&2
         return 1
     fi
     
-    print_info "✓ User Certificate auth provider created successfully"
+    print_info "✓ User Certificate auth provider created successfully" >&2
     
     return 0
 }
