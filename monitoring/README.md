@@ -46,6 +46,15 @@ The monitoring setup uses **User Certificate (TLS)** authentication:
 - **Common Name**: `stackrox-monitoring-prometheus.stackrox.svc`
 - **Secret Name**: `stackrox-prometheus-tls`
 - **Validity**: 365 days
+- **Auto-renewal**: Enabled (if cert-manager is available)
+
+### Certificate Generation Methods
+
+The setup script automatically detects the best method for certificate generation:
+
+1. **cert-manager (Recommended)**: If cert-manager is installed in the cluster, the script creates a Certificate resource with automatic renewal configured. Certificates will be renewed 30 days before expiration.
+
+2. **OpenSSL (Fallback)**: If cert-manager is not available, the script uses openssl to generate a self-signed certificate. Manual renewal is required after 365 days.
 
 ## Usage
 
@@ -117,11 +126,31 @@ scrape_configs:
 If you need to regenerate the certificate:
 
 ```bash
-# Delete the existing secret
+# For cert-manager certificates
+oc delete certificate stackrox-prometheus-cert -n stackrox
+oc delete secret stackrox-prometheus-tls -n stackrox
+
+# For openssl certificates
 oc delete secret stackrox-prometheus-tls -n stackrox
 
 # Re-run the monitoring setup
 ./setup/06-setup-monitoring.sh
+```
+
+### Verify cert-manager Installation
+
+Check if cert-manager is installed and ready:
+
+```bash
+# Check if cert-manager CRDs are present
+oc get crd certificates.cert-manager.io
+
+# Check cert-manager deployment
+oc get deployment -n cert-manager
+
+# View certificate status
+oc get certificate -n stackrox
+oc describe certificate stackrox-prometheus-cert -n stackrox
 ```
 
 ### Authentication Failures
