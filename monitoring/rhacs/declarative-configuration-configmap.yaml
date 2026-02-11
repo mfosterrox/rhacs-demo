@@ -3,6 +3,8 @@ kind: ConfigMap
 metadata:
   name: sample-stackrox-prometheus-declarative-configuration
   namespace: stackrox
+  labels:
+    app.kubernetes.io/name: stackrox
 data:
   prometheus.yaml: |
     ---
@@ -29,6 +31,14 @@ data:
       access: READ_ACCESS
     ---
     name: Prometheus Server
-    description: Sample role for Prometheus server access
+    description: Sample role for Prometheus server access with service account
     accessScope: Unrestricted
     permissionSet: Prometheus Server
+    ---
+    name: sample-stackrox-prometheus
+    description: Service account for Prometheus metrics collection
+    role: Prometheus Server
+    subjects:
+    - name: sample-stackrox-prometheus
+      kind: SERVICE_ACCOUNT
+      namespace: stackrox

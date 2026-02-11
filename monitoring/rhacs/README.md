@@ -11,17 +11,25 @@ See details on using declarative configuration in [the product documentation](ht
 
 ## Configuring API access
 
-- You can store a long-lived ROX API token in a secret.
-- You can configure Prometheus to access RHACS API with a Kubernetes service account token in a few of ways:
-  - OpenShift OAuth provider:
-    - use the long-lived service account token as the client key.
-  - Short-lived projected service account token:
-    - can only be configured via additional scrape config file (not with ServiceMonitor, not with PodMonitor, neither with ScrapeConfig);
-    - see the example in [prometheus-operator](../prometheus-operator).
-  - Generated service account token secret:
-    - you can create a secret of type `kubernetes.io/service-account-token`, and Kubernetes will add there a long-lived token, which can be used as the Bearer token for accessing RHACS API.
-- You can configure Prometheus to access RHACS API using TLS certificate:
-  - see examples in [cluster-observability-operator](../cluster-observability-operator).
+This demo uses **Kubernetes Service Account Token authentication** for Prometheus to access RHACS metrics.
+
+### Service Account Token Setup
+
+The configuration includes:
+
+1. **ServiceAccount**: `sample-stackrox-prometheus` - Kubernetes service account for Prometheus
+2. **Token Secret**: `sample-stackrox-prometheus-token` - Long-lived token secret of type `kubernetes.io/service-account-token`
+3. **Role Binding**: Declarative configuration binds the service account to the "Prometheus Server" role
+
+See the complete example in [cluster-observability-operator](../cluster-observability-operator):
+- `service-account.yaml` - ServiceAccount and token secret
+- `scrape-config.yaml` - ScrapeConfig using Bearer token authentication
+- `declarative-configuration-configmap.yaml` - RBAC configuration
+
+### Alternative Authentication Methods
+
+- **ROX API Token**: Store a long-lived ROX API token in a secret (not used in this demo)
+- **TLS Certificate**: Configure client certificate authentication (more complex, not recommended for demos)
 
 ## Configuring metrics via API
 

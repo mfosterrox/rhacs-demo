@@ -15,8 +15,6 @@ readonly NC='\033[0m' # No Color
 
 # Configuration
 readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
-readonly CERT_SECRET_NAME="stackrox-prometheus-tls"
-readonly PROMETHEUS_CN="sample-stackrox-monitoring-stack-prometheus.stackrox.svc"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 readonly MONITORING_DIR="${PROJECT_ROOT}/monitoring"
@@ -178,123 +176,27 @@ generate_api_token() {
     return 0
 }
 
-# Check if cert-manager is installed
-check_cert_manager() {
-    if oc get crd certificates.cert-manager.io >/dev/null 2>&1; then
-        return 0
-    fi
+# Wait for service account token to be populated
+wait_for_service_account_token() {
+    print_step "Waiting for service account token..."
+    
+    local max_wait=60
+    local waited=0
+    
+    while [ ${waited} -lt ${max_wait} ]; do
+        local token=$(oc get secret sample-stackrox-prometheus-token -n "${RHACS_NAMESPACE}" -o jsonpath='{.data.token}' 2>/dev/null || echo "")
+        
+        if [ -n "${token}" ] && [ "${token}" != "" ]; then
+            print_info "✓ Service account token is ready"
+            return 0
+        fi
+        
+        sleep 2
+        waited=$((waited + 2))
+    done
+    
+    print_error "Timeout waiting for service account token"
     return 1
-}
-
-# Generate TLS certificate for Prometheus
-generate_prometheus_certificate() {
-    print_step "Generating TLS certificate for Prometheus..."
-    
-    # Check if certificate already exists
-    if oc get secret "${CERT_SECRET_NAME}" -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "✓ Certificate secret '${CERT_SECRET_NAME}' already exists"
-        return 0
-    fi
-    
-    # Check if cert-manager is available
-    if check_cert_manager; then
-        print_info "Using cert-manager to generate certificate..."
-        
-        # Create self-signed Issuer
-        cat <<EOF | oc apply -f - >/dev/null 2>&1
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: stackrox-prometheus-issuer
-  namespace: ${RHACS_NAMESPACE}
-spec:
-  selfSigned: {}
-EOF
-        
-        # Create Certificate resource
-        cat <<EOF | oc apply -f - >/dev/null 2>&1
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: stackrox-prometheus-cert
-  namespace: ${RHACS_NAMESPACE}
-spec:
-  secretName: ${CERT_SECRET_NAME}
-  duration: 8760h  # 365 days
-  renewBefore: 720h  # 30 days
-  subject:
-    organizations:
-      - Red Hat Advanced Cluster Security
-  commonName: ${PROMETHEUS_CN}
-  isCA: false
-  privateKey:
-    algorithm: RSA
-    size: 2048
-  usages:
-    - digital signature
-    - key encipherment
-    - client auth
-  issuerRef:
-    name: stackrox-prometheus-issuer
-    kind: Issuer
-EOF
-        
-        print_info "Waiting for certificate to be ready..."
-        local max_wait=60
-        local waited=0
-        while [ ${waited} -lt ${max_wait} ]; do
-            if oc get secret "${CERT_SECRET_NAME}" -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-                print_info "✓ Certificate generated successfully via cert-manager"
-                print_info "  Secret: ${CERT_SECRET_NAME}"
-                print_info "  Common Name: ${PROMETHEUS_CN}"
-                print_info "  Validity: 365 days (auto-renewal enabled)"
-                return 0
-            fi
-            sleep 2
-            waited=$((waited + 2))
-        done
-        
-        print_error "Timeout waiting for certificate to be generated"
-        return 1
-    else
-        print_info "cert-manager not found, using openssl..."
-        
-        if ! command_exists openssl; then
-            print_error "openssl is required but not installed"
-            return 1
-        fi
-        
-        # Create temporary directory for certificate generation
-        local temp_dir=$(mktemp -d)
-        trap "rm -rf ${temp_dir}" RETURN
-        
-        cd "${temp_dir}"
-        
-        # Generate private key and certificate
-        print_info "Generating RSA private key and self-signed certificate..."
-        openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-            -subj "/CN=${PROMETHEUS_CN}" \
-            -keyout tls.key -out tls.crt >/dev/null 2>&1
-        
-        if [ ! -f tls.key ] || [ ! -f tls.crt ]; then
-            print_error "Failed to generate certificate"
-            return 1
-        fi
-        
-        # Create TLS secret
-        print_info "Creating TLS secret in namespace '${RHACS_NAMESPACE}'..."
-        oc create secret tls "${CERT_SECRET_NAME}" \
-            --cert=tls.crt \
-            --key=tls.key \
-            -n "${RHACS_NAMESPACE}" >/dev/null 2>&1
-        
-        print_info "✓ TLS certificate generated successfully"
-        print_info "  Secret: ${CERT_SECRET_NAME}"
-        print_info "  Common Name: ${PROMETHEUS_CN}"
-        print_info "  Validity: 365 days"
-        
-        return 0
-    fi
 }
 
 # Configure RHACS settings
@@ -519,10 +421,10 @@ display_monitoring_info() {
     print_info "  - Retention: 7d alerts, 30d runtime, 90d vulnerabilities"
     print_info "  - Platform components: Red Hat products recognized"
     print_info ""
-    print_info "TLS Certificate:"
-    print_info "  Secret: ${CERT_SECRET_NAME}"
+    print_info "Service Account Authentication:"
+    print_info "  ServiceAccount: sample-stackrox-prometheus"
+    print_info "  Token Secret: sample-stackrox-prometheus-token"
     print_info "  Namespace: ${RHACS_NAMESPACE}"
-    print_info "  Common Name: ${PROMETHEUS_CN}"
     print_info ""
     local central_url=$(get_central_url)
     if [ -n "${central_url}" ]; then
@@ -534,19 +436,29 @@ display_monitoring_info() {
     # Check what monitoring resources were deployed
     print_info "Deployed Monitoring Resources:"
     
+    # Check for service account
+    if oc get serviceaccount sample-stackrox-prometheus -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ ServiceAccount: sample-stackrox-prometheus"
+    fi
+    
+    # Check for token secret
+    if oc get secret sample-stackrox-prometheus-token -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ Secret: sample-stackrox-prometheus-token"
+    fi
+    
     # Check for declarative configuration
-    if oc get configmap stackrox-prometheus-declarative-configuration -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "  ✓ ConfigMap: stackrox-prometheus-declarative-configuration"
+    if oc get configmap sample-stackrox-prometheus-declarative-configuration -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ ConfigMap: sample-stackrox-prometheus-declarative-configuration"
     fi
     
     # Check for MonitoringStack
-    if oc get monitoringstack rhacs-monitoring-stack -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "  ✓ MonitoringStack: rhacs-monitoring-stack"
+    if oc get monitoringstack sample-stackrox-monitoring-stack -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ MonitoringStack: sample-stackrox-monitoring-stack"
     fi
     
     # Check for ScrapeConfig
-    if oc get scrapeconfig rhacs-scrape-config -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "  ✓ ScrapeConfig: rhacs-scrape-config"
+    if oc get scrapeconfig sample-stackrox-scrape-config -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ ScrapeConfig: sample-stackrox-scrape-config"
     fi
     
     print_info ""
@@ -593,18 +505,17 @@ main() {
     
     print_info ""
     
-    # Generate Prometheus certificate
-    if ! generate_prometheus_certificate; then
-        print_error "Failed to generate Prometheus certificate"
+    # Apply all monitoring manifests
+    if ! apply_monitoring_manifests; then
+        print_error "Failed to apply monitoring manifests"
         exit 1
     fi
     
     print_info ""
     
-    # Apply all monitoring manifests
-    if ! apply_monitoring_manifests; then
-        print_error "Failed to apply monitoring manifests"
-        exit 1
+    # Wait for service account token
+    if ! wait_for_service_account_token; then
+        print_warn "Service account token not ready yet (may take a few moments)"
     fi
     
     # Display monitoring information
