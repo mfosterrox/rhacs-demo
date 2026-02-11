@@ -65,7 +65,16 @@ is_compliance_operator_installed() {
     fi
     
     # Additional check: verify operator pods are running
-    local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running --no-headers 2>/dev/null | grep compliance-operator | wc -l | tr -d ' ')
+    # Try multiple methods to find the pod
+    local pod_count=0
+    
+    # Method 1: Check with label
+    pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+    
+    # Method 2: If label doesn't work, check by pod name prefix
+    if [ "${pod_count}" = "0" ] || [ -z "${pod_count}" ]; then
+        pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | grep "^compliance-operator-" | wc -l | tr -d ' ' || echo "0")
+    fi
     
     # Ensure we have a valid integer
     if [ -z "${pod_count}" ] || [ "${pod_count}" = "" ]; then
@@ -233,13 +242,19 @@ main() {
     print_step "Checking Compliance Operator installation..."
     if is_compliance_operator_installed; then
         local version=$(get_compliance_operator_version)
-        print_info "✓ Compliance Operator is already installed"
+        print_info "✓ Compliance Operator is already installed and ready"
         if [ -n "${version}" ]; then
             print_info "  Version: ${version}"
         fi
-        print_info "Skipping installation and sensor restart"
+        
+        # Show that we're explicitly NOT restarting sensor
+        local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | grep "^compliance-operator-" | wc -l | tr -d ' ' || echo "0")
+        print_info "  Operator pods running: ${pod_count}"
+        print_info ""
+        print_info "Skipping installation and sensor restart (operator already installed)"
+        operator_installed=false
     else
-        print_info "Compliance Operator not found or not ready"
+        print_info "Compliance Operator not found or not ready, installing..."
         
         # Install compliance operator
         if ! install_compliance_operator; then
