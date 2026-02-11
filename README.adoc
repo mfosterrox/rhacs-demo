@@ -6,20 +6,8 @@ Clone the repository:
 
 [source,bash]
 ----
-([ -d rhacs-demo ] && cd rhacs-demo && git pull) || (git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo) && ./install.sh
+if [ -d rhacs-demo ]; then cd rhacs-demo && git pull; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo; fi && ./install.sh
 ----
-
-== Prerequisites
-
-Before running the installation script, ensure the following variables are set in your `~/.bashrc`:
-
-* `KUBECONFIG` - Path to your OpenShift kubeconfig file
-* `OC_CLUSTER_URL` - OpenShift cluster URL
-* `OC_CLUSTER_USER` - OpenShift cluster admin username
-* `OC_CLUSTER_PASSWORD` - OpenShift cluster admin password
-* `RHACS_NAMESPACE` - Namespace where RHACS is installed (default: `stackrox`)
-* `RHACS_ROUTE_NAME` - Name of the RHACS route (default: `central`)
-* `RHACS_VERSION` - Optional: Target RHACS version
 
 == What It Does
 

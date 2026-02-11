@@ -64,21 +64,37 @@ main() {
     local missing_vars=0
     
     # Check for OpenShift/Kubernetes credentials
-    check_variable_in_bashrc "KUBECONFIG" "Path to kubeconfig file for OpenShift cluster access" || ((missing_vars++))
-    check_variable_in_bashrc "OC_CLUSTER_URL" "OpenShift cluster URL (e.g., https://api.example.com:6443)" || ((missing_vars++))
-    check_variable_in_bashrc "OC_CLUSTER_USER" "OpenShift cluster admin username" || ((missing_vars++))
-    check_variable_in_bashrc "OC_CLUSTER_PASSWORD" "OpenShift cluster admin password" || ((missing_vars++))
+    if ! check_variable_in_bashrc "KUBECONFIG" "Path to kubeconfig file for OpenShift cluster access"; then
+        missing_vars=$((missing_vars + 1))
+    fi
+    if ! check_variable_in_bashrc "OC_CLUSTER_URL" "OpenShift cluster URL (e.g., https://api.example.com:6443)"; then
+        missing_vars=$((missing_vars + 1))
+    fi
+    if ! check_variable_in_bashrc "OC_CLUSTER_USER" "OpenShift cluster admin username"; then
+        missing_vars=$((missing_vars + 1))
+    fi
+    if ! check_variable_in_bashrc "OC_CLUSTER_PASSWORD" "OpenShift cluster admin password"; then
+        missing_vars=$((missing_vars + 1))
+    fi
     
     # Check for RHACS specific variables
-    check_variable_in_bashrc "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)" || ((missing_vars++))
-    check_variable_in_bashrc "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)" || ((missing_vars++))
+    if ! check_variable_in_bashrc "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)"; then
+        missing_vars=$((missing_vars + 1))
+    fi
+    if ! check_variable_in_bashrc "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
+        missing_vars=$((missing_vars + 1))
+    fi
     
     # Optional but recommended variables
-    check_variable_in_bashrc "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)" || print_warn "RHACS_VERSION not set - will use latest stable"
+    if ! check_variable_in_bashrc "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)"; then
+        print_warn "RHACS_VERSION not set - will use latest stable"
+    fi
     
-    if [ $missing_vars -gt 0 ]; then
+    if [ "${missing_vars}" -gt 0 ]; then
+        print_error ""
         print_error "Missing ${missing_vars} required variable(s) in ~/.bashrc"
         print_error "Please add the missing variables to ~/.bashrc and run this script again"
+        print_error ""
         exit 1
     fi
     
@@ -86,10 +102,12 @@ main() {
     print_info ""
     
     # Ensure setup directory exists
+    print_info "Checking for setup directory: ${SETUP_DIR}"
     if [ ! -d "${SETUP_DIR}" ]; then
         print_error "Setup directory not found: ${SETUP_DIR}"
         exit 1
     fi
+    print_info "✓ Setup directory found"
     
     # Source bashrc again to ensure we have the latest variables
     source_bashrc
