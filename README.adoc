@@ -48,3 +48,30 @@ The installation script will:
 . Verify RHACS installation including secured cluster services
 . Ensure the RHACS route is encrypted with TLS
 . Check and update RHACS to the latest stable version if needed
+. Install and configure the Red Hat Compliance Operator
+. Deploy demo applications for testing
+. Configure RHACS settings (telemetry, metrics collection)
+. Set up automated compliance scan schedules
+. Configure monitoring with certificate-based authentication for Prometheus
+
+== Setup Scripts
+
+The following scripts are executed in order:
+
+. `01-verify-rhacs-install.sh` - Verifies RHACS installation and version
+. `02-compliance-operator-install.sh` - Installs Red Hat Compliance Operator
+. `03-deploy-applications.sh` - Deploys demo applications
+. `04-configure-rhacs-settings.sh` - Configures RHACS API settings
+. `05-setup-co-scan-schedule.sh` - Sets up automated compliance scanning
+. `06-setup-monitoring.sh` - Configures RHACS monitoring with TLS certificates
+
+== Monitoring Configuration
+
+The monitoring setup provides:
+
+* **Certificate-based authentication** for Prometheus to access RHACS metrics
+* **Custom metrics** for image vulnerabilities and policy violations
+* **Read-only access** via declarative RBAC configuration
+* **Secure TLS** communication with 365-day certificate validity
+
+For detailed monitoring documentation, see link:monitoring/README.md[monitoring/README.md]
