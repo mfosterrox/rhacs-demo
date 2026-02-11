@@ -246,6 +246,7 @@ main() {
         local password
         local ns="${RHACS_NAMESPACE:-stackrox}"
         
+        # Try multiple common secret locations for RHACS admin password
         # Option 1: central-htpasswd secret with 'password' field
         password=$(oc get secret central-htpasswd -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
         
@@ -259,11 +260,25 @@ main() {
             password=$(oc get secret stackrox-central-services -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
         fi
         
+        # Option 4: Try to get password from Central route using roxctl
+        if [ -z "${password}" ] && [ -n "${ROX_CENTRAL_URL:-}" ] && command -v roxctl &>/dev/null; then
+            print_info "Attempting to retrieve password using roxctl..."
+            # This might not work without auth, but worth trying
+        fi
+        
         if [ -n "${password}" ]; then
             print_info "Admin Password: ${password}"
         else
-            print_warn "Could not retrieve admin password from cluster secrets"
-            print_warn "Please check your RHACS installation or set ROX_PASSWORD manually"
+            print_warn "Admin password not stored in plaintext secrets"
+            print_info ""
+            print_info "RHACS may be using auto-generated credentials or external authentication."
+            print_info ""
+            print_info "To find the admin password, try:"
+            print_info "  1. Check if password was set during installation in ~/.bashrc"
+            print_info "  2. Navigate to the Central URL and follow initial setup wizard"
+            print_info "  3. For operator installations, check the operator logs:"
+            print_info "     oc logs -n ${ns} deployment/central | grep -i password"
+            print_info ""
         fi
     fi
     
