@@ -290,8 +290,9 @@ create_scan_config() {
     
     print_info "Creating compliance scan configuration '${scan_name}'..."
     
-    # Create JSON payload with proper variable substitution
-    local scan_config=$(cat <<EOF
+    # Create JSON payload in a temp file for reliable transmission
+    local temp_file=$(mktemp)
+    cat > "${temp_file}" <<EOF
 {
   "scanName": "${scan_name}",
   "scanConfig": {
@@ -320,21 +321,50 @@ create_scan_config() {
   "clusters": ["${cluster_id}"]
 }
 EOF
-)
+    
+    # Debug: verify JSON is valid
+    if ! jq . "${temp_file}" >/dev/null 2>&1; then
+        print_error "Generated invalid JSON payload"
+        rm -f "${temp_file}"
+        return 1
+    fi
+    
+    print_info "Making API request to: ${api_base}/v2/compliance/scan/configurations"
     
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X POST \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
-        --data-binary "${scan_config}" \
-        "${api_base}/v2/compliance/scan/configurations" 2>/dev/null || echo "")
+        --data @"${temp_file}" \
+        "${api_base}/v2/compliance/scan/configurations" 2>&1)
+    
+    # Clean up temp file
+    rm -f "${temp_file}"
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
     
+    # Check if we got HTML response (indicates wrong endpoint or proxy issue)
+    if echo "${body}" | grep -qi "<html>\|<body>"; then
+        print_error "Received HTML response instead of JSON (HTTP ${http_code})"
+        print_error "URL: ${api_base}/v2/compliance/scan/configurations"
+        print_error "This usually indicates:"
+        print_error "  - Wrong API endpoint or route configuration"
+        print_error "  - Proxy or load balancer intercepting the request"
+        print_error "Response: ${body:0:300}"
+        return 1
+    fi
+    
     if [ "${http_code}" != "200" ] && [ "${http_code}" != "201" ]; then
         print_error "Failed to create scan configuration (HTTP ${http_code})"
+        print_error "URL: ${api_base}/v2/compliance/scan/configurations"
+        print_error "Cluster ID: ${cluster_id}"
         print_error "Response: ${body:0:500}"
+        print_error ""
+        print_error "This may indicate:"
+        print_error "  - ProfileBundles not yet ready (wait and retry)"
+        print_error "  - Invalid cluster ID"
+        print_error "  - API authentication issue"
         return 1
     fi
     
@@ -406,10 +436,12 @@ main() {
     
     # Get cluster ID
     local cluster_id=$(get_cluster_id "${token}" "${api_base}")
-    if [ -z "${cluster_id}" ]; then
+    if [ -z "${cluster_id}" ] || [ "${cluster_id}" = "null" ]; then
         print_error "Failed to get cluster ID"
+        print_error "Verify that at least one cluster is connected to RHACS Central"
         exit 1
     fi
+    print_info "✓ Cluster ID validated: ${cluster_id}"
     
     print_info ""
     
