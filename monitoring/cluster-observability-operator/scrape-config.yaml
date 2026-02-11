@@ -14,9 +14,8 @@ spec:
   authorization:
     type: Bearer
     credentials:
-      secret:
-        key: token
-        name: sample-stackrox-prometheus-token
+      key: token
+      name: sample-stackrox-prometheus-token
   tlsConfig:
     ca:
       secret:
