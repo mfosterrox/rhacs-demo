@@ -1,0 +1,20 @@
+apiVersion: monitoring.rhobs/v1alpha1
+kind: MonitoringStack
+metadata:
+  name: rhacs-monitoring-stack
+  namespace: stackrox
+spec:
+  logLevel: info
+  retention: 7d
+  resourceSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: rhacs-monitoring
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 1000m
+      memory: 4Gi
+  alertmanagerConfig:
+    disabled: false

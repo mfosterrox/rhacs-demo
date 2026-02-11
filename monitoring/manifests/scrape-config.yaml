@@ -1,0 +1,24 @@
+apiVersion: monitoring.rhobs/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: rhacs-scrape-config
+  namespace: stackrox
+  labels:
+    app.kubernetes.io/part-of: rhacs-monitoring
+spec:
+  staticConfigs:
+  - targets:
+    - central.stackrox.svc.cluster.local:443
+    labels:
+      job: rhacs-central
+  metricsPath: /metrics
+  scheme: https
+  tlsConfig:
+    insecureSkipVerify: true
+    cert:
+      secret:
+        name: stackrox-prometheus-tls
+        key: tls.crt
+    keySecret:
+      name: stackrox-prometheus-tls
+      key: tls.key
