@@ -374,6 +374,23 @@ configure_rhacs_settings() {
       .config.privateConfig.reportRetentionConfig.downloadableReportRetentionDays = 7 |
       .config.privateConfig.reportRetentionConfig.downloadableReportGlobalRetentionBytes = 524288000 |
       
+      # Vulnerability exception config (ensure it exists)
+      .config.privateConfig.vulnerabilityExceptionConfig = (
+        .config.privateConfig.vulnerabilityExceptionConfig // {
+          "expiryOptions": {
+            "dayOptions": [
+              { "numDays": 14, "enabled": true },
+              { "numDays": 30, "enabled": true },
+              { "numDays": 60, "enabled": true },
+              { "numDays": 90, "enabled": true }
+            ],
+            "fixableCveOptions": { "allFixable": true, "anyFixable": true },
+            "customDate": false,
+            "indefinite": false
+          }
+        }
+      ) |
+      
       # Administration events
       .config.privateConfig.administrationEventsConfig.retentionDurationDays = 4 |
       
