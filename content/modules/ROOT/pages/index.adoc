@@ -14,7 +14,7 @@ To ensure your RHACS environment is up to date, and has all of the necessary com
 +
 [source,sh,subs="attributes",role=execute]
 ----
-if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; then cd rhacs-demo && git pull && ./install.sh; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo && ./install.sh - {acs_portal_password}; fi
+if [ -f install.sh ]; then git pull && ./install.sh; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo && ./install.sh {acs_portal_password}; fi
 ----
 
 . Verify the deployment completed successfully
@@ -35,11 +35,13 @@ if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; the
 [INFO] Username: admin
 [INFO] 
 ----
-+
 
-== Access Your Consoles
+
+== Accessing the Consoles
 
 === OpenShift Console
+
+IMPORTANT: You will need to into the OpenShift console in another tab before the showroom instance works.
 
 Access the OpenShift Console from the *OpenShift Console* tab in the right panel, or open it directly: {openshift_cluster_console_url}[window=blank]
 
