@@ -51,12 +51,24 @@ get_operator_version() {
 
 # Function to get installed RHACS version
 get_installed_version() {
+    local version=""
+    
     # Try to get version from central resource status
-    local version=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Release")].message}' 2>/dev/null | grep -oP 'version \K[0-9.]+')
+    version=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Release")].message}' 2>/dev/null | grep -oP 'version \K[0-9.]+')
+    
+    # If not found, try from Central spec.central.image
+    if [ -z "${version}" ]; then
+        version=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].spec.central.image}' 2>/dev/null | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+')
+    fi
     
     # If not found, try from deployment image tag (looking for semantic version pattern)
     if [ -z "${version}" ]; then
         version=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+    
+    # If still not found and operator CSV exists, use operator version as installed version
+    if [ -z "${version}" ]; then
+        version=$(get_latest_available_version)
     fi
     
     echo "${version}"
@@ -69,8 +81,22 @@ get_current_image_tag() {
 
 # Function to get latest available RHACS version from operator
 get_latest_available_version() {
-    oc get subscription -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.items[?(@.spec.name=="rhacs-operator")].status.installedCSV}' 2>/dev/null | grep -oP 'rhacs-operator\.v\K[0-9.]+' || \
-    oc get csv -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.items[?(@.metadata.name=~"rhacs-operator.*")].spec.version}' 2>/dev/null | head -1 || echo ""
+    local version=""
+    
+    # Try to get version from CSV (most reliable)
+    version=$(oc get csv -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.items[?(@.metadata.name=~"rhacs-operator.*")].spec.version}' 2>/dev/null | head -1)
+    
+    # If not found, try from CSV name
+    if [ -z "${version}" ]; then
+        version=$(oc get csv -n "${RHACS_OPERATOR_NAMESPACE}" -o name 2>/dev/null | grep rhacs-operator | head -1 | grep -oP 'rhacs-operator\.v\K[0-9.]+')
+    fi
+    
+    # If still not found, try from subscription
+    if [ -z "${version}" ]; then
+        version=$(oc get subscription -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.items[?(@.spec.name=="rhacs-operator")].status.installedCSV}' 2>/dev/null | grep -oP 'rhacs-operator\.v\K[0-9.]+')
+    fi
+    
+    echo "${version}"
 }
 
 # Function to verify RHACS installation
