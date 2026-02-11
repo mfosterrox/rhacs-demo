@@ -28,18 +28,73 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Function to check if a variable exists in ~/.bashrc
-check_variable_in_bashrc() {
+# Function to check if a variable exists in ~/.bashrc or current environment
+check_variable() {
     local var_name=$1
     local description=$2
     
+    # First check if it's in ~/.bashrc
     if grep -q "^export ${var_name}=" ~/.bashrc 2>/dev/null || grep -q "^${var_name}=" ~/.bashrc 2>/dev/null; then
         print_info "Found ${var_name} in ~/.bashrc"
         return 0
+    # If not in ~/.bashrc, check if it's set in current environment
+    elif [ -n "${!var_name:-}" ]; then
+        print_info "Found ${var_name} in current environment"
+        return 0
     else
-        print_error "${var_name} not found in ~/.bashrc"
+        print_error "${var_name} not found in ~/.bashrc or environment"
         print_warn "Description: ${description}"
         return 1
+    fi
+}
+
+# Function to add missing RHACS variables to ~/.bashrc by fetching from the cluster
+add_bashrc_vars_from_cluster() {
+    local ns="${RHACS_NAMESPACE:-stackrox}"
+    local route="${RHACS_ROUTE_NAME:-central}"
+
+    touch ~/.bashrc
+
+    if ! grep -qE "^(export[[:space:]]+)?ROX_CENTRAL_URL=" ~/.bashrc 2>/dev/null; then
+        local url
+        url=$(oc get route "${route}" -n "${ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null) || true
+        if [ -n "${url}" ]; then
+            echo "export ROX_CENTRAL_URL=\"${url}\"" >> ~/.bashrc
+            print_info "Added ROX_CENTRAL_URL to ~/.bashrc"
+        fi
+    fi
+
+    if ! grep -qE "^(export[[:space:]]+)?ROX_PASSWORD=" ~/.bashrc 2>/dev/null; then
+        local password
+        password=$(oc get secret central-htpasswd -n "${ns}" -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null) || true
+        if [ -n "${password}" ]; then
+            local escaped
+            escaped=$(printf '%s' "${password}" | sed "s/'/'\\\\''/g")
+            echo "export ROX_PASSWORD='${escaped}'" >> ~/.bashrc
+            print_info "Added ROX_PASSWORD to ~/.bashrc"
+        fi
+    fi
+
+    if ! grep -qE "^(export[[:space:]]+)?RHACS_NAMESPACE=" ~/.bashrc 2>/dev/null; then
+        echo "export RHACS_NAMESPACE=\"${ns}\"" >> ~/.bashrc
+        print_info "Added RHACS_NAMESPACE to ~/.bashrc"
+    fi
+
+    if ! grep -qE "^(export[[:space:]]+)?RHACS_ROUTE_NAME=" ~/.bashrc 2>/dev/null; then
+        echo "export RHACS_ROUTE_NAME=\"${route}\"" >> ~/.bashrc
+        print_info "Added RHACS_ROUTE_NAME to ~/.bashrc"
+    fi
+
+    if ! grep -qE "^(export[[:space:]]+)?RHACS_VERSION=" ~/.bashrc 2>/dev/null; then
+        local version
+        version=$(oc get subscription -n rhacs-operator -o jsonpath='{.items[?(@.spec.name=="rhacs-operator")].status.currentCSV}' 2>/dev/null | grep -oP 'rhacs-operator\.v\K[0-9.]+' || true)
+        if [ -n "${version}" ]; then
+            echo "export RHACS_VERSION=\"${version}\"" >> ~/.bashrc
+            print_info "Added RHACS_VERSION to ~/.bashrc"
+        else
+            echo 'export RHACS_VERSION="4.5.0"' >> ~/.bashrc
+            print_info "Added RHACS_VERSION to ~/.bashrc (default)"
+        fi
     fi
 }
 
@@ -67,31 +122,42 @@ main() {
     # Load variables from ~/.bashrc (parse instead of source to avoid exit from /etc/bashrc)
     print_info "Loading variables from ~/.bashrc..."
     export_bashrc_vars || true
-    
+
+    # If cluster is accessible, populate missing variables from RHACS installation
+    if oc whoami &>/dev/null; then
+        print_info "Cluster accessible - populating missing variables from RHACS installation..."
+        trap - ERR
+        set +e
+        add_bashrc_vars_from_cluster || true
+        set -euo pipefail
+        trap 'echo "Error at line $LINENO"' ERR
+        export_bashrc_vars || true
+    fi
+
     # Required variables and credentials
-    print_info "Checking for required variables and credentials in ~/.bashrc..."
+    print_info "Checking for required variables and credentials..."
     echo ""  # Ensure output is flushed
     
     local missing_vars=0
     
     # Check for RHACS API/CLI credentials (needed for roxctl and API calls)
     print_info "Checking ROX_CENTRAL_URL..."
-    if ! check_variable_in_bashrc "ROX_CENTRAL_URL" "RHACS Central URL for API access and roxctl CLI"; then
+    if ! check_variable "ROX_CENTRAL_URL" "RHACS Central URL for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
     print_info "Checking ROX_PASSWORD..."
-    if ! check_variable_in_bashrc "ROX_PASSWORD" "RHACS Central password for API access and roxctl CLI"; then
+    if ! check_variable "ROX_PASSWORD" "RHACS Central password for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
     
     # Optional but recommended variables
-    if ! check_variable_in_bashrc "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)"; then
+    if ! check_variable "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)"; then
         print_warn "RHACS_NAMESPACE not set - will use default: stackrox"
     fi
-    if ! check_variable_in_bashrc "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
+    if ! check_variable "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
-    if ! check_variable_in_bashrc "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)"; then
+    if ! check_variable "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)"; then
         print_warn "RHACS_VERSION not set - will use latest stable"
     fi
     
@@ -99,8 +165,8 @@ main() {
     
     if [ "${missing_vars}" -gt 0 ]; then
         print_error ""
-        print_error "Missing ${missing_vars} required variable(s) in ~/.bashrc"
-        print_error "Please add the missing variables to ~/.bashrc and run this script again"
+        print_error "Missing ${missing_vars} required variable(s)"
+        print_error "Please add the missing variables to ~/.bashrc or export them in your environment"
         print_error ""
         print_error "Required variables:"
         print_error "  - ROX_CENTRAL_URL"
@@ -109,7 +175,7 @@ main() {
         exit 1
     fi
     
-    print_info "All required variables found in ~/.bashrc"
+    print_info "All required variables found"
     print_info ""
     
     # Ensure setup directory exists
