@@ -688,6 +688,31 @@ deploy_monitoring_stack() {
     oc apply -f "${MONITORING_MANIFESTS_DIR}/scrape-config.yaml" >/dev/null 2>&1
     print_info "✓ ScrapeConfig applied"
     
+    # Apply declarative configuration ConfigMap for RHACS permissions
+    if [ -f "${MONITORING_MANIFESTS_DIR}/declarative-configuration-configmap.yaml" ]; then
+        print_info "Applying RHACS declarative configuration..."
+        oc apply -f "${MONITORING_MANIFESTS_DIR}/declarative-configuration-configmap.yaml" >/dev/null 2>&1
+        print_info "✓ RHACS declarative configuration applied"
+        
+        # Add declarative configuration to Central CR if not already present
+        local current_dc=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].spec.central.declarativeConfiguration.configMaps}' 2>/dev/null || echo "")
+        if echo "${current_dc}" | grep -q "stackrox-prometheus-declarative-configuration"; then
+            print_info "✓ Declarative configuration already referenced in Central CR"
+        else
+            print_info "Adding declarative configuration to Central CR..."
+            if oc get central -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+                oc patch central -n "${RHACS_NAMESPACE}" --type=json -p '[{
+                  "op": "add",
+                  "path": "/spec/central/declarativeConfiguration",
+                  "value": {
+                    "configMaps": ["stackrox-prometheus-declarative-configuration"]
+                  }
+                }]' >/dev/null 2>&1 || print_warn "Could not patch Central CR (may require manual configuration)"
+                print_info "✓ Declarative configuration added to Central CR"
+            fi
+        fi
+    fi
+    
     print_info "✓ Monitoring stack deployed successfully"
     return 0
 }
@@ -725,6 +750,11 @@ display_monitoring_info() {
         print_info "  Namespace: ${RHACS_NAMESPACE}"
         print_info "  MonitoringStack: rhacs-monitoring-stack"
         print_info "  ScrapeConfig: rhacs-scrape-config"
+        
+        # Check for declarative configuration
+        if oc get configmap stackrox-prometheus-declarative-configuration -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+            print_info "  Declarative Config: stackrox-prometheus-declarative-configuration"
+        fi
         print_info ""
     fi
     
