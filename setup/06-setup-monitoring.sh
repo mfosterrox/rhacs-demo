@@ -286,19 +286,19 @@ configure_rhacs_auth_provider() {
     fi
     
     # Create auth provider JSON payload using jq to properly escape the certificate
+    # Use echo with jq -Rs to handle multi-line certificate properly
     local temp_file=$(mktemp)
-    jq -n \
+    echo "${cert_pem}" | jq -Rs \
         --arg name "Prometheus User Certificate" \
         --arg type "userpki" \
         --arg endpoint "${central_url}" \
-        --arg cert "${cert_pem}" \
         '{
           name: $name,
           type: $type,
           uiEndpoint: $endpoint,
           enabled: true,
           config: {
-            keys: [$cert]
+            keys: [.]
           }
         }' > "${temp_file}"
     
