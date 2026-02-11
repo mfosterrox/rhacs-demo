@@ -225,14 +225,20 @@ main() {
     api_host="${api_host#http://}"
     local api_base="https://${api_host}/v1"
     
-    # Generate API token
-    local token=$(generate_api_token "${central_url}" "${ROX_PASSWORD}")
+    # Use provided API token or generate new one
+    local token="${ROX_API_TOKEN:-}"
     if [ -z "${token}" ]; then
-        print_error "Failed to generate API token"
-        print_error "Please verify ROX_PASSWORD is correct"
-        exit 1
+        print_info "Generating API token..."
+        token=$(generate_api_token "${central_url}" "${ROX_PASSWORD}")
+        if [ -z "${token}" ]; then
+            print_error "Failed to generate API token"
+            print_error "Please verify ROX_PASSWORD is correct"
+            exit 1
+        fi
+        print_info "✓ API token generated"
+    else
+        print_info "✓ Using API token from environment"
     fi
-    print_info "✓ API token generated"
     
     print_info ""
     

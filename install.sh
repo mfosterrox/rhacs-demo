@@ -134,6 +134,42 @@ export_bashrc_vars() {
     done
 }
 
+# Function to generate RHACS API token
+generate_rhacs_api_token() {
+    # Check if we have required variables
+    if [ -z "${ROX_CENTRAL_URL:-}" ] || [ -z "${ROX_PASSWORD:-}" ]; then
+        return 1
+    fi
+    
+    # Remove https:// prefix for API call
+    local api_host="${ROX_CENTRAL_URL#https://}"
+    api_host="${api_host#http://}"
+    
+    # Generate API token
+    local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -X POST \
+        -u "admin:${ROX_PASSWORD}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/apitokens/generate" \
+        -d '{"name":"install-script-token-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
+    
+    local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
+    
+    if [ "${http_code}" != "200" ]; then
+        return 1
+    fi
+    
+    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
+    if [ -z "${token}" ] || [ "${token}" = "null" ]; then
+        return 1
+    fi
+    
+    # Export token for subscripts
+    export ROX_API_TOKEN="${token}"
+    return 0
+}
+
 # Main installation function
 main() {
     # Accept password as command-line argument
@@ -228,6 +264,15 @@ main() {
         print_warn "Please ensure KUBECONFIG is set if you need cluster access."
     else
         print_info "Successfully connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+    fi
+    print_info ""
+    
+    # Generate RHACS API token (for use by subscripts)
+    print_info "Generating RHACS API token for subscripts..."
+    if generate_rhacs_api_token; then
+        print_info "✓ API token generated and exported"
+    else
+        print_warn "Could not generate API token (subscripts will generate their own if needed)"
     fi
     print_info ""
     

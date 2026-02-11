@@ -324,13 +324,19 @@ configure_rhacs_settings() {
     
     print_info "Central URL: ${central_url}"
     
-    # Generate API token
-    local token=$(generate_api_token "${central_url}" "${password}")
+    # Use provided API token or generate new one
+    local token="${ROX_API_TOKEN:-}"
     if [ -z "${token}" ]; then
-        print_error "Failed to generate API token"
-        return 1
+        print_info "Generating API token..."
+        token=$(generate_api_token "${central_url}" "${password}")
+        if [ -z "${token}" ]; then
+            print_error "Failed to generate API token"
+            return 1
+        fi
+        print_info "✓ API token generated"
+    else
+        print_info "✓ Using API token from environment"
     fi
-    print_info "✓ API token generated"
     
     # Get current configuration first
     local api_host="${central_url#https://}"
