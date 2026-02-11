@@ -20,9 +20,20 @@ if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; the
 . Verify the deployment completed successfully
 +
 .**OUTPUT**
-[source,sh]
+[source,sh,subs="attributes"]
 ----
-
+[INFO] ======================================
+[INFO] RHACS Demo Environment Setup Complete!
+[INFO] ======================================
+[INFO] 
+[INFO] RHACS Central Access Information:
+[INFO] ==================================
+[INFO] Central URL: {acs_route}
+[INFO] Admin Password: {acs_portal_password}
+[INFO] RHACS Version: 4.9.2
+[INFO] 
+[INFO] Username: admin
+[INFO] 
 ----
 +
 
