@@ -167,14 +167,15 @@ wait_for_compliance_pods() {
         local pod_status=""
         
         for pod_prefix in "${required_pods[@]}"; do
-            local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l "app=${pod_prefix}" --field-selector=status.phase=Running 2>/dev/null | grep -c "${pod_prefix}" || echo "0")
+            # Check if any pods with this prefix are running
+            local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | grep "${pod_prefix}" | wc -l | tr -d ' ')
             
-            # Alternative check using pod name prefix if label doesn't work
-            if [ "${pod_count}" = "0" ]; then
-                pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running 2>/dev/null | grep -c "${pod_prefix}" || echo "0")
+            # Ensure we have a valid integer
+            if [ -z "${pod_count}" ] || [ "${pod_count}" = "" ]; then
+                pod_count="0"
             fi
             
-            if [ "${pod_count}" -eq "0" ]; then
+            if [ "${pod_count}" -eq 0 ]; then
                 all_ready=false
                 pod_status="${pod_status}  ${pod_prefix}: Not running\n"
             else
@@ -289,39 +290,43 @@ create_scan_config() {
     
     print_info "Creating compliance scan configuration '${scan_name}'..."
     
-    local scan_config='{
-        "scanName": "'${scan_name}'",
-        "scanConfig": {
-            "oneTimeScan": false,
-            "profiles": [
-                "ocp4-cis",
-                "ocp4-cis-node",
-                "ocp4-moderate",
-                "ocp4-moderate-node",
-                "ocp4-e8",
-                "ocp4-high",
-                "ocp4-high-node",
-                "ocp4-nerc-cip",
-                "ocp4-nerc-cip-node",
-                "ocp4-pci-dss",
-                "ocp4-pci-dss-node",
-                "ocp4-stig-node"
-            ],
-            "scanSchedule": {
-                "intervalType": "DAILY",
-                "hour": 12,
-                "minute": 0
-            },
-            "description": "Daily compliance scan for all profiles"
-        },
-        "clusters": ["'${cluster_id}'"]
-    }'
+    # Create JSON payload with proper variable substitution
+    local scan_config=$(cat <<EOF
+{
+  "scanName": "${scan_name}",
+  "scanConfig": {
+    "oneTimeScan": false,
+    "profiles": [
+      "ocp4-cis",
+      "ocp4-cis-node",
+      "ocp4-moderate",
+      "ocp4-moderate-node",
+      "ocp4-e8",
+      "ocp4-high",
+      "ocp4-high-node",
+      "ocp4-nerc-cip",
+      "ocp4-nerc-cip-node",
+      "ocp4-pci-dss",
+      "ocp4-pci-dss-node",
+      "ocp4-stig-node"
+    ],
+    "scanSchedule": {
+      "intervalType": "DAILY",
+      "hour": 12,
+      "minute": 0
+    },
+    "description": "Daily compliance scan for all profiles"
+  },
+  "clusters": ["${cluster_id}"]
+}
+EOF
+)
     
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X POST \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
-        -d "${scan_config}" \
+        --data-binary "${scan_config}" \
         "${api_base}/v2/compliance/scan/configurations" 2>/dev/null || echo "")
     
     local http_code=$(echo "${response}" | tail -n1)
