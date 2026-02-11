@@ -2,7 +2,18 @@
 
 == Getting Started
 
-Clone the repository:
+=== Quick Start (with auto-populated password)
+
+[source,bash]
+----
+if [ -f install.sh ]; then git pull && ./install.sh {acs_portal_password}; elif [ -d rhacs-demo ]; then cd rhacs-demo && git pull && ./install.sh {acs_portal_password}; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo && ./install.sh {acs_portal_password}; fi
+----
+
+The `{acs_portal_password}` placeholder will be automatically replaced with your actual password.
+
+=== Alternative: Using environment variables
+
+Clone and run without arguments (requires variables in `~/.bashrc` or environment):
 
 [source,bash]
 ----
@@ -11,10 +22,17 @@ if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; the
 
 == Prerequisites
 
-Before running the installation script, ensure the following variables are set in your `~/.bashrc`:
+The script checks for required variables in this order:
 
-* `ROX_CENTRAL_URL` - RHACS Central URL for API access and roxctl CLI (e.g., https://central.example.com)
-* `ROX_PASSWORD` - RHACS Central password for API access and roxctl CLI
+1. Command-line arguments (highest priority)
+2. Current environment variables
+3. Variables defined in `~/.bashrc`
+4. Auto-detection from cluster (for `ROX_CENTRAL_URL`)
+
+=== Required Variables
+
+* `ROX_PASSWORD` - RHACS Central admin password (can be passed as argument: `./install.sh YOUR_PASSWORD`)
+* `ROX_CENTRAL_URL` - RHACS Central URL (auto-detected from cluster route if not provided)
 
 Optional variables:
 

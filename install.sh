@@ -1,4 +1,23 @@
 #!/bin/bash
+#
+# RHACS Demo Environment Setup Script
+#
+# Usage:
+#   ./install.sh [PASSWORD]
+#
+# Arguments:
+#   PASSWORD    Optional: RHACS Central admin password (sets ROX_PASSWORD)
+#
+# Examples:
+#   ./install.sh                      # Use password from environment or ~/.bashrc
+#   ./install.sh mySecurePassword123  # Provide password as argument
+#
+# The script will check for required environment variables in this order:
+#   1. Command-line arguments
+#   2. Current environment variables
+#   3. Variables defined in ~/.bashrc
+#   4. Auto-detection from cluster (for ROX_CENTRAL_URL)
+#
 
 set -euo pipefail
 
@@ -117,6 +136,14 @@ export_bashrc_vars() {
 
 # Main installation function
 main() {
+    # Accept password as command-line argument
+    local provided_password="${1:-}"
+    
+    if [ -n "${provided_password}" ]; then
+        export ROX_PASSWORD="${provided_password}"
+        print_info "Using password provided via command-line argument"
+    fi
+    
     print_info "Starting RHACS Demo Environment Setup"
     print_info "======================================"
     echo "" >&2  # Flush stderr
