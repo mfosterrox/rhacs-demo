@@ -195,38 +195,12 @@ EOF
     return 0
 }
 
-# Function to restart RHACS sensor to sync compliance results
-restart_rhacs_sensor() {
-    print_step "Restarting RHACS sensor to sync Compliance Operator results..."
-    
-    if check_resource_exists "deployment" "sensor" "${RHACS_NAMESPACE}"; then
-        print_info "Deleting sensor pods to trigger restart..."
-        oc delete pods -l app.kubernetes.io/component=sensor -n "${RHACS_NAMESPACE}" 2>/dev/null || {
-            print_warn "Could not delete sensor pods"
-            return 1
-        }
-        
-        print_info "Waiting for sensor to be ready..."
-        oc wait --for=condition=Available deployment/sensor -n "${RHACS_NAMESPACE}" --timeout=120s 2>/dev/null || {
-            print_warn "Sensor may still be restarting"
-            return 1
-        }
-        
-        print_info "✓ Sensor restarted successfully"
-    else
-        print_warn "RHACS sensor not found in namespace ${RHACS_NAMESPACE}"
-        print_info "Sensor will automatically sync compliance results when it starts"
-    fi
-}
-
 # Main function
 main() {
     print_info "=========================================="
     print_info "Compliance Operator Installation"
     print_info "=========================================="
     print_info ""
-    
-    local operator_installed=false
     
     # Check if already installed
     print_step "Checking Compliance Operator installation..."
@@ -241,10 +215,7 @@ main() {
         local deployment_status=$(oc get deployment compliance-operator -n "${COMPLIANCE_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
         print_info "  Deployment status: Available=${deployment_status}"
         print_info ""
-        print_info "✓ Skipping installation and sensor restart (operator already installed)"
-        
-        # Explicitly set to false to ensure sensor is NOT restarted
-        operator_installed=false
+        print_info "✓ Skipping installation"
     else
         print_info "Compliance Operator not found or not ready, installing..."
         
@@ -255,21 +226,15 @@ main() {
         fi
         
         print_info "✓ Compliance Operator installed successfully"
-        operator_installed=true
     fi
     
     print_info ""
-    
-    # Only restart RHACS sensor if we just installed the operator
-    if [ "${operator_installed}" = true ]; then
-        restart_rhacs_sensor || true
-        print_info ""
-    fi
-    
     print_info "=========================================="
     print_info "Compliance Operator Setup Complete"
     print_info "=========================================="
     print_info "Namespace: ${COMPLIANCE_NAMESPACE}"
+    print_info ""
+    print_info "Note: RHACS sensor will automatically sync compliance results"
     print_info ""
 }
 
