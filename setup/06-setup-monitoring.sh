@@ -332,59 +332,55 @@ configure_rhacs_settings() {
     fi
     print_info "✓ API token generated"
     
-    # Prepare configuration payload
+    # Get current configuration first
     local api_host="${central_url#https://}"
     api_host="${api_host#http://}"
     
-    local config_payload=$(cat <<'EOF'
-{
-  "config": {
-    "publicConfig": {
-      "telemetry": { "enabled": true }
-    },
-    "privateConfig": {
-      "alertConfig": {
-        "resolvedDeployRetentionDurationDays": 7,
-        "deletedRuntimeRetentionDurationDays": 7,
-        "allRuntimeRetentionDurationDays": 30
-      },
-      "metrics": {
-        "imageVulnerabilities": {
-          "gatheringPeriodMinutes": 1,
-          "descriptors": {
-            "deployment_severity": {
-              "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"]
-            },
-            "namespace_severity": {
-              "labels": ["Cluster","Namespace","IsFixable","Severity"]
-            }
+    print_info "Getting current RHACS configuration..."
+    local current_config=$(curl -k -s \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/config" 2>&1)
+    
+    if ! echo "${current_config}" | jq . >/dev/null 2>&1; then
+        print_warn "Could not retrieve current configuration, skipping update"
+        return 0  # Non-fatal
+    fi
+    
+    # Merge our changes with current config using jq
+    local config_payload=$(echo "${current_config}" | jq '
+      .config.publicConfig.telemetry.enabled = true |
+      .config.privateConfig.metrics.imageVulnerabilities = {
+        "gatheringPeriodMinutes": 1,
+        "descriptors": {
+          "deployment_severity": {
+            "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"]
+          },
+          "namespace_severity": {
+            "labels": ["Cluster","Namespace","IsFixable","Severity"]
           }
-        },
-        "policyViolations": {
-          "gatheringPeriodMinutes": 1,
-          "descriptors": {
-            "deployment_severity": {
-              "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"]
-            },
-            "namespace_severity": {
-              "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"]
-            }
+        }
+      } |
+      .config.privateConfig.metrics.policyViolations = {
+        "gatheringPeriodMinutes": 1,
+        "descriptors": {
+          "deployment_severity": {
+            "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"]
+          },
+          "namespace_severity": {
+            "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"]
           }
-        },
-        "nodeVulnerabilities": {
-          "gatheringPeriodMinutes": 1,
-          "descriptors": {
-            "node_severity": {
-              "labels": ["Cluster","Node","IsFixable","Severity"]
-            }
+        }
+      } |
+      .config.privateConfig.metrics.nodeVulnerabilities = {
+        "gatheringPeriodMinutes": 1,
+        "descriptors": {
+          "node_severity": {
+            "labels": ["Cluster","Node","IsFixable","Severity"]
           }
         }
       }
-    }
-  }
-}
-EOF
-)
+    ')
     
     # Update RHACS configuration
     print_info "Updating RHACS configuration..."
@@ -396,16 +392,20 @@ EOF
         "https://${api_host}/v1/config" 2>&1)
     
     local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
     
     if [ "${http_code}" != "200" ] && [ "${http_code}" != "204" ]; then
         print_warn "Failed to update RHACS configuration (HTTP ${http_code})"
+        print_warn "Response: ${body:0:200}"
         return 0  # Non-fatal
     fi
     
     print_info "✓ RHACS configuration updated successfully"
     print_info "  - Telemetry enabled"
-    print_info "  - Metrics collection configured"
-    print_info "  - Retention policies set"
+    print_info "  - Metrics collection configured (1-minute gathering)"
+    print_info "  - Image vulnerabilities: deployment_severity, namespace_severity"
+    print_info "  - Policy violations: deployment_severity, namespace_severity"
+    print_info "  - Node vulnerabilities: node_severity"
     
     return 0
 }
