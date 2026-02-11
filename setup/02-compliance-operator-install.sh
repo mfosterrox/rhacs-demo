@@ -89,10 +89,7 @@ install_compliance_operator() {
     
     # Create OperatorGroup
     print_info "Creating OperatorGroup..."
-    cat <<EOF | oc apply -f - || {
-        print_error "Failed to create OperatorGroup"
-        return 1
-    }
+    if ! cat <<EOF | oc apply -f -
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
@@ -101,6 +98,10 @@ metadata:
 spec:
   targetNamespaces: []
 EOF
+    then
+        print_error "Failed to create OperatorGroup"
+        return 1
+    fi
     print_info "✓ OperatorGroup created"
     
     # Determine channel
@@ -118,10 +119,7 @@ EOF
     
     # Create Subscription
     print_info "Creating Subscription..."
-    cat <<EOF | oc apply -f - || {
-        print_error "Failed to create Subscription"
-        return 1
-    }
+    if ! cat <<EOF | oc apply -f -
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
@@ -134,6 +132,10 @@ spec:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
 EOF
+    then
+        print_error "Failed to create Subscription"
+        return 1
+    fi
     print_info "✓ Subscription created"
     
     # Wait for CSV to be created
@@ -249,3 +251,4 @@ main() {
 
 # Run main function
 main "$@"
+
