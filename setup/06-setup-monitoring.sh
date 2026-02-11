@@ -410,6 +410,14 @@ install_cluster_observability_operator() {
     
     # Check if already installed
     if oc get namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
+        # Check for operator pods (more reliable than CSV status)
+        local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
+        if [ "${pod_count}" -gt 0 ]; then
+            print_info "✓ Cluster Observability Operator already installed (${pod_count} pods running)"
+            return 0
+        fi
+        
+        # Also check CSV status as fallback
         if oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
             local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
             if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
@@ -465,9 +473,23 @@ EOF
     
     # Wait for operator to be ready
     print_info "Waiting for operator to be installed (this may take a few minutes)..."
-    local max_wait=300  # Increased to 5 minutes
+    local max_wait=300  # 5 minutes
     local waited=0
     while [ ${waited} -lt ${max_wait} ]; do
+        # Check for running operator pods (more reliable indicator)
+        local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
+        if [ "${pod_count}" -gt 0 ]; then
+            print_info "✓ Cluster Observability Operator installed successfully (${pod_count} pods running)"
+            
+            # Also try to get CSV for reference
+            local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
+            if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
+                print_info "  CSV: ${csv}"
+            fi
+            return 0
+        fi
+        
+        # Check CSV status as fallback
         local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
         if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
             if oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
@@ -486,7 +508,8 @@ EOF
         # Show progress every 30 seconds
         if [ $((waited % 30)) -eq 0 ] && [ ${waited} -gt 0 ]; then
             local sub_state=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.state}' 2>/dev/null || echo "unknown")
-            print_info "  Still waiting... (${waited}s elapsed, subscription state: ${sub_state})"
+            local total_pods=$(oc get pods -n "${OPERATOR_NAMESPACE}" 2>/dev/null | grep -c Running || echo "0")
+            print_info "  Still waiting... (${waited}s elapsed, subscription: ${sub_state}, running pods: ${total_pods})"
             if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
                 print_info "  Current CSV: ${csv}"
             fi
@@ -496,9 +519,19 @@ EOF
         waited=$((waited + 5))
     done
     
+    # Check if pods are running even if timeout occurred
+    local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
+    if [ "${pod_count}" -gt 0 ]; then
+        print_warn "Timeout waiting for CSV, but operator pods are running (${pod_count} pods)"
+        print_info "Considering installation successful"
+        return 0
+    fi
+    
     print_error "Timeout waiting for operator installation after ${max_wait} seconds"
     print_error "Checking subscription status..."
     oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o yaml 2>&1 || true
+    print_error "Checking pods..."
+    oc get pods -n "${OPERATOR_NAMESPACE}" 2>&1 || true
     return 1
 }
 
