@@ -81,29 +81,34 @@ generate_api_token() {
     local api_host="${central_url#https://}"
     api_host="${api_host#http://}"
     
-    print_info "Generating API token..."
+    # All print statements go to stderr
+    print_info "Generating API token..." >&2
     
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X POST \
         -u "admin:${password}" \
         -H "Content-Type: application/json" \
         "https://${api_host}/v1/apitokens/generate" \
-        -d '{"name":"compliance-scan-config-'$(date +%s)'","roles":["Admin"]}' 2>/dev/null || echo "")
+        -d '{"name":"compliance-scan-config-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
     
     if [ "${http_code}" != "200" ]; then
-        print_error "Failed to generate API token (HTTP ${http_code})"
+        print_error "Failed to generate API token (HTTP ${http_code})" >&2
+        print_error "URL: https://${api_host}/v1/apitokens/generate" >&2
+        print_error "Response: ${body:0:500}" >&2
         return 1
     fi
     
     local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
     if [ -z "${token}" ] || [ "${token}" = "null" ]; then
-        print_error "Could not extract token from response"
+        print_error "Could not extract token from response" >&2
+        print_error "Response: ${body:0:500}" >&2
         return 1
     fi
     
+    # Only echo the token to stdout (for capture)
     echo "${token}"
     return 0
 }
@@ -113,19 +118,22 @@ get_cluster_id() {
     local token=$1
     local api_base=$2
     
-    print_info "Fetching cluster ID..."
+    # All print statements go to stderr so they don't get captured in the return value
+    print_info "Fetching cluster ID..." >&2
     
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X GET \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
-        "${api_base}/v1/clusters" 2>/dev/null || echo "")
+        "${api_base}/v1/clusters" 2>&1 || echo "")
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
     
     if [ "${http_code}" != "200" ]; then
-        print_error "Failed to fetch clusters (HTTP ${http_code})"
+        print_error "Failed to fetch clusters (HTTP ${http_code})" >&2
+        print_error "URL: ${api_base}/v1/clusters" >&2
+        print_error "Response: ${body:0:500}" >&2
         return 1
     fi
     
@@ -137,17 +145,19 @@ get_cluster_id() {
     fi
     
     if [ -z "${cluster_id}" ] || [ "${cluster_id}" = "null" ]; then
-        print_error "Could not find cluster ID"
+        print_error "Could not find cluster ID" >&2
+        print_error "API Response: ${body:0:500}" >&2
         return 1
     fi
     
     local cluster_name=$(echo "${body}" | jq -r ".clusters[] | select(.id == \"${cluster_id}\") | .name" 2>/dev/null || echo "")
     if [ -n "${cluster_name}" ] && [ "${cluster_name}" != "null" ]; then
-        print_info "Found cluster: ${cluster_name} (ID: ${cluster_id})"
+        print_info "Found cluster: ${cluster_name} (ID: ${cluster_id})" >&2
     else
-        print_info "Using cluster ID: ${cluster_id}"
+        print_info "Using cluster ID: ${cluster_id}" >&2
     fi
     
+    # Only echo the cluster_id to stdout (for capture)
     echo "${cluster_id}"
     return 0
 }
