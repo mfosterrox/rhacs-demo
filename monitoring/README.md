@@ -15,10 +15,14 @@ RHACS Central exposes Prometheus metrics on the `/metrics` endpoint (port 443/ht
 
 ## Components
 
-### Auto-Generated Manifests
+### Manifests
 
-The script automatically generates and deploys:
+**Pre-configured** (in `monitoring/manifests/`):
+- **declarative-configuration-configmap.yaml**: RHACS Permission Set and Role for Prometheus
+  - Grants read-only access to Administration, Alert, Cluster, Deployment, Image, etc.
+  - Required for Prometheus authentication and authorization
 
+**Auto-generated** (by script):
 - **monitoring-stack.yaml**: MonitoringStack resource for Cluster Observability Operator
 - **scrape-config.yaml**: ScrapeConfig for RHACS Central metrics endpoint with TLS authentication
 
@@ -28,10 +32,12 @@ The `setup/06-setup-monitoring.sh` script provides a complete monitoring solutio
 
 1. **RHACS Configuration**: Configures telemetry, metrics collection, and retention policies via API
 2. **Certificate Generation**: Creates TLS certificates (cert-manager or openssl fallback)
-3. **Operator Installation**: Installs and configures Cluster Observability Operator
-4. **Monitoring Stack**: Deploys MonitoringStack with Prometheus and custom scrape configs
-5. **Custom Metrics**: Enables comprehensive metrics for vulnerabilities and policy violations
-6. **Idempotent**: Safe to run multiple times, skips already-configured components
+3. **Declarative RBAC**: Applies Permission Set and Role for Prometheus access
+4. **Operator Installation**: Installs and configures Cluster Observability Operator
+5. **Monitoring Stack**: Deploys MonitoringStack with Prometheus and custom scrape configs
+6. **Custom Metrics**: Enables comprehensive metrics for vulnerabilities and policy violations
+7. **Central CR Integration**: Automatically configures Central to use declarative configuration
+8. **Idempotent**: Safe to run multiple times, skips already-configured components
 
 ## RHACS Metrics
 
@@ -49,6 +55,34 @@ Configured with 10-minute gathering period:
   - Labels: Cluster, Namespace, Deployment, IsPlatformWorkload, IsFixable, Severity
 - `rox_central_image_vuln_namespace_severity` - Image vulnerabilities by namespace
   - Labels: Cluster, Namespace, Severity
+
+## RBAC and Authorization
+
+The monitoring setup configures proper RBAC permissions for Prometheus:
+
+### Declarative Configuration
+
+The **stackrox-prometheus-declarative-configuration** ConfigMap defines:
+
+**Permission Set** (Prometheus Server):
+- Administration: READ_ACCESS
+- Alert: READ_ACCESS
+- Cluster: READ_ACCESS
+- Deployment: READ_ACCESS
+- Image: READ_ACCESS
+- Integration: READ_ACCESS
+- Namespace: READ_ACCESS
+- Node: READ_ACCESS
+- WorkflowAdministration: READ_ACCESS
+
+**Role** (Prometheus Server):
+- Access Scope: Unrestricted
+- Permission Set: Prometheus Server
+
+This ConfigMap is automatically:
+1. Applied to the `stackrox` namespace
+2. Referenced in the Central CR's `declarativeConfiguration.configMaps`
+3. Used by RHACS to authorize Prometheus scrape requests
 
 ## Authentication
 
