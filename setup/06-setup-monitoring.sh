@@ -1,14 +1,7 @@
 #!/bin/bash
 
 # Script: 06-setup-monitoring.sh
-# Description: Complete RHACS monitoring setup with Cluster Observability Operator and Perses
-# Features:
-#   - Configures RHACS API settings (metrics, telemetry, retention policies)
-#   - Generates TLS certificates (cert-manager or openssl)
-#   - Creates RHACS UserPKI auth provider for Prometheus
-#   - Installs Cluster Observability Operator
-#   - Deploys Prometheus with custom scrape configs
-#   - Sets up Perses dashboards and datasources
+# Description: Configure RHACS monitoring with certificates and deploy monitoring manifests
 # Usage: ./06-setup-monitoring.sh
 
 set -euo pipefail
@@ -22,12 +15,11 @@ readonly NC='\033[0m' # No Color
 
 # Configuration
 readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
-readonly OPERATOR_NAMESPACE="openshift-cluster-observability-operator"
 readonly CERT_SECRET_NAME="stackrox-prometheus-tls"
 readonly PROMETHEUS_CN="stackrox-monitoring-prometheus.${RHACS_NAMESPACE}.svc"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-readonly MONITORING_MANIFESTS_DIR="${PROJECT_ROOT}/monitoring/manifests"
+readonly MONITORING_DIR="${PROJECT_ROOT}/monitoring"
 
 # Trap errors
 trap 'error_handler $? $LINENO' ERR
@@ -200,7 +192,7 @@ generate_prometheus_certificate() {
     
     # Check if certificate already exists
     if oc get secret "${CERT_SECRET_NAME}" -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "Certificate secret '${CERT_SECRET_NAME}' already exists"
+        print_info "✓ Certificate secret '${CERT_SECRET_NAME}' already exists"
         return 0
     fi
     
@@ -305,7 +297,7 @@ EOF
     fi
 }
 
-# Configure RHACS settings (from script 11)
+# Configure RHACS settings
 configure_rhacs_settings() {
     print_step "Configuring RHACS API settings..."
     
@@ -475,245 +467,39 @@ configure_rhacs_settings() {
     return 0
 }
 
-# Install Cluster Observability Operator
-install_cluster_observability_operator() {
-    print_step "Installing Cluster Observability Operator..."
+# Apply monitoring manifests
+apply_monitoring_manifests() {
+    print_step "Applying monitoring manifests..."
     
-    # Check if already installed
-    if oc get namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-        # Check for operator pods (more reliable than CSV status)
-        local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
-        if [ "${pod_count}" -gt 0 ]; then
-            print_info "✓ Cluster Observability Operator already installed (${pod_count} pods running)"
-            return 0
-        fi
-        
-        # Also check CSV status as fallback
-        if oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-            local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
-            if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
-                if oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-                    local phase=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-                    if [ "${phase}" = "Succeeded" ]; then
-                        print_info "✓ Cluster Observability Operator already installed (CSV: ${csv})"
-                        return 0
-                    fi
-                fi
-            fi
-        fi
+    # Check if monitoring directory exists
+    if [ ! -d "${MONITORING_DIR}" ]; then
+        print_error "Monitoring directory not found: ${MONITORING_DIR}"
+        return 1
     fi
     
-    # Create namespace
-    print_info "Creating namespace ${OPERATOR_NAMESPACE}..."
-    if ! oc get namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-        oc create namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1
-        print_info "✓ Namespace created"
+    print_info "Monitoring directory: ${MONITORING_DIR}"
+    
+    # Apply all manifests recursively
+    print_info "Applying manifests with: oc apply -f ${MONITORING_DIR}/ --recursive"
+    
+    local output
+    output=$(oc apply -f "${MONITORING_DIR}/" --recursive 2>&1)
+    local exit_code=$?
+    
+    if [ ${exit_code} -eq 0 ]; then
+        print_info "✓ Monitoring manifests applied successfully"
+        # Show what was created/updated
+        echo "${output}" | while read -r line; do
+            if [ -n "${line}" ]; then
+                print_info "  ${line}"
+            fi
+        done
     else
-        print_info "✓ Namespace already exists"
+        print_error "Failed to apply monitoring manifests"
+        print_error "${output}"
+        return 1
     fi
     
-    # Create OperatorGroup
-    print_info "Creating OperatorGroup..."
-    cat <<EOF | oc apply -f - >/dev/null 2>&1
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: cluster-observability-og
-  namespace: ${OPERATOR_NAMESPACE}
-spec:
-  targetNamespaces: []
-EOF
-    print_info "✓ OperatorGroup created"
-    
-    # Create Subscription
-    print_info "Creating Subscription..."
-    cat <<EOF | oc apply -f - >/dev/null 2>&1
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: cluster-observability-operator
-  namespace: ${OPERATOR_NAMESPACE}
-spec:
-  channel: stable
-  installPlanApproval: Automatic
-  name: cluster-observability-operator
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-EOF
-    print_info "✓ Subscription created"
-    
-    # Wait for operator to be ready
-    print_info "Waiting for operator to be installed (this may take a few minutes)..."
-    local max_wait=300  # 5 minutes
-    local waited=0
-    while [ ${waited} -lt ${max_wait} ]; do
-        # Check for running operator pods (more reliable indicator)
-        local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
-        if [ "${pod_count}" -gt 0 ]; then
-            print_info "✓ Cluster Observability Operator installed successfully (${pod_count} pods running)"
-            
-            # Also try to get CSV for reference
-            local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
-            if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
-                print_info "  CSV: ${csv}"
-            fi
-            return 0
-        fi
-        
-        # Check CSV status as fallback
-        local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
-        if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
-            if oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-                local phase=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-                if [ "${phase}" = "Succeeded" ]; then
-                    print_info "✓ Cluster Observability Operator installed successfully (CSV: ${csv})"
-                    return 0
-                elif [ "${phase}" = "Failed" ]; then
-                    print_error "Operator installation failed (CSV phase: ${phase})"
-                    print_error "Check CSV details: oc describe csv ${csv} -n ${OPERATOR_NAMESPACE}"
-                    return 1
-                fi
-            fi
-        fi
-        
-        # Show progress every 30 seconds
-        if [ $((waited % 30)) -eq 0 ] && [ ${waited} -gt 0 ]; then
-            local sub_state=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.state}' 2>/dev/null || echo "unknown")
-            local total_pods=$(oc get pods -n "${OPERATOR_NAMESPACE}" 2>/dev/null | grep -c Running || echo "0")
-            print_info "  Still waiting... (${waited}s elapsed, subscription: ${sub_state}, running pods: ${total_pods})"
-            if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
-                print_info "  Current CSV: ${csv}"
-            fi
-        fi
-        
-        sleep 5
-        waited=$((waited + 5))
-    done
-    
-    # Check if pods are running even if timeout occurred
-    local pod_count=$(oc get pods -n "${OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=observability-operator 2>/dev/null | grep -c Running || echo "0")
-    if [ "${pod_count}" -gt 0 ]; then
-        print_warn "Timeout waiting for CSV, but operator pods are running (${pod_count} pods)"
-        print_info "Considering installation successful"
-        return 0
-    fi
-    
-    print_error "Timeout waiting for operator installation after ${max_wait} seconds"
-    print_error "Checking subscription status..."
-    oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o yaml 2>&1 || true
-    print_error "Checking pods..."
-    oc get pods -n "${OPERATOR_NAMESPACE}" 2>&1 || true
-    return 1
-}
-
-# Create monitoring manifests directory
-create_monitoring_manifests() {
-    print_step "Creating monitoring manifests..."
-    
-    mkdir -p "${MONITORING_MANIFESTS_DIR}"
-    
-    # Create MonitoringStack manifest
-    cat > "${MONITORING_MANIFESTS_DIR}/monitoring-stack.yaml" <<EOF
-apiVersion: monitoring.rhobs/v1alpha1
-kind: MonitoringStack
-metadata:
-  name: rhacs-monitoring-stack
-  namespace: ${RHACS_NAMESPACE}
-spec:
-  logLevel: info
-  retention: 7d
-  resourceSelector:
-    matchLabels:
-      app.kubernetes.io/part-of: rhacs-monitoring
-  resources:
-    requests:
-      cpu: 500m
-      memory: 2Gi
-    limits:
-      cpu: 1000m
-      memory: 4Gi
-  alertmanagerConfig:
-    disabled: false
-EOF
-    
-    # Create ScrapeConfig manifest
-    cat > "${MONITORING_MANIFESTS_DIR}/scrape-config.yaml" <<EOF
-apiVersion: monitoring.rhobs/v1alpha1
-kind: ScrapeConfig
-metadata:
-  name: rhacs-scrape-config
-  namespace: ${RHACS_NAMESPACE}
-  labels:
-    app.kubernetes.io/part-of: rhacs-monitoring
-spec:
-  staticConfigs:
-  - targets:
-    - central.${RHACS_NAMESPACE}.svc.cluster.local:443
-    labels:
-      job: rhacs-central
-  metricsPath: /metrics
-  scheme: https
-  tlsConfig:
-    insecureSkipVerify: true
-    cert:
-      secret:
-        name: ${CERT_SECRET_NAME}
-        key: tls.crt
-    keySecret:
-      name: ${CERT_SECRET_NAME}
-      key: tls.key
-EOF
-    
-    print_info "✓ Monitoring manifests created"
-}
-
-# Deploy monitoring stack
-deploy_monitoring_stack() {
-    print_step "Deploying monitoring stack..."
-    
-    # Create manifests if they don't exist
-    if [ ! -f "${MONITORING_MANIFESTS_DIR}/monitoring-stack.yaml" ]; then
-        create_monitoring_manifests
-    fi
-    
-    # Apply MonitoringStack
-    print_info "Applying MonitoringStack..."
-    oc apply -f "${MONITORING_MANIFESTS_DIR}/monitoring-stack.yaml" >/dev/null 2>&1
-    print_info "✓ MonitoringStack applied"
-    
-    sleep 5
-    
-    # Apply ScrapeConfig
-    print_info "Applying ScrapeConfig..."
-    oc apply -f "${MONITORING_MANIFESTS_DIR}/scrape-config.yaml" >/dev/null 2>&1
-    print_info "✓ ScrapeConfig applied"
-    
-    # Apply declarative configuration ConfigMap for RHACS permissions
-    if [ -f "${MONITORING_MANIFESTS_DIR}/declarative-configuration-configmap.yaml" ]; then
-        print_info "Applying RHACS declarative configuration..."
-        oc apply -f "${MONITORING_MANIFESTS_DIR}/declarative-configuration-configmap.yaml" >/dev/null 2>&1
-        print_info "✓ RHACS declarative configuration applied"
-        
-        # Add declarative configuration to Central CR if not already present
-        local current_dc=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].spec.central.declarativeConfiguration.configMaps}' 2>/dev/null || echo "")
-        if echo "${current_dc}" | grep -q "stackrox-prometheus-declarative-configuration"; then
-            print_info "✓ Declarative configuration already referenced in Central CR"
-        else
-            print_info "Adding declarative configuration to Central CR..."
-            if oc get central -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-                oc patch central -n "${RHACS_NAMESPACE}" --type=json -p '[{
-                  "op": "add",
-                  "path": "/spec/central/declarativeConfiguration",
-                  "value": {
-                    "configMaps": ["stackrox-prometheus-declarative-configuration"]
-                  }
-                }]' >/dev/null 2>&1 || print_warn "Could not patch Central CR (may require manual configuration)"
-                print_info "✓ Declarative configuration added to Central CR"
-            fi
-        fi
-    fi
-    
-    print_info "✓ Monitoring stack deployed successfully"
     return 0
 }
 
@@ -744,44 +530,43 @@ display_monitoring_info() {
         print_info "  URL: ${central_url}/metrics"
         print_info ""
     fi
-    # Check if monitoring stack is deployed
-    if oc get monitoringstack rhacs-monitoring-stack -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "Monitoring Stack:"
-        print_info "  Namespace: ${RHACS_NAMESPACE}"
-        print_info "  MonitoringStack: rhacs-monitoring-stack"
-        print_info "  ScrapeConfig: rhacs-scrape-config"
-        
-        # Check for declarative configuration
-        if oc get configmap stackrox-prometheus-declarative-configuration -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
-            print_info "  Declarative Config: stackrox-prometheus-declarative-configuration"
-        fi
-        print_info ""
+    
+    # Check what monitoring resources were deployed
+    print_info "Deployed Monitoring Resources:"
+    
+    # Check for declarative configuration
+    if oc get configmap stackrox-prometheus-declarative-configuration -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ ConfigMap: stackrox-prometheus-declarative-configuration"
     fi
     
-    # Check if operator is installed
-    if oc get namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
-        print_info "Cluster Observability Operator:"
-        print_info "  Namespace: ${OPERATOR_NAMESPACE}"
-        local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
-        if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
-            print_info "  Status: Installed (${csv})"
-        else
-            print_info "  Status: Installation in progress"
+    # Check for MonitoringStack
+    if oc get monitoringstack rhacs-monitoring-stack -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ MonitoringStack: rhacs-monitoring-stack"
+    fi
+    
+    # Check for ScrapeConfig
+    if oc get scrapeconfig rhacs-scrape-config -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "  ✓ ScrapeConfig: rhacs-scrape-config"
+    fi
+    
+    print_info ""
+    
+    # Check if Cluster Observability Operator is installed
+    if oc get namespace openshift-cluster-observability-operator >/dev/null 2>&1; then
+        local pod_count=$(oc get pods -n openshift-cluster-observability-operator 2>/dev/null | grep -c Running || echo "0")
+        if [ "${pod_count}" -gt 0 ]; then
+            print_info "Cluster Observability Operator:"
+            print_info "  Namespace: openshift-cluster-observability-operator"
+            print_info "  Status: Running (${pod_count} pods)"
+            print_info ""
         fi
-        print_info ""
-    else
-        print_info "Alternative Monitoring Options:"
-        print_info "  - Use OpenShift built-in monitoring"
-        print_info "  - Install Cluster Observability Operator manually"
-        print_info "  - Configure external Prometheus"
-        print_info ""
     fi
 }
 
 # Main function
 main() {
     print_info "=========================================="
-    print_info "RHACS Comprehensive Monitoring Setup"
+    print_info "RHACS Monitoring Setup"
     print_info "=========================================="
     print_info ""
     
@@ -803,7 +588,7 @@ main() {
     
     # Configure RHACS settings
     if ! configure_rhacs_settings; then
-        print_warn "RHACS configuration failed (non-fatal, continuing...)"
+        print_warn "RHACS configuration failed (continuing without it)"
     fi
     
     print_info ""
@@ -816,18 +601,10 @@ main() {
     
     print_info ""
     
-    # Install Cluster Observability Operator (optional)
-    if ! install_cluster_observability_operator; then
-        print_warn "Failed to install Cluster Observability Operator (continuing without it)"
-        print_warn "You can use OpenShift's built-in monitoring instead"
-        print_warn "Or install the operator manually later"
-    else
-        print_info ""
-        
-        # Deploy monitoring stack (only if operator installed successfully)
-        if ! deploy_monitoring_stack; then
-            print_warn "Failed to deploy monitoring stack (non-fatal)"
-        fi
+    # Apply all monitoring manifests
+    if ! apply_monitoring_manifests; then
+        print_error "Failed to apply monitoring manifests"
+        exit 1
     fi
     
     # Display monitoring information
