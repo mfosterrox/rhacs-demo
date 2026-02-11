@@ -353,16 +353,43 @@ configure_rhacs_settings() {
         return 0  # Non-fatal
     fi
     
-    # Merge our changes with current config using jq (preserve all existing fields)
+    # Merge comprehensive configuration (preserve all existing fields, update what we need)
     local config_payload=$(echo "${current_config}" | jq '
+      # Public config
       .config.publicConfig.telemetry.enabled = true |
+      
+      # Private config - Alert retention
+      .config.privateConfig.alertConfig.resolvedDeployRetentionDurationDays = 7 |
+      .config.privateConfig.alertConfig.deletedRuntimeRetentionDurationDays = 7 |
+      .config.privateConfig.alertConfig.allRuntimeRetentionDurationDays = 30 |
+      .config.privateConfig.alertConfig.attemptedDeployRetentionDurationDays = 7 |
+      .config.privateConfig.alertConfig.attemptedRuntimeRetentionDurationDays = 7 |
+      
+      # Image retention
+      .config.privateConfig.imageRetentionDurationDays = 7 |
+      .config.privateConfig.expiredVulnReqRetentionDurationDays = 90 |
+      
+      # Report retention
+      .config.privateConfig.reportRetentionConfig.historyRetentionDurationDays = 7 |
+      .config.privateConfig.reportRetentionConfig.downloadableReportRetentionDays = 7 |
+      .config.privateConfig.reportRetentionConfig.downloadableReportGlobalRetentionBytes = 524288000 |
+      
+      # Administration events
+      .config.privateConfig.administrationEventsConfig.retentionDurationDays = 4 |
+      
+      # Metrics - Image Vulnerabilities
       .config.privateConfig.metrics.imageVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.cve_severity = {
+        "labels": ["Cluster","CVE","IsPlatformWorkload","IsFixable","Severity"]
+      } |
       .config.privateConfig.metrics.imageVulnerabilities.descriptors.deployment_severity = {
         "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"]
       } |
       .config.privateConfig.metrics.imageVulnerabilities.descriptors.namespace_severity = {
-        "labels": ["Cluster","Namespace","IsFixable","Severity"]
+        "labels": ["Cluster","Namespace","IsPlatformWorkload","IsFixable","Severity"]
       } |
+      
+      # Metrics - Policy Violations
       .config.privateConfig.metrics.policyViolations.gatheringPeriodMinutes = 1 |
       .config.privateConfig.metrics.policyViolations.descriptors.deployment_severity = {
         "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"]
@@ -370,10 +397,35 @@ configure_rhacs_settings() {
       .config.privateConfig.metrics.policyViolations.descriptors.namespace_severity = {
         "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"]
       } |
+      
+      # Metrics - Node Vulnerabilities
       .config.privateConfig.metrics.nodeVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.component_severity = {
+        "labels": ["Cluster","Node","Component","IsFixable","Severity"]
+      } |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.cve_severity = {
+        "labels": ["Cluster","CVE","IsFixable","Severity"]
+      } |
       .config.privateConfig.metrics.nodeVulnerabilities.descriptors.node_severity = {
         "labels": ["Cluster","Node","IsFixable","Severity"]
-      }
+      } |
+      
+      # Platform component config (Red Hat layered products)
+      .config.platformComponentConfig.rules = [
+        {
+          "name": "red hat layered products",
+          "namespaceRule": {
+            "regex": "^aap$|^ack-system$|^aws-load-balancer-operator$|^cert-manager-operator$|^cert-utils-operator$|^costmanagement-metrics-operator$|^external-dns-operator$|^metallb-system$|^mtr$|^multicluster-engine$|^multicluster-global-hub$|^node-observability-operator$|^open-cluster-management$|^openshift-adp$|^openshift-apiserver-operator$|^openshift-authentication$|^openshift-authentication-operator$|^openshift-builds$|^openshift-cloud-controller-manager$|^openshift-cloud-controller-manager-operator$|^openshift-cloud-credential-operator$|^openshift-cloud-network-config-controller$|^openshift-cluster-csi-drivers$|^openshift-cluster-machine-approver$|^openshift-cluster-node-tuning-operator$|^openshift-cluster-observability-operator$|^openshift-cluster-samples-operator$|^openshift-cluster-storage-operator$|^openshift-cluster-version$|^openshift-cnv$|^openshift-compliance$|^openshift-config$|^openshift-config-managed$|^openshift-config-operator$|^openshift-console$|^openshift-console-operator$|^openshift-console-user-settings$|^openshift-controller-manager$|^openshift-controller-manager-operator$|^openshift-dbaas-operator$|^openshift-distributed-tracing$|^openshift-dns$|^openshift-dns-operator$|^openshift-dpu-network-operator$|^openshift-dr-system$|^openshift-etcd$|^openshift-etcd-operator$|^openshift-file-integrity$|^openshift-gitops-operator$|^openshift-host-network$|^openshift-image-registry$|^openshift-infra$|^openshift-ingress$|^openshift-ingress-canary$|^openshift-ingress-node-firewall$|^openshift-ingress-operator$|^openshift-insights$|^openshift-keda$|^openshift-kmm$|^openshift-kmm-hub$|^openshift-kni-infra$|^openshift-kube-apiserver$|^openshift-kube-apiserver-operator$|^openshift-kube-controller-manager$|^openshift-kube-controller-manager-operator$|^openshift-kube-scheduler$|^openshift-kube-scheduler-operator$|^openshift-kube-storage-version-migrator$|^openshift-kube-storage-version-migrator-operator$|^openshift-lifecycle-agent$|^openshift-local-storage$|^openshift-logging$|^openshift-machine-api$|^openshift-machine-config-operator$|^openshift-marketplace$|^openshift-migration$|^openshift-monitoring$|^openshift-mta$|^openshift-mtv$|^openshift-multus$|^openshift-netobserv-operator$|^openshift-network-diagnostics$|^openshift-network-node-identity$|^openshift-network-operator$|^openshift-nfd$|^openshift-nmstate$|^openshift-node$|^openshift-nutanix-infra$|^openshift-oauth-apiserver$|^openshift-openstack-infra$|^openshift-opentelemetry-operator$|^openshift-operator-lifecycle-manager$|^openshift-operators$|^openshift-operators-redhat$|^openshift-ovirt-infra$|^openshift-ovn-kubernetes$|^openshift-ptp$|^openshift-route-controller-manager$|^openshift-sandboxed-containers-operator$|^openshift-security-profiles$|^openshift-serverless$|^openshift-serverless-logic$|^openshift-service-ca$|^openshift-service-ca-operator$|^openshift-sriov-network-operator$|^openshift-storage$|^openshift-tempo-operator$|^openshift-update-service$|^openshift-user-workload-monitoring$|^openshift-vertical-pod-autoscaler$|^openshift-vsphere-infra$|^openshift-windows-machine-config-operator$|^openshift-workload-availability$|^redhat-ods-operator$|^rhacs-operator$|^rhdh-operator$|^service-telemetry$|^stackrox$|^submariner-operator$|^tssc-acs$|^openshift-devspaces$"
+          }
+        },
+        {
+          "name": "system rule",
+          "namespaceRule": {
+            "regex": "^openshift$|^openshift-apiserver$|^openshift-operators$|^kube-.*"
+          }
+        }
+      ] |
+      .config.platformComponentConfig.needsReevaluation = false
     ')
     
     # Update RHACS configuration
@@ -395,11 +447,13 @@ configure_rhacs_settings() {
     fi
     
     print_info "✓ RHACS configuration updated successfully"
-    print_info "  - Telemetry enabled"
-    print_info "  - Metrics collection configured (1-minute gathering)"
-    print_info "  - Image vulnerabilities: deployment_severity, namespace_severity"
+    print_info "  - Telemetry: Enabled"
+    print_info "  - Metrics gathering: 1 minute"
+    print_info "  - Image vulnerabilities: cve_severity, deployment_severity, namespace_severity"
     print_info "  - Policy violations: deployment_severity, namespace_severity"
-    print_info "  - Node vulnerabilities: node_severity"
+    print_info "  - Node vulnerabilities: component_severity, cve_severity, node_severity"
+    print_info "  - Retention policies: 7-day alerts, 30-day runtime, 90-day vuln requests"
+    print_info "  - Platform components: Red Hat layered products recognized"
     
     return 0
 }
@@ -629,9 +683,13 @@ display_monitoring_info() {
     print_info "=========================================="
     print_info ""
     print_info "RHACS Configuration:"
-    print_info "  - Telemetry enabled"
-    print_info "  - Custom metrics configured"
-    print_info "  - Gathering period: 1 minute"
+    print_info "  - Telemetry: Enabled"
+    print_info "  - Metrics: 1-minute gathering period"
+    print_info "  - Image vulnerabilities: 3 metrics (cve, deployment, namespace)"
+    print_info "  - Policy violations: 2 metrics (deployment, namespace)"
+    print_info "  - Node vulnerabilities: 3 metrics (component, cve, node)"
+    print_info "  - Retention: 7d alerts, 30d runtime, 90d vulnerabilities"
+    print_info "  - Platform components: Red Hat products recognized"
     print_info ""
     print_info "TLS Certificate:"
     print_info "  Secret: ${CERT_SECRET_NAME}"
