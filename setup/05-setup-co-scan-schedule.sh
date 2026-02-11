@@ -152,41 +152,54 @@ get_cluster_id() {
     return 0
 }
 
-# Function to wait for ProfileBundles to be ready
-wait_for_profilebundles() {
-    print_step "Checking Compliance Operator ProfileBundle status..."
+# Function to wait for Compliance Operator pods to be ready
+wait_for_compliance_pods() {
+    print_step "Checking Compliance Operator pod status..."
     
-    local required_bundles=("ocp4" "rhcos4")
-    local max_wait=300  # 5 minutes
+    # Required pods for compliance scanning
+    local required_pods=("compliance-operator" "ocp4-openshift-compliance-pp" "rhcos4-openshift-compliance-pp")
+    local max_wait=180  # 3 minutes
     local interval=10
     local elapsed=0
     
     while [ ${elapsed} -lt ${max_wait} ]; do
         local all_ready=true
+        local pod_status=""
         
-        for bundle in "${required_bundles[@]}"; do
-            local phase=$(oc get profilebundle "${bundle}" -n "${COMPLIANCE_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NOT_FOUND")
+        for pod_prefix in "${required_pods[@]}"; do
+            local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l "app=${pod_prefix}" --field-selector=status.phase=Running 2>/dev/null | grep -c "${pod_prefix}" || echo "0")
             
-            if [ "${phase}" != "READY" ] && [ "${phase}" != "Ready" ]; then
+            # Alternative check using pod name prefix if label doesn't work
+            if [ "${pod_count}" = "0" ]; then
+                pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running 2>/dev/null | grep -c "${pod_prefix}" || echo "0")
+            fi
+            
+            if [ "${pod_count}" -eq "0" ]; then
                 all_ready=false
-                break
+                pod_status="${pod_status}  ${pod_prefix}: Not running\n"
+            else
+                pod_status="${pod_status}  ${pod_prefix}: ✓ Running\n"
             fi
         done
         
         if [ "${all_ready}" = true ]; then
-            print_info "✓ All ProfileBundles are ready"
+            print_info "✓ All Compliance Operator pods are running"
+            echo -e "${pod_status}"
             return 0
         fi
         
         if [ $((elapsed % 30)) -eq 0 ]; then
-            print_info "Waiting for ProfileBundles to be ready... (${elapsed}s/${max_wait}s)"
+            print_info "Waiting for Compliance Operator pods to be ready... (${elapsed}s/${max_wait}s)"
+            if [ -n "${pod_status}" ]; then
+                echo -e "${pod_status}"
+            fi
         fi
         
         sleep ${interval}
         elapsed=$((elapsed + interval))
     done
     
-    print_warn "ProfileBundles did not become ready within ${max_wait}s"
+    print_warn "Not all Compliance Operator pods are ready within ${max_wait}s"
     print_warn "Attempting to create scan configuration anyway..."
     return 0
 }
@@ -395,8 +408,8 @@ main() {
     
     print_info ""
     
-    # Wait for ProfileBundles to be ready
-    wait_for_profilebundles || true
+    # Wait for Compliance Operator pods to be ready
+    wait_for_compliance_pods || true
     
     print_info ""
     
