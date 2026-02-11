@@ -16,7 +16,7 @@ readonly NC='\033[0m' # No Color
 # Configuration
 readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 readonly CERT_SECRET_NAME="stackrox-prometheus-tls"
-readonly PROMETHEUS_CN="stackrox-monitoring-prometheus.${RHACS_NAMESPACE}.svc"
+readonly PROMETHEUS_CN="sample-stackrox-monitoring-stack-prometheus.stackrox.svc"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 readonly MONITORING_DIR="${PROJECT_ROOT}/monitoring"
