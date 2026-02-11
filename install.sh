@@ -260,24 +260,29 @@ main() {
             password=$(oc get secret stackrox-central-services -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
         fi
         
-        # Option 4: Try to get password from Central route using roxctl
-        if [ -z "${password}" ] && [ -n "${ROX_CENTRAL_URL:-}" ] && command -v roxctl &>/dev/null; then
-            print_info "Attempting to retrieve password using roxctl..."
-            # This might not work without auth, but worth trying
+        # Option 4: Try to extract from Central deployment logs (operator installations)
+        if [ -z "${password}" ]; then
+            print_info "Checking Central deployment logs for initial password..."
+            password=$(oc logs deployment/central -n "${ns}" --since=24h 2>/dev/null | grep -oP '(?<=password:\s).*' | head -1 || true)
+            
+            # Alternative pattern for operator logs
+            if [ -z "${password}" ]; then
+                password=$(oc logs deployment/central -n "${ns}" --since=24h 2>/dev/null | grep -i "admin.*password" | grep -oP '[A-Za-z0-9@#$%^&*()_+\-=\[\]{};:,.<>?]{16,}' | head -1 || true)
+            fi
         fi
         
         if [ -n "${password}" ]; then
             print_info "Admin Password: ${password}"
         else
-            print_warn "Admin password not stored in plaintext secrets"
+            print_warn "Admin password not found in secrets or logs"
             print_info ""
-            print_info "RHACS may be using auto-generated credentials or external authentication."
+            print_info "For operator-managed RHACS installations, the password is typically only"
+            print_info "available in the Central deployment logs during initial setup."
             print_info ""
-            print_info "To find the admin password, try:"
-            print_info "  1. Check if password was set during installation in ~/.bashrc"
-            print_info "  2. Navigate to the Central URL and follow initial setup wizard"
-            print_info "  3. For operator installations, check the operator logs:"
-            print_info "     oc logs -n ${ns} deployment/central | grep -i password"
+            print_info "To retrieve or reset the admin password:"
+            print_info "  1. Check Central logs: oc logs -n ${ns} deployment/central --tail=1000 | grep -i password"
+            print_info "  2. Check if stored in ~/.bashrc: grep ROX_PASSWORD ~/.bashrc"
+            print_info "  3. Reset via Central UI at: ${ROX_CENTRAL_URL:-[Central URL]}"
             print_info ""
         fi
     fi
