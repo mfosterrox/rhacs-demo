@@ -64,6 +64,12 @@ is_compliance_operator_installed() {
         return 1
     fi
     
+    # Additional check: verify operator pods are running
+    local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running 2>/dev/null | grep -c compliance-operator || echo "0")
+    if [ "${pod_count}" = "0" ]; then
+        return 1
+    fi
+    
     return 0
 }
 
