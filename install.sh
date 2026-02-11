@@ -183,6 +183,40 @@ generate_rhacs_api_token() {
     return 0
 }
 
+# Save password to ~/.bashrc
+save_password_to_bashrc() {
+    local password="${1}"
+    
+    if [ -z "${password}" ]; then
+        return 1
+    fi
+    
+    touch ~/.bashrc
+    
+    # Check if password already exists in ~/.bashrc
+    local existing_password
+    existing_password=$(grep -E "^export ROX_PASSWORD=" ~/.bashrc 2>/dev/null | head -1 | sed 's/.*="\(.*\)".*/\1/' || echo "")
+    
+    if [ "${existing_password}" = "${password}" ]; then
+        print_info "✓ Password already saved in ~/.bashrc (unchanged)"
+        return 0
+    fi
+    
+    # Remove any existing ROX_PASSWORD entries
+    sed -i.bak '/^export ROX_PASSWORD=/d' ~/.bashrc 2>/dev/null || true
+    
+    # Add new password
+    echo "export ROX_PASSWORD=\"${password}\"" >> ~/.bashrc
+    
+    if [ -n "${existing_password}" ] && [ "${existing_password}" != "${password}" ]; then
+        print_info "✓ Password updated in ~/.bashrc"
+    else
+        print_info "✓ Password saved to ~/.bashrc"
+    fi
+    
+    return 0
+}
+
 # Main installation function
 main() {
     # Accept password as command-line argument
@@ -191,6 +225,8 @@ main() {
     if [ -n "${provided_password}" ]; then
         export ROX_PASSWORD="${provided_password}"
         print_info "Using password provided via command-line argument"
+        # Save password to ~/.bashrc for future runs
+        save_password_to_bashrc "${provided_password}"
     fi
     
     print_info "Starting RHACS Demo Environment Setup"
