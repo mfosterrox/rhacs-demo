@@ -111,17 +111,22 @@ verify_rhacs_installation() {
     else
         print_info "✓ Found ${secured_clusters} SecuredCluster resource(s)"
         
-        # Verify each SecuredCluster is healthy
+        # Verify each SecuredCluster by checking its pods
         while IFS= read -r sc; do
             if [ -n "${sc}" ]; then
                 local sc_namespace=$(echo "${sc}" | awk '{print $1}')
                 local sc_name=$(echo "${sc}" | awk '{print $2}')
-                local sc_status=$(oc get securedcluster "${sc_name}" -n "${sc_namespace}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
                 
-                if [ "${sc_status}" = "True" ]; then
-                    print_info "  ✓ SecuredCluster '${sc_name}' in namespace '${sc_namespace}' is ready"
+                # Check if sensor, admission-control, and collector pods are running
+                local sensor_ready=$(oc get deployment sensor -n "${sc_namespace}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "False")
+                local admission_ready=$(oc get deployment admission-control -n "${sc_namespace}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "False")
+                local collector_count=$(oc get daemonset collector -n "${sc_namespace}" -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
+                local collector_desired=$(oc get daemonset collector -n "${sc_namespace}" -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "0")
+                
+                if [ "${sensor_ready}" = "True" ] && [ "${admission_ready}" = "True" ] && [ "${collector_count}" -eq "${collector_desired}" ] && [ "${collector_count}" -gt 0 ]; then
+                    print_info "  ✓ SecuredCluster '${sc_name}' in namespace '${sc_namespace}' is ready (sensor, admission-control, and ${collector_count}/${collector_desired} collectors running)"
                 else
-                    print_warn "  ⚠ SecuredCluster '${sc_name}' in namespace '${sc_namespace}' is not ready (status: ${sc_status})"
+                    print_warn "  ⚠ SecuredCluster '${sc_name}' in namespace '${sc_namespace}' components: sensor=${sensor_ready}, admission-control=${admission_ready}, collectors=${collector_count}/${collector_desired}"
                 fi
             fi
         done < <(oc get securedcluster -A --no-headers 2>/dev/null || true)
