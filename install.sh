@@ -212,6 +212,34 @@ main() {
     print_info "======================================"
     print_info "RHACS Demo Environment Setup Complete!"
     print_info "======================================"
+    print_info ""
+    
+    # Display important connection information
+    print_info "RHACS Central Access Information:"
+    print_info "=================================="
+    
+    if [ -n "${ROX_CENTRAL_URL:-}" ]; then
+        print_info "Central URL: ${ROX_CENTRAL_URL}"
+    fi
+    
+    if [ -n "${ROX_PASSWORD:-}" ]; then
+        print_info "Admin Password: ${ROX_PASSWORD}"
+    else
+        # Try to fetch it if not already loaded
+        local password
+        password=$(oc get secret central-htpasswd -n "${RHACS_NAMESPACE:-stackrox}" -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null || true)
+        if [ -n "${password}" ]; then
+            print_info "Admin Password: ${password}"
+        fi
+    fi
+    
+    if [ -n "${RHACS_VERSION:-}" ]; then
+        print_info "RHACS Version: ${RHACS_VERSION}"
+    fi
+    
+    print_info ""
+    print_info "Username: admin"
+    print_info ""
 }
 
 # Run main function
