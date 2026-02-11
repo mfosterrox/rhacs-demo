@@ -1,26 +1,37 @@
-# RHACS Monitoring Configuration
+# RHACS Comprehensive Monitoring Setup
 
-This directory contains configuration files and manifests for setting up monitoring integration with Red Hat Advanced Cluster Security (RHACS).
+This directory contains configuration files and manifests for a complete RHACS monitoring solution with the Cluster Observability Operator and Prometheus.
 
 ## Overview
 
-RHACS Central exposes Prometheus metrics on the `/metrics` endpoint (port 443/https). Access to these metrics requires authentication and proper authorization. This configuration sets up certificate-based authentication for Prometheus to securely access RHACS metrics.
+This monitoring setup provides:
+- **RHACS API Configuration**: Enables telemetry and custom metrics collection
+- **Certificate-based Authentication**: TLS certificates for secure Prometheus access
+- **Cluster Observability Operator**: Production-grade monitoring infrastructure
+- **Custom Metrics**: Image vulnerabilities, policy violations, node vulnerabilities
+- **Auto-renewal**: Automatic certificate rotation with cert-manager (when available)
+
+RHACS Central exposes Prometheus metrics on the `/metrics` endpoint (port 443/https). All access is authenticated and uses TLS encryption.
 
 ## Components
 
-### Manifests
+### Auto-Generated Manifests
 
-- **declarative-configuration-configmap.yaml**: Defines the RHACS Permission Set and Role for Prometheus server access. This grants read-only access to the metrics endpoint.
+The script automatically generates and deploys:
+
+- **monitoring-stack.yaml**: MonitoringStack resource for Cluster Observability Operator
+- **scrape-config.yaml**: ScrapeConfig for RHACS Central metrics endpoint with TLS authentication
 
 ### Setup Script
 
-The `setup/06-setup-monitoring.sh` script automates the following:
+The `setup/06-setup-monitoring.sh` script provides a complete monitoring solution:
 
-1. **Certificate Generation**: Creates a TLS certificate and private key for Prometheus authentication
-2. **Secret Creation**: Stores the certificate in a Kubernetes secret
-3. **Auth Provider Configuration**: Configures RHACS User Certificate authentication provider
-4. **Declarative Configuration**: Applies the Prometheus permissions and role via ConfigMap
-5. **Custom Metrics Configuration**: Enables custom metrics for image vulnerabilities and policy violations
+1. **RHACS Configuration**: Configures telemetry, metrics collection, and retention policies via API
+2. **Certificate Generation**: Creates TLS certificates (cert-manager or openssl fallback)
+3. **Operator Installation**: Installs and configures Cluster Observability Operator
+4. **Monitoring Stack**: Deploys MonitoringStack with Prometheus and custom scrape configs
+5. **Custom Metrics**: Enables comprehensive metrics for vulnerabilities and policy violations
+6. **Idempotent**: Safe to run multiple times, skips already-configured components
 
 ## RHACS Metrics
 
