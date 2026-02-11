@@ -215,6 +215,8 @@ main() {
     print_info "=========================================="
     print_info ""
     
+    local operator_installed=false
+    
     # Check if already installed
     print_step "Checking Compliance Operator installation..."
     if is_compliance_operator_installed; then
@@ -223,7 +225,7 @@ main() {
         if [ -n "${version}" ]; then
             print_info "  Version: ${version}"
         fi
-        print_info "Skipping installation"
+        print_info "Skipping installation and sensor restart"
     else
         print_info "Compliance Operator not found or not ready"
         
@@ -234,14 +236,17 @@ main() {
         fi
         
         print_info "✓ Compliance Operator installed successfully"
+        operator_installed=true
     fi
     
     print_info ""
     
-    # Restart RHACS sensor if it exists
-    restart_rhacs_sensor || true
+    # Only restart RHACS sensor if we just installed the operator
+    if [ "${operator_installed}" = true ]; then
+        restart_rhacs_sensor || true
+        print_info ""
+    fi
     
-    print_info ""
     print_info "=========================================="
     print_info "Compliance Operator Setup Complete"
     print_info "=========================================="
