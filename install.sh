@@ -195,6 +195,7 @@ main() {
     local script_num=1
     local script_pattern=""
     
+    
     # Find and run scripts in numerical order (01-*.sh, 02-*.sh, etc.)
     for script in "${SETUP_DIR}"/[0-9][0-9]-*.sh; do
         if [ -f "${script}" ]; then
