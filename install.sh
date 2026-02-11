@@ -84,23 +84,11 @@ add_bashrc_vars_from_cluster() {
         echo "export RHACS_ROUTE_NAME=\"${route}\"" >> ~/.bashrc
         print_info "Added RHACS_ROUTE_NAME to ~/.bashrc"
     fi
-
-    if ! grep -qE "^(export[[:space:]]+)?RHACS_VERSION=" ~/.bashrc 2>/dev/null; then
-        local version
-        version=$(oc get subscription -n rhacs-operator -o jsonpath='{.items[?(@.spec.name=="rhacs-operator")].status.currentCSV}' 2>/dev/null | grep -oP 'rhacs-operator\.v\K[0-9.]+' || true)
-        if [ -n "${version}" ]; then
-            echo "export RHACS_VERSION=\"${version}\"" >> ~/.bashrc
-            print_info "Added RHACS_VERSION to ~/.bashrc"
-        else
-            echo 'export RHACS_VERSION="4.9.2"' >> ~/.bashrc
-            print_info "Added RHACS_VERSION to ~/.bashrc (default)"
-        fi
-    fi
 }
 
 # Function to export variables from ~/.bashrc without sourcing (avoids exit from /etc/bashrc etc)
 export_bashrc_vars() {
-    local vars=(ROX_CENTRAL_URL ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME RHACS_VERSION KUBECONFIG GUID CLOUDUSER)
+    local vars=(ROX_CENTRAL_URL ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME KUBECONFIG GUID CLOUDUSER)
     [ ! -f ~/.bashrc ] && return 0
     
     for var in "${vars[@]}"; do
@@ -158,7 +146,8 @@ main() {
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
     if ! check_variable "RHACS_VERSION" "Desired RHACS version (e.g., 4.9.2)"; then
-        print_warn "RHACS_VERSION not set - will use latest stable"
+        print_warn "RHACS_VERSION not set - will use default: 4.9.2"
+        export RHACS_VERSION="4.9.2"
     fi
     
     echo ""  # Ensure output is flushed
