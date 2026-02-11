@@ -43,16 +43,19 @@ check_variable_in_bashrc() {
     fi
 }
 
-# Function to source ~/.bashrc to get current variables
-source_bashrc() {
-    if [ -f ~/.bashrc ]; then
-        # Source bashrc in a way that doesn't exit on errors
-        set +e
-        source ~/.bashrc 2>/dev/null || true
-        set -euo pipefail
-    else
-        print_warn "~/.bashrc not found"
-    fi
+# Function to export variables from ~/.bashrc without sourcing (avoids exit from /etc/bashrc etc)
+export_bashrc_vars() {
+    local vars=(ROX_CENTRAL_URL ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME RHACS_VERSION KUBECONFIG GUID CLOUDUSER)
+    [ ! -f ~/.bashrc ] && return 0
+    
+    for var in "${vars[@]}"; do
+        local line
+        line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1)
+        if [ -n "$line" ]; then
+            [[ "$line" =~ ^export[[:space:]]+ ]] || line="export $line"
+            eval "$line" 2>/dev/null || true
+        fi
+    done
 }
 
 # Main installation function
@@ -61,11 +64,9 @@ main() {
     print_info "======================================"
     echo "" >&2  # Flush stderr
     
-    # Source bashrc to get current environment
-    print_info "Sourcing ~/.bashrc..."
-    source_bashrc || {
-        print_warn "Warning: Failed to source ~/.bashrc, continuing anyway..."
-    }
+    # Load variables from ~/.bashrc (parse instead of source to avoid exit from /etc/bashrc)
+    print_info "Loading variables from ~/.bashrc..."
+    export_bashrc_vars || true
     
     # Required variables and credentials
     print_info "Checking for required variables and credentials in ~/.bashrc..."
@@ -119,8 +120,8 @@ main() {
     fi
     print_info "✓ Setup directory found"
     
-    # Source bashrc again to ensure we have the latest variables
-    source_bashrc
+    # Ensure we have the latest variables from ~/.bashrc
+    export_bashrc_vars || true
     
     # Verify we can connect to the cluster (optional, but recommended for verification scripts)
     print_info "Verifying cluster connectivity..."
