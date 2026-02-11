@@ -65,23 +65,13 @@ is_compliance_operator_installed() {
     fi
     
     # Additional check: verify operator pods are running
-    # Try multiple methods to find the pod
-    local pod_count=0
-    
-    # Method 1: Check with label
-    pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-    
-    # Method 2: If label doesn't work, check by pod name prefix
-    if [ "${pod_count}" = "0" ] || [ -z "${pod_count}" ]; then
-        pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | grep "^compliance-operator-" | wc -l | tr -d ' ' || echo "0")
-    fi
-    
-    # Ensure we have a valid integer
-    if [ -z "${pod_count}" ] || [ "${pod_count}" = "" ]; then
-        pod_count="0"
-    fi
-    
-    if [ "${pod_count}" -eq 0 ]; then
+    # Check if compliance-operator deployment exists and is available
+    if check_resource_exists "deployment" "compliance-operator" "${COMPLIANCE_NAMESPACE}"; then
+        local deployment_ready=$(oc get deployment compliance-operator -n "${COMPLIANCE_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "False")
+        if [ "${deployment_ready}" != "True" ]; then
+            return 1
+        fi
+    else
         return 1
     fi
     
@@ -247,11 +237,13 @@ main() {
             print_info "  Version: ${version}"
         fi
         
-        # Show that we're explicitly NOT restarting sensor
-        local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | grep "^compliance-operator-" | wc -l | tr -d ' ' || echo "0")
-        print_info "  Operator pods running: ${pod_count}"
+        # Show deployment status
+        local deployment_status=$(oc get deployment compliance-operator -n "${COMPLIANCE_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
+        print_info "  Deployment status: Available=${deployment_status}"
         print_info ""
-        print_info "Skipping installation and sensor restart (operator already installed)"
+        print_info "✓ Skipping installation and sensor restart (operator already installed)"
+        
+        # Explicitly set to false to ensure sensor is NOT restarted
         operator_installed=false
     else
         print_info "Compliance Operator not found or not ready, installing..."
