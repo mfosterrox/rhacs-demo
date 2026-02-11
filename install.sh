@@ -63,29 +63,21 @@ main() {
     
     local missing_vars=0
     
-    # Check for OpenShift/Kubernetes credentials
-    if ! check_variable_in_bashrc "KUBECONFIG" "Path to kubeconfig file for OpenShift cluster access"; then
+    # Check for RHACS API/CLI credentials (needed for roxctl and API calls)
+    if ! check_variable_in_bashrc "ROX_CENTRAL_URL" "RHACS Central URL for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
-    if ! check_variable_in_bashrc "OC_CLUSTER_URL" "OpenShift cluster URL (e.g., https://api.example.com:6443)"; then
-        missing_vars=$((missing_vars + 1))
-    fi
-    if ! check_variable_in_bashrc "OC_CLUSTER_USER" "OpenShift cluster admin username"; then
-        missing_vars=$((missing_vars + 1))
-    fi
-    if ! check_variable_in_bashrc "OC_CLUSTER_PASSWORD" "OpenShift cluster admin password"; then
-        missing_vars=$((missing_vars + 1))
-    fi
-    
-    # Check for RHACS specific variables
-    if ! check_variable_in_bashrc "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)"; then
-        missing_vars=$((missing_vars + 1))
-    fi
-    if ! check_variable_in_bashrc "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
+    if ! check_variable_in_bashrc "ROX_PASSWORD" "RHACS Central password for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
     
     # Optional but recommended variables
+    if ! check_variable_in_bashrc "RHACS_NAMESPACE" "Namespace where RHACS is installed (default: stackrox)"; then
+        print_warn "RHACS_NAMESPACE not set - will use default: stackrox"
+    fi
+    if ! check_variable_in_bashrc "RHACS_ROUTE_NAME" "Name of the RHACS route (default: central)"; then
+        print_warn "RHACS_ROUTE_NAME not set - will use default: central"
+    fi
     if ! check_variable_in_bashrc "RHACS_VERSION" "Desired RHACS version (e.g., 4.5.0)"; then
         print_warn "RHACS_VERSION not set - will use latest stable"
     fi
@@ -112,13 +104,14 @@ main() {
     # Source bashrc again to ensure we have the latest variables
     source_bashrc
     
-    # Verify we can connect to the cluster
+    # Verify we can connect to the cluster (optional, but recommended for verification scripts)
     print_info "Verifying cluster connectivity..."
     if ! oc whoami &>/dev/null; then
-        print_error "Cannot connect to OpenShift cluster. Please check your KUBECONFIG and credentials."
-        exit 1
+        print_warn "Cannot connect to OpenShift cluster. Some verification steps may fail."
+        print_warn "Please ensure KUBECONFIG is set if you need cluster access."
+    else
+        print_info "Successfully connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     fi
-    print_info "Successfully connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     print_info ""
     
     # Run setup scripts in order
