@@ -2,9 +2,9 @@
 
 = {lab_name}
 
-Run the following to ensure your ACS environment is up to date.
+== Setup Instructions (5 minutes)
 
-== Setup Instructions
+To ensure your RHACS environment is up to date, and has all of the necessary components, run the following command in the *Bastion* tab.
 
 *Procedure*
 
@@ -17,11 +17,7 @@ Run the following to ensure your ACS environment is up to date.
 if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; then cd rhacs-demo && git pull && ./install.sh; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo && ./install.sh - {acs_portal_password}; fi
 ----
 
-. Verify the deployment
-+
-[source,sh,role=execute]
-----
-----
+. Verify the deployment completed successfully
 +
 .**OUTPUT**
 [source,sh]
@@ -30,15 +26,11 @@ if [ -f install.sh ]; then git pull && ./install.sh; elif [ -d rhacs-demo ]; the
 ----
 +
 
-== OpenShift Console Access
+== Access Your Consoles
 
-The Red Hat Advanced Cluster Management for Kubernetes (RHACM) Console is now integrated with OpenShift Console. To access it, select *Fleet Management* from the dropdown menu on the left once you log in.
+=== OpenShift Console
 
-Switch to the *OpenShift Console* tab in the right panel. In case you want to open it in another window it is here: {openshift_cluster_console_url}[window=blank]
-
-NOTE: ctrl + click on the URL to open URLs in a new tab.
-
-Administrator login credentials:
+Access the OpenShift Console from the *OpenShift Console* tab in the right panel, or open it directly: {openshift_cluster_console_url}[window=blank]
 
 [cols="1,1"]
 |===
@@ -46,14 +38,12 @@ Administrator login credentials:
 | *Password:* | {openshift_cluster_admin_password}
 |===
 
-== RHACS Console Access
+=== RHACS Console
 
-Your RHACS Console is also available in the right panel. In case you want to open it in another window it is here: {acs_route}[window=blank]
-
-Administrator login credentials:
+Access the RHACS Console from the *RHACS Console* tab in the right panel, or open it directly: {acs_route}[window=blank]
 
 [cols="1,1"]
 |===
-| *RHACS Console Username:* | {acs_portal_username}
-| *RHACS Console Password:* | {acs_portal_password}
+| *Username:* | {acs_portal_username}
+| *Password:* | {acs_portal_password}
 |===
