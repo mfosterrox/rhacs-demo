@@ -51,8 +51,20 @@ get_operator_version() {
 
 # Function to get installed RHACS version
 get_installed_version() {
-    oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Release")].message}' 2>/dev/null | grep -oP 'version \K[0-9.]+' || \
-    oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | grep -oP ':\K[0-9.]+' || echo ""
+    # Try to get version from central resource status
+    local version=$(oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Release")].message}' 2>/dev/null | grep -oP 'version \K[0-9.]+')
+    
+    # If not found, try from deployment image tag (looking for semantic version pattern)
+    if [ -z "${version}" ]; then
+        version=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+    
+    echo "${version}"
+}
+
+# Function to get current image tag from deployment
+get_current_image_tag() {
+    oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | grep -oP ':[^:]+$' | sed 's/^://'
 }
 
 # Function to get latest available RHACS version from operator
@@ -178,8 +190,13 @@ check_and_update_version() {
     
     # Get current installed version
     local installed_version=$(get_installed_version)
+    local current_image_tag=$(get_current_image_tag)
+    
     if [ -z "${installed_version}" ]; then
-        print_warn "Could not determine installed RHACS version"
+        print_warn "Could not determine installed RHACS version from semantic version pattern"
+        if [ -n "${current_image_tag}" ]; then
+            print_info "Current image tag: ${current_image_tag}"
+        fi
         installed_version="unknown"
     else
         print_info "Installed RHACS version: ${installed_version}"
@@ -198,12 +215,22 @@ check_and_update_version() {
     if [ -n "${RHACS_VERSION:-}" ]; then
         print_info "Target version specified: ${RHACS_VERSION}"
         
-        if [ "${installed_version}" != "${RHACS_VERSION}" ]; then
-            print_info "Updating RHACS to version ${RHACS_VERSION}..."
-            update_rhacs_version "${RHACS_VERSION}"
-        else
-            print_info "✓ RHACS is already at target version ${RHACS_VERSION}"
+        # Check if the current image tag already matches the target version
+        if [ "${current_image_tag}" = "${RHACS_VERSION}" ]; then
+            print_info "✓ RHACS deployment is already using image tag ${RHACS_VERSION}"
+            return 0
         fi
+        
+        # Check if installed version matches (for operator-managed installations)
+        if [ "${installed_version}" = "${RHACS_VERSION}" ] && [ "${installed_version}" != "unknown" ]; then
+            print_info "✓ RHACS is already at target version ${RHACS_VERSION}"
+            return 0
+        fi
+        
+        # Version doesn't match, proceed with update
+        print_info "Current version/tag does not match target. Proceeding with update..."
+        update_rhacs_version "${RHACS_VERSION}"
+        
     elif [ "${installed_version}" != "${latest_version}" ] && [ "${latest_version}" != "unknown" ] && [ "${installed_version}" != "unknown" ]; then
         print_info "Update available: ${installed_version} -> ${latest_version}"
         print_info "Updating RHACS to latest version..."
