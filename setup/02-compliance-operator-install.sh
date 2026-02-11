@@ -65,8 +65,14 @@ is_compliance_operator_installed() {
     fi
     
     # Additional check: verify operator pods are running
-    local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running 2>/dev/null | grep -c compliance-operator || echo "0")
-    if [ "${pod_count}" = "0" ]; then
+    local pod_count=$(oc get pods -n "${COMPLIANCE_NAMESPACE}" -l name=compliance-operator --field-selector=status.phase=Running --no-headers 2>/dev/null | grep compliance-operator | wc -l | tr -d ' ')
+    
+    # Ensure we have a valid integer
+    if [ -z "${pod_count}" ] || [ "${pod_count}" = "" ]; then
+        pod_count="0"
+    fi
+    
+    if [ "${pod_count}" -eq 0 ]; then
         return 1
     fi
     
