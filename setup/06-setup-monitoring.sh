@@ -347,38 +347,26 @@ configure_rhacs_settings() {
         return 0  # Non-fatal
     fi
     
-    # Merge our changes with current config using jq
+    # Merge our changes with current config using jq (preserve all existing fields)
     local config_payload=$(echo "${current_config}" | jq '
       .config.publicConfig.telemetry.enabled = true |
-      .config.privateConfig.metrics.imageVulnerabilities = {
-        "gatheringPeriodMinutes": 1,
-        "descriptors": {
-          "deployment_severity": {
-            "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"]
-          },
-          "namespace_severity": {
-            "labels": ["Cluster","Namespace","IsFixable","Severity"]
-          }
-        }
+      .config.privateConfig.metrics.imageVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.deployment_severity = {
+        "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"]
       } |
-      .config.privateConfig.metrics.policyViolations = {
-        "gatheringPeriodMinutes": 1,
-        "descriptors": {
-          "deployment_severity": {
-            "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"]
-          },
-          "namespace_severity": {
-            "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"]
-          }
-        }
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.namespace_severity = {
+        "labels": ["Cluster","Namespace","IsFixable","Severity"]
       } |
-      .config.privateConfig.metrics.nodeVulnerabilities = {
-        "gatheringPeriodMinutes": 1,
-        "descriptors": {
-          "node_severity": {
-            "labels": ["Cluster","Node","IsFixable","Severity"]
-          }
-        }
+      .config.privateConfig.metrics.policyViolations.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.policyViolations.descriptors.deployment_severity = {
+        "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"]
+      } |
+      .config.privateConfig.metrics.policyViolations.descriptors.namespace_severity = {
+        "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"]
+      } |
+      .config.privateConfig.metrics.nodeVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.node_severity = {
+        "labels": ["Cluster","Node","IsFixable","Severity"]
       }
     ')
     
@@ -471,7 +459,7 @@ EOF
     
     # Wait for operator to be ready
     print_info "Waiting for operator to be installed (this may take a few minutes)..."
-    local max_wait=120
+    local max_wait=300  # Increased to 5 minutes
     local waited=0
     while [ ${waited} -lt ${max_wait} ]; do
         local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
@@ -481,14 +469,30 @@ EOF
                 if [ "${phase}" = "Succeeded" ]; then
                     print_info "✓ Cluster Observability Operator installed successfully (CSV: ${csv})"
                     return 0
+                elif [ "${phase}" = "Failed" ]; then
+                    print_error "Operator installation failed (CSV phase: ${phase})"
+                    print_error "Check CSV details: oc describe csv ${csv} -n ${OPERATOR_NAMESPACE}"
+                    return 1
                 fi
             fi
         fi
+        
+        # Show progress every 30 seconds
+        if [ $((waited % 30)) -eq 0 ] && [ ${waited} -gt 0 ]; then
+            local sub_state=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.state}' 2>/dev/null || echo "unknown")
+            print_info "  Still waiting... (${waited}s elapsed, subscription state: ${sub_state})"
+            if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
+                print_info "  Current CSV: ${csv}"
+            fi
+        fi
+        
         sleep 5
         waited=$((waited + 5))
     done
     
-    print_error "Timeout waiting for operator installation"
+    print_error "Timeout waiting for operator installation after ${max_wait} seconds"
+    print_error "Checking subscription status..."
+    oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o yaml 2>&1 || true
     return 1
 }
 
