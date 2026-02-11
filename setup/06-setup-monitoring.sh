@@ -605,14 +605,33 @@ display_monitoring_info() {
         print_info "  URL: ${central_url}/metrics"
         print_info ""
     fi
-    print_info "Monitoring Stack:"
-    print_info "  Namespace: ${RHACS_NAMESPACE}"
-    print_info "  MonitoringStack: rhacs-monitoring-stack"
-    print_info "  ScrapeConfig: rhacs-scrape-config"
-    print_info ""
-    print_info "Cluster Observability Operator:"
-    print_info "  Namespace: ${OPERATOR_NAMESPACE}"
-    print_info ""
+    # Check if monitoring stack is deployed
+    if oc get monitoringstack rhacs-monitoring-stack -n "${RHACS_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "Monitoring Stack:"
+        print_info "  Namespace: ${RHACS_NAMESPACE}"
+        print_info "  MonitoringStack: rhacs-monitoring-stack"
+        print_info "  ScrapeConfig: rhacs-scrape-config"
+        print_info ""
+    fi
+    
+    # Check if operator is installed
+    if oc get namespace "${OPERATOR_NAMESPACE}" >/dev/null 2>&1; then
+        print_info "Cluster Observability Operator:"
+        print_info "  Namespace: ${OPERATOR_NAMESPACE}"
+        local csv=$(oc get subscription cluster-observability-operator -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
+        if [ -n "${csv}" ] && [ "${csv}" != "null" ]; then
+            print_info "  Status: Installed (${csv})"
+        else
+            print_info "  Status: Installation in progress"
+        fi
+        print_info ""
+    else
+        print_info "Alternative Monitoring Options:"
+        print_info "  - Use OpenShift built-in monitoring"
+        print_info "  - Install Cluster Observability Operator manually"
+        print_info "  - Configure external Prometheus"
+        print_info ""
+    fi
 }
 
 # Main function
@@ -653,18 +672,18 @@ main() {
     
     print_info ""
     
-    # Install Cluster Observability Operator
+    # Install Cluster Observability Operator (optional)
     if ! install_cluster_observability_operator; then
-        print_error "Failed to install Cluster Observability Operator"
-        exit 1
-    fi
-    
-    print_info ""
-    
-    # Deploy monitoring stack
-    if ! deploy_monitoring_stack; then
-        print_error "Failed to deploy monitoring stack"
-        exit 1
+        print_warn "Failed to install Cluster Observability Operator (continuing without it)"
+        print_warn "You can use OpenShift's built-in monitoring instead"
+        print_warn "Or install the operator manually later"
+    else
+        print_info ""
+        
+        # Deploy monitoring stack (only if operator installed successfully)
+        if ! deploy_monitoring_stack; then
+            print_warn "Failed to deploy monitoring stack (non-fatal)"
+        fi
     fi
     
     # Display monitoring information
