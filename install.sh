@@ -66,7 +66,21 @@ add_bashrc_vars_from_cluster() {
 
     if ! grep -qE "^(export[[:space:]]+)?ROX_PASSWORD=" ~/.bashrc 2>/dev/null; then
         local password
-        password=$(oc get secret central-htpasswd -n "${ns}" -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null) || true
+        # Try multiple common locations for the plaintext admin password
+        
+        # Option 1: central-htpasswd secret with 'password' field
+        password=$(oc get secret central-htpasswd -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        
+        # Option 2: admin-password secret
+        if [ -z "${password}" ]; then
+            password=$(oc get secret admin-password -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        fi
+        
+        # Option 3: stackrox-central-services secret
+        if [ -z "${password}" ]; then
+            password=$(oc get secret stackrox-central-services -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        fi
+        
         if [ -n "${password}" ]; then
             local escaped
             escaped=$(printf '%s' "${password}" | sed "s/'/'\\\\''/g")
@@ -197,7 +211,7 @@ main() {
     local script_num=1
     local script_pattern=""
     
-    
+
     # Find and run scripts in numerical order (01-*.sh, 02-*.sh, etc.)
     for script in "${SETUP_DIR}"/[0-9][0-9]-*.sh; do
         if [ -f "${script}" ]; then
@@ -228,11 +242,28 @@ main() {
     if [ -n "${ROX_PASSWORD:-}" ]; then
         print_info "Admin Password: ${ROX_PASSWORD}"
     else
-        # Try to fetch it if not already loaded
+        # Try to fetch it if not already loaded from multiple possible locations
         local password
-        password=$(oc get secret central-htpasswd -n "${RHACS_NAMESPACE:-stackrox}" -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null || true)
+        local ns="${RHACS_NAMESPACE:-stackrox}"
+        
+        # Option 1: central-htpasswd secret with 'password' field
+        password=$(oc get secret central-htpasswd -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        
+        # Option 2: admin-password secret
+        if [ -z "${password}" ]; then
+            password=$(oc get secret admin-password -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        fi
+        
+        # Option 3: stackrox-central-services secret
+        if [ -z "${password}" ]; then
+            password=$(oc get secret stackrox-central-services -n "${ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+        fi
+        
         if [ -n "${password}" ]; then
             print_info "Admin Password: ${password}"
+        else
+            print_warn "Could not retrieve admin password from cluster secrets"
+            print_warn "Please check your RHACS installation or set ROX_PASSWORD manually"
         fi
     fi
     
