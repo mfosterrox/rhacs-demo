@@ -1,5 +1,4 @@
-* xref:index.adoc[RHACS Demo Lab]
+* xref:index.adoc[RHACS Lab Setup]
 ** xref:index.adoc#labname[Lab Overview]
 ** xref:index.adoc#openshift-console-access[OpenShift Console Access]
 ** xref:index.adoc#rhacs-console-access[RHACS Console Access]
-** xref:index.adoc#whats-next[What's Next]
