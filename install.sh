@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Trap to show error location
+trap 'echo "Error at line $LINENO"' ERR
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,7 +49,9 @@ source_bashrc() {
         # Source bashrc in a way that doesn't exit on errors
         set +e
         source ~/.bashrc 2>/dev/null || true
-        set -e
+        set -euo pipefail
+    else
+        print_warn "~/.bashrc not found"
     fi
 }
 
@@ -54,19 +59,26 @@ source_bashrc() {
 main() {
     print_info "Starting RHACS Demo Environment Setup"
     print_info "======================================"
+    echo "" >&2  # Flush stderr
     
     # Source bashrc to get current environment
-    source_bashrc
+    print_info "Sourcing ~/.bashrc..."
+    source_bashrc || {
+        print_warn "Warning: Failed to source ~/.bashrc, continuing anyway..."
+    }
     
     # Required variables and credentials
     print_info "Checking for required variables and credentials in ~/.bashrc..."
+    echo ""  # Ensure output is flushed
     
     local missing_vars=0
     
     # Check for RHACS API/CLI credentials (needed for roxctl and API calls)
+    print_info "Checking ROX_CENTRAL_URL..."
     if ! check_variable_in_bashrc "ROX_CENTRAL_URL" "RHACS Central URL for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
+    print_info "Checking ROX_PASSWORD..."
     if ! check_variable_in_bashrc "ROX_PASSWORD" "RHACS Central password for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
@@ -82,10 +94,16 @@ main() {
         print_warn "RHACS_VERSION not set - will use latest stable"
     fi
     
+    echo ""  # Ensure output is flushed
+    
     if [ "${missing_vars}" -gt 0 ]; then
         print_error ""
         print_error "Missing ${missing_vars} required variable(s) in ~/.bashrc"
         print_error "Please add the missing variables to ~/.bashrc and run this script again"
+        print_error ""
+        print_error "Required variables:"
+        print_error "  - ROX_CENTRAL_URL"
+        print_error "  - ROX_PASSWORD"
         print_error ""
         exit 1
     fi
