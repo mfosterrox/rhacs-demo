@@ -189,10 +189,45 @@ update_rhacs_config() {
     local token=$1
     local api_base=$2
     
-    print_info "Updating RHACS configuration..."
+    print_info "Getting current configuration..."
     
-    # Comprehensive configuration including all settings
-    local config_payload=$(cat <<'EOF'
+    # Get current configuration first
+    local current_config=$(curl -k -s \
+        -H "Authorization: Bearer ${token}" \
+        "${api_base}/config" 2>&1)
+    
+    if [ -z "${current_config}" ]; then
+        print_error "Failed to retrieve current configuration"
+        return 1
+    fi
+    
+    print_info "Modifying configuration..."
+    
+    # Modify only the fields we need using jq
+    local config_payload=$(echo "${current_config}" | jq '
+      .config.publicConfig.telemetry.enabled = true |
+      .config.privateConfig.metrics.imageVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.cve_severity.labels = ["Cluster","CVE","IsPlatformWorkload","IsFixable","Severity"] |
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.deployment_severity.labels = ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"] |
+      .config.privateConfig.metrics.imageVulnerabilities.descriptors.namespace_severity.labels = ["Cluster","Namespace","IsPlatformWorkload","IsFixable","Severity"] |
+      .config.privateConfig.metrics.policyViolations.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.policyViolations.descriptors.deployment_severity.labels = ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"] |
+      .config.privateConfig.metrics.policyViolations.descriptors.namespace_severity.labels = ["Cluster","Namespace","IsPlatformComponent","Action","Severity"] |
+      .config.privateConfig.metrics.nodeVulnerabilities.gatheringPeriodMinutes = 1 |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.component_severity.labels = ["Cluster","Node","Component","IsFixable","Severity"] |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.cve_severity.labels = ["Cluster","CVE","IsFixable","Severity"] |
+      .config.privateConfig.metrics.nodeVulnerabilities.descriptors.node_severity.labels = ["Cluster","Node","IsFixable","Severity"]
+    ')
+    
+    if [ -z "${config_payload}" ] || [ "${config_payload}" = "null" ]; then
+        print_error "Failed to build configuration payload"
+        return 1
+    fi
+    
+    print_info "Applying configuration..."
+    
+    # OLD HARDCODED PAYLOAD - IGNORE
+    local _OLD=$(cat <<'EOF'
 {
   "config": {
     "publicConfig": {
@@ -278,7 +313,7 @@ update_rhacs_config() {
 EOF
 )
     
-    # Use temp file for multi-line JSON to avoid quoting issues
+    # Use temp file to send the modified JSON
     local temp_file=$(mktemp)
     echo "${config_payload}" > "${temp_file}"
     
