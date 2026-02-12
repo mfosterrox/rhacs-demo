@@ -82,49 +82,18 @@ check_prerequisites() {
 }
 
 #================================================================
-# Deploy DataVolume for RHEL base image
+# Check for existing VMs and clean up if needed
 #================================================================
-deploy_datavolume() {
-    print_step "Creating DataVolume for RHEL base image..."
+cleanup_existing_resources() {
+    print_step "Checking for existing resources..."
     
-    # Check if DataVolume already exists
+    # Check if old DataVolume exists and clean it up
     if oc get datavolume rhel9-roxagent-base -n "${NAMESPACE}" >/dev/null 2>&1; then
-        print_warn "DataVolume already exists: rhel9-roxagent-base"
-        read -p "Delete and recreate? (y/n): " answer
-        if [[ "${answer}" =~ ^[Yy] ]]; then
-            oc delete datavolume rhel9-roxagent-base -n "${NAMESPACE}"
-        else
-            print_info "Using existing DataVolume"
-            return 0
-        fi
+        print_warn "Found existing DataVolume, cleaning up..."
+        oc delete datavolume rhel9-roxagent-base -n "${NAMESPACE}" --wait=false
     fi
     
-    print_info "Creating DataVolume from: ${RHEL_IMAGE}"
-    
-    cat <<EOF | oc apply -f -
-apiVersion: cdi.kubevirt.io/v1beta1
-kind: DataVolume
-metadata:
-  name: rhel9-roxagent-base
-  namespace: ${NAMESPACE}
-spec:
-  source:
-    registry:
-      url: "docker://${RHEL_IMAGE}"
-      pullMethod: node
-  pvc:
-    accessModes:
-      - ReadWriteOnce
-    resources:
-      requests:
-        storage: ${VM_DISK_SIZE}
-    storageClassName: ${STORAGE_CLASS}
-EOF
-    
-    print_info "Waiting for DataVolume to be ready..."
-    oc wait --for=condition=Ready datavolume/rhel9-roxagent-base -n "${NAMESPACE}" --timeout=10m
-    
-    print_info "✓ DataVolume ready"
+    print_info "✓ Resource check complete"
 }
 
 #================================================================
@@ -154,8 +123,9 @@ deploy_vm() {
     print_info "  Name: ${VM_NAME}"
     print_info "  CPUs: ${VM_CPUS}"
     print_info "  Memory: ${VM_MEMORY}"
-    print_info "  Disk: ${VM_DISK_SIZE}"
+    print_info "  Image: ${RHEL_IMAGE}"
     print_info "  vsock: enabled"
+    print_info "  Storage: containerDisk (ephemeral)"
     
     cat <<EOF | oc apply -f -
 apiVersion: kubevirt.io/v1
@@ -185,7 +155,7 @@ spec:
           # CRITICAL: Enable vsock for RHACS communication
           autoattachVSOCK: true
           disks:
-            - name: rootdisk
+            - name: containerdisk
               disk:
                 bus: virtio
             - name: cloudinitdisk
@@ -203,9 +173,9 @@ spec:
         - name: default
           pod: {}
       volumes:
-        - name: rootdisk
-          dataVolume:
-            name: rhel9-roxagent-base
+        - name: containerdisk
+          containerDisk:
+            image: ${RHEL_IMAGE}
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:
@@ -337,10 +307,11 @@ main() {
     check_prerequisites || exit 1
     echo ""
     
-    # Deploy components
-    deploy_datavolume
+    # Clean up any existing resources
+    cleanup_existing_resources
     echo ""
     
+    # Deploy VM
     deploy_vm
     echo ""
     
