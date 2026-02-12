@@ -1,0 +1,96 @@
+#cloud-config
+# Cloud-init configuration for RHACS roxagent installation
+# Use this with RHACM or OpenShift Virtualization VM templates
+
+# Set hostname
+hostname: rhel-roxagent-vm
+
+# Configure users
+users:
+  - default
+  - name: rhacs
+    groups: sudo
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    lock_passwd: false
+
+# Package installation
+packages:
+  - curl
+  - wget
+  - systemd
+
+# Run commands on first boot
+runcmd:
+  # Download roxagent binary from Red Hat mirror
+  - mkdir -p /opt/roxagent
+  - curl -L -o /opt/roxagent/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.9.2/bin/linux/roxagent
+  - chmod +x /opt/roxagent/roxagent
+  
+  # Create systemd service for roxagent daemon
+  - |
+    cat > /etc/systemd/system/roxagent.service <<'EOF'
+    [Unit]
+    Description=RHACS Virtual Machine Vulnerability Agent
+    After=network-online.target
+    Wants=network-online.target
+    
+    [Service]
+    Type=simple
+    ExecStart=/opt/roxagent/roxagent --daemon --index-interval=5m --verbose
+    Restart=always
+    RestartSec=10
+    User=root
+    StandardOutput=journal
+    StandardError=journal
+    
+    # Environment variables for roxagent
+    Environment="ROX_VIRTUAL_MACHINES_VSOCK_PORT=818"
+    Environment="ROX_VIRTUAL_MACHINES_VSOCK_CONN_MAX_SIZE_KB=16384"
+    
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+  
+  # Enable and start roxagent service
+  - systemctl daemon-reload
+  - systemctl enable roxagent.service
+  - systemctl start roxagent.service
+  
+  # Verify service is running
+  - sleep 5
+  - systemctl status roxagent.service
+
+# Write files
+write_files:
+  - path: /etc/profile.d/roxagent.sh
+    permissions: '0644'
+    content: |
+      # RHACS roxagent environment variables
+      export ROX_VIRTUAL_MACHINES_VSOCK_PORT=818
+      export ROX_VIRTUAL_MACHINES_VSOCK_CONN_MAX_SIZE_KB=16384
+
+  - path: /usr/local/bin/roxagent-scan
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Manual scan trigger
+      /opt/roxagent/roxagent --verbose
+
+  - path: /etc/motd
+    permissions: '0644'
+    content: |
+      ================================================
+      RHACS Virtual Machine Vulnerability Management
+      ================================================
+      
+      This VM is configured for RHACS vulnerability scanning.
+      
+      roxagent service: systemctl status roxagent
+      Manual scan:      roxagent-scan
+      Logs:             journalctl -u roxagent -f
+      
+      ================================================
+
+# Final message
+final_message: "RHACS roxagent VM is ready! Service is running at port 818."

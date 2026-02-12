@@ -15,11 +15,9 @@ Before running these scripts, ensure you have:
 - OpenShift Virtualization operator installed
 - `oc` CLI configured and authenticated
 
-## Files
+## Scripts
 
-### Setup Scripts
-
-#### `install.sh`
+### `install.sh`
 
 Configures RHACS and OpenShift Virtualization for VM vulnerability scanning.
 
@@ -36,7 +34,7 @@ cd virt-scanning
 ./install.sh
 ```
 
-#### `01-check-env.sh`
+### `01-check-env.sh`
 
 Verifies all prerequisites for VM vulnerability scanning are met.
 
@@ -56,83 +54,6 @@ Verifies all prerequisites for VM vulnerability scanning are met.
 cd virt-scanning
 ./01-check-env.sh
 ```
-
-### VM Image Building
-
-#### `cloud-init-roxagent.yaml`
-
-**Recommended approach** - Cloud-init configuration for installing roxagent on any RHEL VM.
-
-- Downloads roxagent from Red Hat mirror on first boot
-- Creates systemd service for continuous scanning
-- No custom image building required
-- Perfect for RHACM deployments
-
-#### `vm-template-rhacm.yaml`
-
-Complete VM template ready for RHACM deployment with:
-- vsock support enabled
-- Cloud-init configuration embedded
-- Multiple storage backend options
-- Proper resource sizing
-
-**Usage:**
-```bash
-oc apply -f vm-template-rhacm.yaml
-```
-
-#### `build-custom-image.sh`
-
-Interactive script for building custom RHEL QCOW2 images with roxagent pre-installed.
-
-**What it does:**
-- Guides you through image customization options
-- Downloads roxagent binary
-- Uses `virt-customize` to inject roxagent into QCOW2
-- Creates systemd service
-- Produces uploadable image
-
-**Usage:**
-```bash
-./build-custom-image.sh
-```
-
-#### `IMAGE-BUILD-GUIDE.md`
-
-Comprehensive guide covering **4 different approaches** for building RHEL images with roxagent:
-
-1. **Cloud-init** (Recommended) - No image building, uses standard RHEL + cloud-init
-2. **Image Builder** (Production) - Official Red Hat tool for custom images
-3. **Manual QCOW2** (Advanced) - Direct image customization with libguestfs
-4. **Bootable Container** (Modern) - Cloud-native approach with bootc
-
-Includes deployment instructions for RHACM and troubleshooting guidance.
-
-## Quick Start
-
-### For RHACM Deployments (Recommended)
-
-The easiest way to deploy VMs with roxagent:
-
-1. **Configure RHACS platform:**
-   ```bash
-   ./install.sh
-   ```
-
-2. **Deploy VM with cloud-init:**
-   ```bash
-   oc apply -f vm-template-rhacm.yaml
-   ```
-
-That's it! The VM will auto-configure roxagent on first boot.
-
-### For Custom Images
-
-If you need pre-built images with roxagent:
-
-1. See `IMAGE-BUILD-GUIDE.md` for detailed options
-2. Quick build: `./build-custom-image.sh`
-3. Upload to OpenShift and deploy
 
 ## VM Configuration
 
@@ -179,18 +100,6 @@ For vulnerability scanning to work, VMs must:
 2. **Have valid RHEL subscription** - Required for vulnerability data
 3. **Have network access** - To download repository-to-CPE mappings
 4. **Have vsock enabled** - `spec.domain.devices.autoattachVSOCK: true`
-5. **Run roxagent binary** - Either via cloud-init or pre-installed in image
-
-### roxagent Installation Options
-
-| Method | Best For | Setup Time | Update Ease |
-|--------|----------|------------|-------------|
-| Cloud-init | RHACM, testing | 5 min | Very easy |
-| Image Builder | Production | 30 min | Moderate |
-| Manual QCOW2 | Custom needs | 15 min | Hard |
-| Bootable Container | Modern infra | 20 min | Very easy |
-
-See `IMAGE-BUILD-GUIDE.md` for detailed comparison.
 
 ## Infrastructure Recommendations
 
@@ -265,9 +174,6 @@ oc get crd hyperconvergeds.hco.kubevirt.io -o yaml
 - [RHACS Virtual Machine Scanning Documentation](https://docs.openshift.com/acs/)
 - [OpenShift Virtualization Documentation](https://docs.openshift.com/container-platform/latest/virt/about-virt.html)
 - [VSOCK Support in KubeVirt](https://kubevirt.io/)
-- [roxagent Downloads](https://mirror.openshift.com/pub/rhacs/assets/)
-- [RHEL Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/composing_a_customized_rhel_system_image/)
-- [RHACM VM Management](https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes/)
 
 ## Support
 
