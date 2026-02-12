@@ -135,7 +135,7 @@ export_bashrc_vars() {
     done
 }
 
-# Generate API token using curl
+# Generate API token using curl (outputs only token to stdout)
 generate_api_token() {
     local central_url="${ROX_CENTRAL_URL:-}"
     local password="${ROX_PASSWORD:-}"
@@ -148,15 +148,13 @@ generate_api_token() {
     local api_host="${central_url#https://}"
     api_host="${api_host#http://}"
     
-    # Generate token - redirect print to stderr so only token goes to stdout
-    print_info "Generating API token..." >&2
-    
+    # Make API call silently
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X POST \
         -u "admin:${password}" \
         -H "Content-Type: application/json" \
         "https://${api_host}/v1/apitokens/generate" \
-        -d '{"name":"install-script-'$(date +%s)'","roles":["Admin"]}' 2>&1)
+        -d '{"name":"install-script-'$(date +%s)'","roles":["Admin"]}' 2>/dev/null)
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
@@ -175,8 +173,8 @@ generate_api_token() {
         return 1
     fi
     
-    # Output only the token to stdout
-    echo "${token}"
+    # Output ONLY the token to stdout (no other text)
+    printf "%s" "${token}"
     return 0
 }
 
@@ -317,26 +315,33 @@ main() {
     if [ -z "${ROX_API_TOKEN:-}" ]; then
         print_info "ROX_API_TOKEN not set - attempting to generate..."
         
-        # Generate token (print_info inside function goes to stderr)
+        # Generate token (function outputs ONLY token, no other text)
         local token=""
-        token=$(generate_api_token 2>&1) || true
+        token=$(generate_api_token) || true
         
+        # Validate we got a clean token
         if [ -n "${token}" ] && [ "${token}" != "null" ] && [ ${#token} -gt 20 ]; then
-            export ROX_API_TOKEN="${token}"
-            
-            # Save to ~/.bashrc - clean up any old entries first
-            if [ -f ~/.bashrc ]; then
-                # Remove all old ROX_API_TOKEN lines
-                grep -v "^export ROX_API_TOKEN=" ~/.bashrc > ~/.bashrc.tmp 2>/dev/null || true
-                mv ~/.bashrc.tmp ~/.bashrc
+            # Make sure it doesn't contain any unwanted text
+            if echo "${token}" | grep -q "^\[INFO\]\|^\[ERROR\]\|^\[WARN\]"; then
+                print_error "Token generation returned invalid output"
+                print_warn "Scripts 04 and 05 will require ROX_API_TOKEN"
             else
-                touch ~/.bashrc
+                export ROX_API_TOKEN="${token}"
+                
+                # Save to ~/.bashrc - clean up any old entries first
+                if [ -f ~/.bashrc ]; then
+                    # Remove all old ROX_API_TOKEN lines
+                    grep -v "^export ROX_API_TOKEN=" ~/.bashrc > ~/.bashrc.tmp 2>/dev/null || true
+                    mv ~/.bashrc.tmp ~/.bashrc
+                else
+                    touch ~/.bashrc
+                fi
+                
+                # Add new token (only the token, nothing else)
+                echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
+                
+                print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
             fi
-            
-            # Add new token
-            echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
-            
-            print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
         else
             print_warn "Could not generate API token automatically"
             print_warn "Scripts 04 and 05 will require ROX_API_TOKEN"
