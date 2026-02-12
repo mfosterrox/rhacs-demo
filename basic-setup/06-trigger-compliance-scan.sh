@@ -194,12 +194,30 @@ EOF
 )
         
         # Trigger scan
-        if make_api_call "POST" "${api_base}/compliancemanagement/runs" "${scan_payload}" >/dev/null 2>&1; then
+        local scan_result=""
+        local scan_error=""
+        
+        set +e
+        scan_result=$(make_api_call "POST" "${api_base}/compliancemanagement/runs" "${scan_payload}" 2>&1)
+        local exit_code=$?
+        set -e
+        
+        if [ ${exit_code} -eq 0 ] && [ -n "${scan_result}" ]; then
             print_info "✓ ${actual_name} - scan triggered"
+            
+            # Try to extract scan ID
+            local scan_id=$(echo "${scan_result}" | jq -r '.id // .scanId // .runId // empty' 2>/dev/null)
+            if [ -n "${scan_id}" ] && [ "${scan_id}" != "null" ]; then
+                print_info "  Scan ID: ${scan_id}"
+            fi
+            
             triggered_standards["${actual_name}"]="${standard_id}"
             success_count=$((success_count + 1))
         else
             print_warn "✗ ${actual_name} - failed to trigger"
+            if [ -n "${scan_result}" ]; then
+                print_warn "  Error: ${scan_result:0:200}"
+            fi
             failed_count=$((failed_count + 1))
         fi
         
