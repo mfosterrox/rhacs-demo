@@ -88,15 +88,28 @@ make_api_call() {
 get_cluster_id() {
     local api_base=$1
     
-    print_info "Fetching cluster ID..."
+    print_info "Fetching cluster ID..." >&2
     
-    local body=$(make_api_call "GET" "${api_base}/clusters")
-    if [ -z "${body}" ]; then
+    # Make direct curl call to avoid any print contamination
+    local response=$(curl -k -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+        "${api_base}/clusters" 2>/dev/null)
+    
+    local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
+    
+    if [ "${http_code}" != "200" ] || [ -z "${body}" ]; then
+        print_error "Failed to fetch clusters (HTTP ${http_code})" >&2
         return 1
     fi
     
-    # Try to find "Production" cluster first
-    local cluster_id=$(echo "${body}" | jq -r '.clusters[] | select(.name == "Production") | .id' 2>/dev/null | head -1)
+    # Try to find "production" cluster first (lowercase to match your output)
+    local cluster_id=$(echo "${body}" | jq -r '.clusters[] | select(.name == "production") | .id' 2>/dev/null | head -1)
+    
+    # Try case-insensitive
+    if [ -z "${cluster_id}" ] || [ "${cluster_id}" = "null" ]; then
+        cluster_id=$(echo "${body}" | jq -r '.clusters[] | select(.name | ascii_downcase == "production") | .id' 2>/dev/null | head -1)
+    fi
     
     # If not found, use first cluster
     if [ -z "${cluster_id}" ] || [ "${cluster_id}" = "null" ]; then
@@ -104,17 +117,18 @@ get_cluster_id() {
     fi
     
     if [ -z "${cluster_id}" ]; then
-        print_error "No clusters found"
+        print_error "No clusters found" >&2
         return 1
     fi
     
-    # Get cluster name and health
+    # Get cluster name and health for logging
     local cluster_name=$(echo "${body}" | jq -r ".clusters[] | select(.id == \"${cluster_id}\") | .name" 2>/dev/null)
     local cluster_health=$(echo "${body}" | jq -r ".clusters[] | select(.id == \"${cluster_id}\") | .healthStatus.overallHealthStatus // \"UNKNOWN\"" 2>/dev/null)
     
-    print_info "✓ Cluster: ${cluster_name} (ID: ${cluster_id}, Health: ${cluster_health})"
+    print_info "✓ Cluster: ${cluster_name} (ID: ${cluster_id}, Health: ${cluster_health})" >&2
     
-    echo "${cluster_id}"
+    # Output ONLY the cluster ID to stdout
+    printf "%s" "${cluster_id}"
     return 0
 }
 
@@ -140,7 +154,8 @@ find_standard_id() {
         standard_id=$(echo "${standards_body}" | jq -r ".standards[]? | select(.name | test(\"${pattern}\"; \"i\")) | .id" 2>/dev/null | head -1)
     fi
     
-    echo "${standard_id}"
+    # Output only the standard_id to stdout
+    printf "%s" "${standard_id}"
 }
 
 #================================================================
