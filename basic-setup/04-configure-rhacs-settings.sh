@@ -184,14 +184,14 @@ is_telemetry_enabled() {
     return 1
 }
 
-# Function to update RHACS configuration (comprehensive)
+# Function to update RHACS configuration
 update_rhacs_config() {
     local token=$1
     local api_base=$2
     
-    print_info "Applying RHACS configuration..."
+    print_info "Updating RHACS global configuration..."
     
-    # Use hardcoded payload that matches RHACS 4.9.x structure
+    # Configuration payload for RHACS 4.9.x
     local config_payload=$(cat <<'EOF'
 {
   "config": {
@@ -280,25 +280,22 @@ update_rhacs_config() {
 EOF
 )
     
-    # Use temp file to send the modified JSON
-    local temp_file=$(mktemp)
-    echo "${config_payload}" > "${temp_file}"
+    # Apply configuration
+    print_info "Sending configuration to ${api_base}/config..."
     
     local response=$(curl -k -s -w "\n%{http_code}" \
         -X PUT \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
-        --data-binary @"${temp_file}" \
+        -d "${config_payload}" \
         "${api_base}/config" 2>&1)
-    
-    rm -f "${temp_file}"
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
     
     if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
         print_error "Failed to update configuration (HTTP ${http_code})"
-        print_error "Response: ${body:0:500}"
+        print_error "Response: ${body:0:200}"
         return 1
     fi
     
@@ -389,22 +386,16 @@ main() {
     
     # Check if already configured
     print_step "Checking current configuration..."
-    if is_telemetry_enabled "${token}" "${api_base}"; then
-        print_info "✓ RHACS configuration already applied (telemetry enabled)"
-        print_info "Skipping configuration update"
-    else
-        print_info "Telemetry not enabled, applying configuration..."
-        
-        if ! update_rhacs_config "${token}" "${api_base}"; then
-            print_error "Failed to update RHACS configuration"
-            exit 1
-        fi
-        
-        print_info "✓ RHACS configuration applied successfully"
-        
-        # Validate configuration
-        validate_configuration "${token}" "${api_base}" || print_warn "Configuration validation had warnings"
+    # Apply configuration
+    if ! update_rhacs_config "${token}" "${api_base}"; then
+        print_error "Failed to update RHACS configuration"
+        exit 1
     fi
+    
+    print_info "✓ RHACS configuration applied successfully"
+    
+    # Verify configuration (optional, non-fatal)
+    verify_configuration "${token}" "${api_base}" || true
     
     print_info ""
     print_info "=========================================="
