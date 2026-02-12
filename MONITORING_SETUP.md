@@ -27,16 +27,19 @@ The `06-setup-monitoring.sh` script was attempting to create resources (`Monitor
 
 ### Changes Made
 
-1. **Created new operator installation script**: `setup/06-install-monitoring-operators.sh`
-   - Enables OpenShift user workload monitoring
-   - Activates Prometheus Operator for user namespaces
-   - Waits for operator pods to be ready
+1. **Created comprehensive operator installation script**: `setup/06-install-monitoring-operators.sh`
+   - Installs ALL required operators:
+     * Prometheus Operator (via user workload monitoring)
+     * Cluster Observability Operator
+     * Perses Operator
+   - Waits for all operators to be ready
+   - Fails if any operator installation fails (all are required)
 
 2. **Updated monitoring manifest script**: `setup/07-setup-monitoring.sh` (renamed from `06`)
-   - Now checks which operators are actually installed
-   - Only applies manifests for available operators
-   - Provides clear feedback about what's installed vs skipped
-   - Shows installation instructions for optional operators
+   - Validates that ALL required operators are installed before proceeding
+   - Fails fast if any operator is missing
+   - Applies all monitoring manifests
+   - Provides clear feedback about installation status
 
 3. **Created comprehensive documentation**: `monitoring/README.md`
    - Documents all monitoring solutions
@@ -56,7 +59,7 @@ The `06-setup-monitoring.sh` script was attempting to create resources (`Monitor
 
 ## Monitoring Solutions
 
-### Automatic (Installed by Scripts)
+### All Required (Installed by Scripts)
 
 ✓ **Prometheus Operator**
 - Part of OpenShift monitoring stack
@@ -64,35 +67,33 @@ The `06-setup-monitoring.sh` script was attempting to create resources (`Monitor
 - Used for RHACS metrics collection
 - Lightweight and fast
 
-### Optional (Manual Installation)
-
-⊘ **Cluster Observability Operator**
+✓ **Cluster Observability Operator**
 - Provides comprehensive monitoring stack
 - Includes alerting and multi-tenancy
-- Manifests will be automatically applied if installed
+- Required for MonitoringStack and ScrapeConfig resources
 
-⊘ **Perses**
+✓ **Perses Operator**
 - Advanced dashboard capabilities
 - OpenShift console integration
 - Pre-built RHACS security dashboard
-- Manifests will be automatically applied if installed
+- Required for dashboard visualization
 
 ## What Gets Created
 
-### Core Components (Always)
+### Core Components
 - `ServiceAccount`: `sample-stackrox-prometheus` - Authentication
 - `Secret`: `sample-stackrox-prometheus-token` - Long-lived SA token
 - `ConfigMap`: `sample-stackrox-prometheus-declarative-configuration` - RHACS RBAC
 
-### With Prometheus Operator (Automatic)
+### Prometheus Operator Resources
 - `Secret`: `sample-stackrox-prometheus-additional-scrape-configs` - Scrape configuration
 - `Prometheus`: `sample-stackrox-prometheus-server` - Prometheus instance
 
-### With Cluster Observability Operator (If Installed)
+### Cluster Observability Operator Resources
 - `MonitoringStack`: `sample-stackrox-monitoring-stack`
 - `ScrapeConfig`: `sample-stackrox-scrape-config`
 
-### With Perses (If Installed)
+### Perses Resources
 - `PersesDashboard`: `sample-stackrox-dashboard`
 - `PersesDatasource`: `sample-stackrox-datasource`
 - `UIPlugin`: `monitoring`
@@ -217,67 +218,49 @@ export CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='https://{.spe
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" "${CENTRAL_URL}/metrics" | head -20
 ```
 
-## Installing Optional Operators
+## What If Operators Fail to Install?
 
-### Cluster Observability Operator
+If any operator fails to install during script 06, the script will fail and provide error messages. Here's how to troubleshoot:
+
+### Cluster Observability Operator Issues
 
 ```bash
-oc apply -f - <<EOF
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: openshift-cluster-observability-operator
----
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: cluster-observability-operator
-  namespace: openshift-cluster-observability-operator
-spec:
-  targetNamespaces: []
----
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: cluster-observability-operator
-  namespace: openshift-cluster-observability-operator
-spec:
-  channel: development
-  name: cluster-observability-operator
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-  installPlanApproval: Automatic
-EOF
+# Check subscription status
+oc get subscription cluster-observability-operator -n openshift-cluster-observability-operator
 
-# Wait for operator to be ready
-oc wait --for=condition=ready pod -l app.kubernetes.io/name=cluster-observability-operator \
-  -n openshift-cluster-observability-operator --timeout=300s
+# Check CSV status
+oc get csv -n openshift-cluster-observability-operator
 
-# Re-run monitoring setup to apply MonitoringStack manifests
-bash setup/07-setup-monitoring.sh
+# Check operator logs
+oc logs -n openshift-cluster-observability-operator -l app.kubernetes.io/name=cluster-observability-operator
+
+# Manual retry if needed
+oc delete subscription cluster-observability-operator -n openshift-cluster-observability-operator
+bash setup/06-install-monitoring-operators.sh
 ```
 
-### Perses Operator
+### Perses Operator Issues
 
 ```bash
-# Install Perses Operator
-kubectl apply -f https://github.com/perses/perses-operator/releases/latest/download/install.yaml
+# Check deployment status
+oc get deployment perses-operator -n perses-system
 
-# Wait for operator to be ready
-kubectl wait --for=condition=ready pod -l app=perses-operator \
-  -n perses-system --timeout=300s
+# Check pod logs
+oc logs -n perses-system -l app=perses-operator
 
-# Re-run monitoring setup to apply Perses manifests
-bash setup/07-setup-monitoring.sh
+# Manual retry if needed
+oc delete namespace perses-system
+bash setup/06-install-monitoring-operators.sh
 ```
 
 ## Benefits of This Approach
 
-1. **Graceful Degradation**: Works with whatever operators are available
-2. **Clear Feedback**: Shows what's installed, what's skipped, and why
-3. **Easy Extension**: Installing additional operators automatically enables their features
+1. **Complete Installation**: All required operators are installed automatically
+2. **Clear Feedback**: Shows installation progress and validates all prerequisites
+3. **Fail Fast**: Script fails immediately if any required component is missing
 4. **Production Ready**: Uses official OpenShift monitoring stack
 5. **Well Documented**: Comprehensive docs for all monitoring solutions
+6. **Fully Functional**: All monitoring features work out of the box
 
 ## References
 

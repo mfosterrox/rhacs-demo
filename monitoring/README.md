@@ -37,9 +37,9 @@ monitoring/
 
 ## Monitoring Solutions
 
-The setup supports multiple monitoring solutions depending on which operators are installed:
+The setup installs ALL required monitoring operators automatically:
 
-### 1. Prometheus Operator (Recommended)
+### 1. Prometheus Operator (Required)
 
 **Status**: ✓ Installed automatically via setup scripts  
 **Location**: `prometheus-operator/`
@@ -58,41 +58,29 @@ The Prometheus Operator is part of OpenShift's built-in monitoring stack. The se
 - `Secret`: `sample-stackrox-prometheus-additional-scrape-configs` (scrape config)
 - `Prometheus`: `sample-stackrox-prometheus-server`
 
-### 2. Cluster Observability Operator (Optional)
+### 2. Cluster Observability Operator (Required)
 
-**Status**: ⊘ Not installed by default  
+**Status**: ✓ Installed automatically via setup scripts  
 **Location**: `cluster-observability-operator/`
 
 The Cluster Observability Operator provides a comprehensive monitoring stack with built-in alerting and multi-tenancy support.
 
-**Installation:**
-```bash
-# Install via OperatorHub
-oc create namespace openshift-cluster-observability-operator
-oc apply -f - <<EOF
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: cluster-observability-operator
-  namespace: openshift-cluster-observability-operator
-spec:
-  channel: development
-  name: cluster-observability-operator
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-EOF
-```
+**Features:**
+- Advanced monitoring capabilities
+- Built-in alerting
+- Multi-tenancy support
+- MonitoringStack and ScrapeConfig resources
 
-**Resources Created (when operator is installed):**
+**Resources Created:**
 - `MonitoringStack`: `sample-stackrox-monitoring-stack`
 - `ScrapeConfig`: `sample-stackrox-scrape-config`
 
 **Documentation:**
 - [Installing Cluster Observability Operator](https://docs.openshift.com/container-platform/latest/observability/cluster_observability_operator/installing-the-cluster-observability-operator.html)
 
-### 3. Perses Dashboards (Optional)
+### 3. Perses Operator (Required)
 
-**Status**: ⊘ Not installed by default  
+**Status**: ✓ Installed automatically via setup scripts  
 **Location**: `perses/`
 
 Perses provides advanced dashboard capabilities and native OpenShift console integration for visualizing RHACS metrics.
@@ -103,13 +91,7 @@ Perses provides advanced dashboard capabilities and native OpenShift console int
 - Dynamic variables (cluster, namespace filtering)
 - Pre-built RHACS security dashboard
 
-**Installation:**
-```bash
-# Install Perses Operator
-oc apply -f https://github.com/perses/perses-operator/releases/latest/download/install.yaml
-```
-
-**Resources Created (when operator is installed):**
+**Resources Created:**
 - `PersesDashboard`: `sample-stackrox-dashboard` (security metrics dashboard)
 - `PersesDatasource`: `sample-stackrox-datasource` (Prometheus connection)
 - `UIPlugin`: `monitoring` (console integration)
@@ -133,11 +115,12 @@ The installation process:
    - Activates Prometheus Operator for user namespaces
 
 2. **Script 07**: Apply monitoring manifests
+   - Validates all required operators are installed
    - Creates ServiceAccount and authentication token
    - Configures RHACS declarative RBAC
-   - Deploys Prometheus instance (if Prometheus Operator available)
-   - Deploys MonitoringStack (if Cluster Observability Operator available)
-   - Deploys Perses dashboards (if Perses available)
+   - Deploys Prometheus instance
+   - Deploys MonitoringStack
+   - Deploys Perses dashboards
 
 ## Authentication
 
@@ -289,21 +272,25 @@ curl -k -H "Authorization: Bearer ${ROX_API_TOKEN}" \
   "${ROX_CENTRAL_URL}/v1/roles" | jq '.roles[] | select(.name=="Prometheus Server")'
 ```
 
-### Operator Not Found Errors
+### If Script 07 Fails With Operator Errors
 
-If monitoring manifests fail to apply with "no matches for kind" errors:
+If monitoring manifests fail to apply, check that all required operators are installed:
 
 ```bash
-# Check which operators are installed
-oc get csv -A | grep -iE "prometheus|observability|perses"
+# Run the check script
+./check-monitoring-status.sh
 
-# Check available API resources
-oc api-resources --api-group=monitoring.coreos.com
-oc api-resources --api-group=monitoring.rhobs
-oc api-resources --api-group=perses.dev
+# Or manually check
+oc api-resources --api-group=monitoring.coreos.com | grep prometheuses
+oc api-resources --api-group=monitoring.rhobs | grep monitoringstacks
+oc api-resources --api-group=perses.dev | grep persesdashboards
 ```
 
-The setup script will automatically skip manifests for operators that aren't installed.
+If any operators are missing, re-run script 06:
+
+```bash
+bash setup/06-install-monitoring-operators.sh
+```
 
 ## References
 

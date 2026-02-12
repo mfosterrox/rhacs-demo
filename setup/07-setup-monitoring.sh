@@ -391,6 +391,48 @@ check_operator_installed() {
     esac
 }
 
+# Check all required operators are installed
+check_required_operators() {
+    print_step "Checking required operators..."
+    
+    local missing_operators=()
+    
+    # Check Prometheus Operator
+    if ! check_operator_installed "Prometheus Operator" "crd" "prometheuses.monitoring.coreos.com"; then
+        missing_operators+=("Prometheus Operator (monitoring.coreos.com)")
+    else
+        print_info "✓ Prometheus Operator is installed"
+    fi
+    
+    # Check Cluster Observability Operator
+    if ! check_operator_installed "Cluster Observability Operator" "crd" "monitoringstacks.monitoring.rhobs"; then
+        missing_operators+=("Cluster Observability Operator (monitoring.rhobs)")
+    else
+        print_info "✓ Cluster Observability Operator is installed"
+    fi
+    
+    # Check Perses
+    if ! check_operator_installed "Perses" "crd" "persesdashboards.perses.dev"; then
+        missing_operators+=("Perses Operator (perses.dev)")
+    else
+        print_info "✓ Perses Operator is installed"
+    fi
+    
+    if [ ${#missing_operators[@]} -gt 0 ]; then
+        print_error "Missing required operators:"
+        for op in "${missing_operators[@]}"; do
+            print_error "  - ${op}"
+        done
+        print_error ""
+        print_error "Please run script 06 first:"
+        print_error "  bash setup/06-install-monitoring-operators.sh"
+        return 1
+    fi
+    
+    print_info "✓ All required operators are installed"
+    return 0
+}
+
 # Apply monitoring manifests
 apply_monitoring_manifests() {
     print_step "Applying monitoring manifests..."
@@ -406,9 +448,8 @@ apply_monitoring_manifests() {
     
     local has_errors=0
     local applied_count=0
-    local skipped_count=0
     
-    # Always apply RHACS configuration (if directory exists)
+    # Apply RHACS configuration
     if [ -d "${MONITORING_DIR}/rhacs" ]; then
         print_info "Applying RHACS configuration..."
         local output
@@ -421,92 +462,69 @@ apply_monitoring_manifests() {
                 fi
             done
         else
-            print_warn "Failed to apply some RHACS manifests:"
-            print_warn "${output}"
+            print_error "Failed to apply RHACS manifests:"
+            print_error "${output}"
+            has_errors=1
         fi
         print_info ""
     fi
     
-    # Check and apply Prometheus Operator manifests
+    # Apply Prometheus Operator manifests
     if [ -d "${MONITORING_DIR}/prometheus-operator" ]; then
-        # Check if Prometheus Operator CRDs exist
-        if check_operator_installed "Prometheus Operator" "crd" "prometheuses.monitoring.coreos.com"; then
-            print_info "✓ Prometheus Operator is installed"
-            print_info "Applying Prometheus Operator manifests..."
-            local output
-            output=$(oc apply -f "${MONITORING_DIR}/prometheus-operator/" --recursive 2>&1)
-            if [ $? -eq 0 ]; then
-                applied_count=$((applied_count + 1))
-                echo "${output}" | while read -r line; do
-                    if [ -n "${line}" ]; then
-                        print_info "  ${line}"
-                    fi
-                done
-            else
-                print_error "Failed to apply Prometheus Operator manifests:"
-                print_error "${output}"
-                has_errors=1
-            fi
+        print_info "Applying Prometheus Operator manifests..."
+        local output
+        output=$(oc apply -f "${MONITORING_DIR}/prometheus-operator/" --recursive 2>&1)
+        if [ $? -eq 0 ]; then
+            applied_count=$((applied_count + 1))
+            echo "${output}" | while read -r line; do
+                if [ -n "${line}" ]; then
+                    print_info "  ${line}"
+                fi
+            done
         else
-            print_warn "⊘ Prometheus Operator not installed - skipping prometheus-operator manifests"
-            skipped_count=$((skipped_count + 1))
+            print_error "Failed to apply Prometheus Operator manifests:"
+            print_error "${output}"
+            has_errors=1
         fi
         print_info ""
     fi
     
-    # Check and apply Cluster Observability Operator manifests
+    # Apply Cluster Observability Operator manifests
     if [ -d "${MONITORING_DIR}/cluster-observability-operator" ]; then
-        # Check if Cluster Observability Operator CRDs exist
-        if check_operator_installed "Cluster Observability Operator" "crd" "monitoringstacks.monitoring.rhobs"; then
-            print_info "✓ Cluster Observability Operator is installed"
-            print_info "Applying Cluster Observability Operator manifests..."
-            local output
-            output=$(oc apply -f "${MONITORING_DIR}/cluster-observability-operator/" --recursive 2>&1)
-            if [ $? -eq 0 ]; then
-                applied_count=$((applied_count + 1))
-                echo "${output}" | while read -r line; do
-                    if [ -n "${line}" ]; then
-                        print_info "  ${line}"
-                    fi
-                done
-            else
-                print_error "Failed to apply Cluster Observability Operator manifests:"
-                print_error "${output}"
-                has_errors=1
-            fi
+        print_info "Applying Cluster Observability Operator manifests..."
+        local output
+        output=$(oc apply -f "${MONITORING_DIR}/cluster-observability-operator/" --recursive 2>&1)
+        if [ $? -eq 0 ]; then
+            applied_count=$((applied_count + 1))
+            echo "${output}" | while read -r line; do
+                if [ -n "${line}" ]; then
+                    print_info "  ${line}"
+                fi
+            done
         else
-            print_warn "⊘ Cluster Observability Operator not installed - skipping cluster-observability-operator manifests"
-            print_info "  To install: https://docs.openshift.com/container-platform/latest/observability/cluster_observability_operator/installing-the-cluster-observability-operator.html"
-            skipped_count=$((skipped_count + 1))
+            print_error "Failed to apply Cluster Observability Operator manifests:"
+            print_error "${output}"
+            has_errors=1
         fi
         print_info ""
     fi
     
-    # Check and apply Perses manifests
+    # Apply Perses manifests
     if [ -d "${MONITORING_DIR}/perses" ]; then
-        # Check if Perses CRDs exist
-        if check_operator_installed "Perses" "crd" "persesdashboards.perses.dev"; then
-            print_info "✓ Perses is installed"
-            print_info "Applying Perses manifests..."
-            local output
-            output=$(oc apply -f "${MONITORING_DIR}/perses/" --recursive 2>&1)
-            if [ $? -eq 0 ]; then
-                applied_count=$((applied_count + 1))
-                echo "${output}" | while read -r line; do
-                    if [ -n "${line}" ]; then
-                        print_info "  ${line}"
-                    fi
-                done
-            else
-                print_error "Failed to apply Perses manifests:"
-                print_error "${output}"
-                has_errors=1
-            fi
+        print_info "Applying Perses manifests..."
+        local output
+        output=$(oc apply -f "${MONITORING_DIR}/perses/" --recursive 2>&1)
+        if [ $? -eq 0 ]; then
+            applied_count=$((applied_count + 1))
+            echo "${output}" | while read -r line; do
+                if [ -n "${line}" ]; then
+                    print_info "  ${line}"
+                fi
+            done
         else
-            print_warn "⊘ Perses not installed - skipping perses manifests"
-            print_info "  Perses dashboards provide advanced visualization for RHACS metrics"
-            print_info "  To install: https://github.com/perses/perses-operator"
-            skipped_count=$((skipped_count + 1))
+            print_error "Failed to apply Perses manifests:"
+            print_error "${output}"
+            has_errors=1
         fi
         print_info ""
     fi
@@ -514,13 +532,11 @@ apply_monitoring_manifests() {
     # Summary
     print_info "Manifest application summary:"
     print_info "  - Applied: ${applied_count} component(s)"
-    if [ ${skipped_count} -gt 0 ]; then
-        print_warn "  - Skipped: ${skipped_count} component(s) (operators not installed)"
-    fi
     if [ ${has_errors} -gt 0 ]; then
         print_error "  - Errors: Some manifests failed to apply"
         return 1
     fi
+    print_info "  - ✓ All monitoring manifests applied successfully"
     
     return 0
 }
@@ -598,33 +614,27 @@ display_monitoring_info() {
     
     print_info ""
     
-    # Check operator status
+    # Show operator status
     print_info "Operator Status:"
     
-    # Check Prometheus Operator
+    # Prometheus Operator
     if check_operator_installed "Prometheus Operator" "crd" "prometheuses.monitoring.coreos.com"; then
         print_info "  ✓ Prometheus Operator: Installed"
-    else
-        print_warn "  ⊘ Prometheus Operator: Not installed"
     fi
     
-    # Check Cluster Observability Operator
+    # Cluster Observability Operator
     if check_operator_installed "Cluster Observability Operator" "crd" "monitoringstacks.monitoring.rhobs"; then
         if oc get namespace openshift-cluster-observability-operator >/dev/null 2>&1; then
             local pod_count=$(oc get pods -n openshift-cluster-observability-operator 2>/dev/null | grep -c Running || echo "0")
-            print_info "  ✓ Cluster Observability Operator: Installed and running (${pod_count} pods)"
+            print_info "  ✓ Cluster Observability Operator: Running (${pod_count} pods)"
         else
-            print_info "  ✓ Cluster Observability Operator: CRDs installed"
+            print_info "  ✓ Cluster Observability Operator: Installed"
         fi
-    else
-        print_warn "  ⊘ Cluster Observability Operator: Not installed"
     fi
     
-    # Check Perses
+    # Perses
     if check_operator_installed "Perses" "crd" "persesdashboards.perses.dev"; then
         print_info "  ✓ Perses: Installed"
-    else
-        print_warn "  ⊘ Perses: Not installed"
     fi
     
     print_info ""
@@ -653,9 +663,18 @@ main() {
     
     print_info ""
     
+    # Check required operators
+    if ! check_required_operators; then
+        print_error "Required operators check failed"
+        exit 1
+    fi
+    
+    print_info ""
+    
     # Configure RHACS settings
     if ! configure_rhacs_settings; then
-        print_warn "RHACS configuration failed (continuing without it)"
+        print_error "RHACS configuration failed"
+        exit 1
     fi
     
     print_info ""
