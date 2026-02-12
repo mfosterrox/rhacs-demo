@@ -17,7 +17,7 @@ The advanced setup provides enterprise-grade monitoring with:
 - RHACS installed in `stackrox` namespace (or set `RHACS_NAMESPACE`)
 - Logged into OpenShift cluster via `oc login`
 - `jq` installed on the system
-- `ROX_PASSWORD` environment variable set (or available in RHACS secrets)
+- `ROX_API_TOKEN` environment variable set (for script 02 - metrics configuration)
 
 ### Basic Setup Must Be Completed First
 Before running advanced setup, ensure you've completed the basic setup:
@@ -27,7 +27,34 @@ cd ../basic-setup
 ./install.sh [PASSWORD]
 ```
 
-This ensures RHACS is properly configured with metrics enabled.
+This ensures RHACS is properly configured.
+
+**Generate API Token**:
+```bash
+# Generate token for advanced setup
+curl -k -X POST \
+  -u "admin:${ROX_PASSWORD}" \
+  -H "Content-Type: application/json" \
+  "${ROX_CENTRAL_URL}/v1/apitokens/generate" \
+  -d '{"name":"dashboard-setup","roles":["Admin"]}' | jq -r '.token'
+
+# Export it
+export ROX_API_TOKEN="your-generated-token"
+```
+
+## Project Structure
+
+The advanced setup consists of 4 focused scripts:
+
+```
+advanced-setup/
+├── install.sh                                  # Main orchestrator
+├── 01-install-cluster-observability-operator.sh # Install COO
+├── 02-configure-rhacs-metrics.sh                # Configure metrics (requires ROX_API_TOKEN)
+├── 03-deploy-monitoring-stack.sh                # Deploy Prometheus + auth
+├── 04-deploy-perses-dashboard.sh                # Deploy dashboard + verify
+└── monitoring/                                  # Manifests
+```
 
 ## Installation
 
@@ -36,14 +63,77 @@ This ensures RHACS is properly configured with metrics enabled.
 ```bash
 cd advanced-setup
 
-# Set RHACS password
-export ROX_PASSWORD="your-rhacs-admin-password"
+# Set RHACS API token (required for script 02)
+export ROX_API_TOKEN="your-api-token"
 
-# Run the installation
+# Run the complete installation
 ./install.sh
 ```
 
-### What Gets Installed
+### Individual Script Usage
+
+You can also run scripts individually for troubleshooting:
+
+```bash
+# Step 1: Install operator
+bash 01-install-cluster-observability-operator.sh
+
+# Step 2: Configure metrics (requires ROX_API_TOKEN)
+export ROX_API_TOKEN="your-token"
+bash 02-configure-rhacs-metrics.sh
+
+# Step 3: Deploy monitoring stack
+bash 03-deploy-monitoring-stack.sh
+
+# Step 4: Deploy dashboard
+bash 04-deploy-perses-dashboard.sh
+```
+
+## Script Details
+
+### 01-install-cluster-observability-operator.sh
+Installs the Cluster Observability Operator which provides the foundation for monitoring.
+
+**Actions**:
+- Creates `openshift-cluster-observability-operator` namespace
+- Creates OperatorGroup and Subscription
+- Waits for CSV to reach "Succeeded" state
+- No external dependencies
+
+### 02-configure-rhacs-metrics.sh
+Configures RHACS to expose metrics for Prometheus scraping.
+
+**Actions**:
+- Fetches current RHACS configuration via API
+- Configures 1-minute gathering periods for:
+  - Image vulnerabilities (CVE, deployment, namespace)
+  - Policy violations (deployment, namespace)
+  - Node vulnerabilities (component, CVE, node)
+- Applies configuration via RHACS API
+
+**Requirements**: `ROX_API_TOKEN` environment variable
+
+### 03-deploy-monitoring-stack.sh
+Deploys Prometheus authentication and the MonitoringStack.
+
+**Actions**:
+- Creates ServiceAccount: `sample-stackrox-prometheus`
+- Creates token secret for authentication
+- Applies RHACS RBAC configuration via ConfigMap
+- Deploys MonitoringStack CR
+- Deploys ScrapeConfig CR for RHACS metrics
+
+### 04-deploy-perses-dashboard.sh
+Deploys Perses dashboard and verifies the complete installation.
+
+**Actions**:
+- Creates Perses datasource (pointing to Prometheus)
+- Creates Perses dashboard with RHACS security metrics
+- Enables UI plugin for console integration
+- Verifies all resources are created
+- Displays access information
+
+## What Gets Installed
 
 #### 1. Cluster Observability Operator
 - Namespace: `openshift-cluster-observability-operator`

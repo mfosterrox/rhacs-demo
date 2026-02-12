@@ -33,6 +33,7 @@ NC='\033[0m' # No Color
 # Script directory (install.sh is now in basic-setup folder)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_DIR="${SCRIPT_DIR}"  # Scripts are in the same directory
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Function to print colored output
 print_info() {
@@ -134,6 +135,48 @@ export_bashrc_vars() {
     done
 }
 
+# Generate API token using curl
+generate_api_token() {
+    local central_url="${ROX_CENTRAL_URL:-}"
+    local password="${ROX_PASSWORD:-}"
+    
+    if [ -z "${central_url}" ] || [ -z "${password}" ]; then
+        return 1
+    fi
+    
+    # Remove https:// prefix
+    local api_host="${central_url#https://}"
+    api_host="${api_host#http://}"
+    
+    print_info "Generating API token..."
+    
+    local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -X POST \
+        -u "admin:${password}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/apitokens/generate" \
+        -d '{"name":"install-script-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
+    
+    local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
+    
+    if [ "${http_code}" != "200" ]; then
+        return 1
+    fi
+    
+    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
+    if [ -z "${token}" ] || [ "${token}" = "null" ]; then
+        return 1
+    fi
+    
+    # Validate token length
+    if [ ${#token} -lt 20 ]; then
+        return 1
+    fi
+    
+    echo "${token}"
+    return 0
+}
 
 # Save password to ~/.bashrc
 save_password_to_bashrc() {
@@ -267,6 +310,27 @@ main() {
         print_info "Successfully connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     fi
     print_info ""
+    
+    # Check if ROX_API_TOKEN is needed and generate if missing
+    if [ -z "${ROX_API_TOKEN:-}" ]; then
+        print_info "ROX_API_TOKEN not set - attempting to generate..."
+        
+        local token=$(generate_api_token || echo "")
+        if [ -n "${token}" ]; then
+            export ROX_API_TOKEN="${token}"
+            
+            # Save to ~/.bashrc
+            touch ~/.bashrc
+            sed -i.bak '/^export ROX_API_TOKEN=/d' ~/.bashrc 2>/dev/null || true
+            echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
+            
+            print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
+        else
+            print_warn "Could not generate API token automatically"
+            print_warn "Scripts 04 and 05 will require ROX_API_TOKEN"
+        fi
+        print_info ""
+    fi
     
     # Run setup scripts in order
     print_info "Running setup scripts..."
