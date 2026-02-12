@@ -48,13 +48,12 @@ make_api_call() {
     local endpoint=$2
     local data="${3:-}"
     
-    local curl_opts="-k -s -w \n%{http_code}"
-    
     if [ -n "${data}" ]; then
+        # Use temp file for data to avoid quoting issues
         local temp_file=$(mktemp)
-        echo "${data}" > "${temp_file}"
+        printf "%s" "${data}" > "${temp_file}"
         
-        local response=$(curl ${curl_opts} \
+        local response=$(curl -k -s -w "\n%{http_code}" \
             -X "${method}" \
             -H "Authorization: Bearer ${ROX_API_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -63,7 +62,7 @@ make_api_call() {
         
         rm -f "${temp_file}"
     else
-        local response=$(curl ${curl_opts} \
+        local response=$(curl -k -s -w "\n%{http_code}" \
             -X "${method}" \
             -H "Authorization: Bearer ${ROX_API_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -182,31 +181,30 @@ trigger_compliance_scans() {
         # Get actual standard name
         local actual_name=$(echo "${standards_body}" | jq -r ".standards[]? | select(.id == \"${standard_id}\") | .name" 2>/dev/null || echo "${standard_name}")
         
-        # Build scan payload
-        local scan_payload=$(cat <<EOF
-{
-  "selection": {
-    "clusterId": "${cluster_id}",
-    "standardId": "${standard_id}"
-  }
-}
-EOF
-)
+        # Build scan payload as single-line JSON (avoids heredoc newline issues)
+        local scan_payload="{\"selection\":{\"clusterId\":\"${cluster_id}\",\"standardId\":\"${standard_id}\"}}"
         
-        # Trigger scan
+        # Trigger scan using direct curl (bypass make_api_call for this specific case)
         local scan_result=""
-        local scan_error=""
         
         set +e
-        scan_result=$(make_api_call "POST" "${api_base}/compliancemanagement/runs" "${scan_payload}" 2>&1)
+        local response=$(curl -k -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${scan_payload}" \
+            "${api_base}/compliancemanagement/runs" 2>&1)
         local exit_code=$?
         set -e
         
-        if [ ${exit_code} -eq 0 ] && [ -n "${scan_result}" ]; then
+        local http_code=$(echo "${response}" | tail -n1)
+        local body=$(echo "${response}" | sed '$d')
+        
+        if [ ${exit_code} -eq 0 ] && [ "${http_code}" = "200" ]; then
             print_info "✓ ${actual_name} - scan triggered"
             
             # Try to extract scan ID
-            local scan_id=$(echo "${scan_result}" | jq -r '.id // .scanId // .runId // empty' 2>/dev/null)
+            local scan_id=$(echo "${body}" | jq -r '.startedRuns[0].id // .id // .scanId // .runId // empty' 2>/dev/null)
             if [ -n "${scan_id}" ] && [ "${scan_id}" != "null" ]; then
                 print_info "  Scan ID: ${scan_id}"
             fi
@@ -214,9 +212,9 @@ EOF
             triggered_standards["${actual_name}"]="${standard_id}"
             success_count=$((success_count + 1))
         else
-            print_warn "✗ ${actual_name} - failed to trigger"
-            if [ -n "${scan_result}" ]; then
-                print_warn "  Error: ${scan_result:0:200}"
+            print_warn "✗ ${actual_name} - failed to trigger (HTTP ${http_code})"
+            if [ -n "${body}" ]; then
+                print_warn "  Error: ${body:0:200}"
             fi
             failed_count=$((failed_count + 1))
         fi
