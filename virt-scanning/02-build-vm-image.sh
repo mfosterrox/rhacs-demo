@@ -21,7 +21,7 @@ print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
 readonly NAMESPACE="${NAMESPACE:-default}"
-readonly IMAGE_METHOD="${IMAGE_METHOD:-cloud-init}"
+IMAGE_METHOD="${IMAGE_METHOD:-}"  # Not readonly - set by user selection
 
 #================================================================
 # Display method selection
