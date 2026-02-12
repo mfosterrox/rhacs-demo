@@ -45,13 +45,37 @@ check_prerequisites() {
         return 1
     fi
     
-    # Check storage class
+    # Auto-detect best storage class if default not available
     if ! oc get storageclass "${STORAGE_CLASS}" >/dev/null 2>&1; then
-        print_warn "Storage class not found: ${STORAGE_CLASS}"
-        print_info "Available storage classes:"
-        oc get storageclass
-        echo ""
-        read -p "Enter storage class name: " STORAGE_CLASS
+        print_warn "Default storage class not found: ${STORAGE_CLASS}"
+        print_info "Auto-detecting best available storage class..."
+        
+        # Try to find default storage class
+        local default_sc=$(oc get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null | awk '{print $1}')
+        
+        if [ -n "${default_sc}" ]; then
+            STORAGE_CLASS="${default_sc}"
+            print_info "Using default storage class: ${STORAGE_CLASS}"
+        else
+            # Look for common OCS/ODF storage classes
+            local ocs_sc=$(oc get storageclass -o name 2>/dev/null | grep -E 'ocs.*ceph-rbd|odf.*ceph-rbd' | head -1 | sed 's|storageclass.storage.k8s.io/||')
+            
+            if [ -n "${ocs_sc}" ]; then
+                STORAGE_CLASS="${ocs_sc}"
+                print_info "Using OCS/ODF storage class: ${STORAGE_CLASS}"
+            else
+                # Fall back to first available RWO storage class
+                local first_sc=$(oc get storageclass -o name 2>/dev/null | head -1 | sed 's|storageclass.storage.k8s.io/||')
+                
+                if [ -n "${first_sc}" ]; then
+                    STORAGE_CLASS="${first_sc}"
+                    print_info "Using first available storage class: ${STORAGE_CLASS}"
+                else
+                    print_error "No storage classes found in cluster"
+                    return 1
+                fi
+            fi
+        fi
     fi
     
     print_info "✓ Prerequisites met"
