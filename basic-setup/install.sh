@@ -148,14 +148,15 @@ generate_api_token() {
     local api_host="${central_url#https://}"
     api_host="${api_host#http://}"
     
-    print_info "Generating API token..."
+    # Generate token - redirect print to stderr so only token goes to stdout
+    print_info "Generating API token..." >&2
     
     local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
         -X POST \
         -u "admin:${password}" \
         -H "Content-Type: application/json" \
         "https://${api_host}/v1/apitokens/generate" \
-        -d '{"name":"install-script-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
+        -d '{"name":"install-script-'$(date +%s)'","roles":["Admin"]}' 2>&1)
     
     local http_code=$(echo "${response}" | tail -n1)
     local body=$(echo "${response}" | sed '$d')
@@ -164,7 +165,7 @@ generate_api_token() {
         return 1
     fi
     
-    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
+    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null)
     if [ -z "${token}" ] || [ "${token}" = "null" ]; then
         return 1
     fi
@@ -174,6 +175,7 @@ generate_api_token() {
         return 1
     fi
     
+    # Output only the token to stdout
     echo "${token}"
     return 0
 }
@@ -315,13 +317,23 @@ main() {
     if [ -z "${ROX_API_TOKEN:-}" ]; then
         print_info "ROX_API_TOKEN not set - attempting to generate..."
         
-        local token=$(generate_api_token || echo "")
-        if [ -n "${token}" ]; then
+        # Generate token (print_info inside function goes to stderr)
+        local token=""
+        token=$(generate_api_token 2>&1) || true
+        
+        if [ -n "${token}" ] && [ "${token}" != "null" ] && [ ${#token} -gt 20 ]; then
             export ROX_API_TOKEN="${token}"
             
-            # Save to ~/.bashrc
-            touch ~/.bashrc
-            sed -i.bak '/^export ROX_API_TOKEN=/d' ~/.bashrc 2>/dev/null || true
+            # Save to ~/.bashrc - clean up any old entries first
+            if [ -f ~/.bashrc ]; then
+                # Remove all old ROX_API_TOKEN lines
+                grep -v "^export ROX_API_TOKEN=" ~/.bashrc > ~/.bashrc.tmp 2>/dev/null || true
+                mv ~/.bashrc.tmp ~/.bashrc
+            else
+                touch ~/.bashrc
+            fi
+            
+            # Add new token
             echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
             
             print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
