@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Script: setup-openshift-dashboard.sh
-# Description: Complete setup for RHACS monitoring with Perses dashboards in OpenShift console
-# Usage: ./setup-openshift-dashboard.sh
+# Script: advanced-setup/install.sh
+# Description: Advanced RHACS monitoring setup with OpenShift console dashboards
+#              Installs Cluster Observability Operator and Perses dashboards
+# Usage: ./advanced-setup/install.sh or cd advanced-setup && ./install.sh
 
 set -euo pipefail
 
@@ -372,15 +373,16 @@ display_access_info() {
 main() {
     echo ""
     print_info "========================================================================"
-    print_info "RHACS OpenShift Dashboard Setup"
+    print_info "RHACS Advanced Monitoring Setup"
     print_info "========================================================================"
     echo ""
-    print_info "This script will:"
-    print_info "  1. Install Cluster Observability Operator (includes Perses)"
-    print_info "  2. Configure RHACS metrics scraping"
-    print_info "  3. Deploy Prometheus authentication"
-    print_info "  4. Deploy MonitoringStack for metrics collection"
-    print_info "  5. Create Perses dashboard in OpenShift console"
+    print_info "This script installs advanced monitoring and dashboards:"
+    print_info "  1. Cluster Observability Operator (includes Perses)"
+    print_info "  2. RHACS metrics configuration"
+    print_info "  3. Prometheus authentication (ServiceAccount + token)"
+    print_info "  4. MonitoringStack for metrics collection"
+    print_info "  5. Perses dashboards in OpenShift console"
+    print_info "  6. UI plugin for console integration"
     echo ""
     
     # Check prerequisites
@@ -432,8 +434,15 @@ main() {
     display_access_info
     
     print_info "========================================================================"
-    print_info "Setup Complete!"
+    print_info "Advanced Setup Complete!"
     print_info "========================================================================"
+    echo ""
+    print_info "Resources created:"
+    print_info "  ✓ Cluster Observability Operator"
+    print_info "  ✓ MonitoringStack (Prometheus with RHACS scraping)"
+    print_info "  ✓ Perses Dashboard"
+    print_info "  ✓ Perses Datasource"
+    print_info "  ✓ UI Plugin (console integration)"
     echo ""
 }
 

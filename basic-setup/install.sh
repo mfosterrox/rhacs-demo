@@ -30,9 +30,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Script directory
+# Script directory (install.sh is now in basic-setup folder)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SETUP_DIR="${SCRIPT_DIR}/setup"
+SETUP_DIR="${SCRIPT_DIR}"  # Scripts are in the same directory
 
 # Function to print colored output
 print_info() {
