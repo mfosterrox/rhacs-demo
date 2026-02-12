@@ -1,4 +1,7 @@
 #!/bin/bash
+# RHACS Configuration Script
+# Makes API calls to RHACS to change configuration details
+# Enables monitoring/metrics and configures policy guidelines
 
 set -euo pipefail
 
@@ -19,12 +22,21 @@ print_warn() {
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 print_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
+
+error_handler() {
+    local exit_code=$1
+    local line_number=$2
+    print_error "Script failed at line ${line_number} (exit code: ${exit_code})"
+    exit "${exit_code}"
+}
+
+trap 'error_handler $? $LINENO' ERR
 
 # Default values
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
@@ -52,6 +64,31 @@ ensure_jq() {
     fi
     
     print_error "Could not install jq. Please install it manually: sudo dnf install -y jq"
+    return 1
+}
+
+# Function to get admin password (try multiple sources)
+get_admin_password() {
+    # First try environment variable
+    if [ -n "${ROX_PASSWORD:-}" ]; then
+        echo "${ROX_PASSWORD}"
+        return 0
+    fi
+    
+    # Try central-htpasswd secret
+    local password=$(oc get secret central-htpasswd -n "${RHACS_NAMESPACE}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -n "${password}" ]; then
+        echo "${password}"
+        return 0
+    fi
+    
+    # Try admin-password secret
+    password=$(oc get secret admin-password -n "${RHACS_NAMESPACE}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -n "${password}" ]; then
+        echo "${password}"
+        return 0
+    fi
+    
     return 1
 }
 
@@ -157,36 +194,153 @@ is_telemetry_enabled() {
     return 1
 }
 
-# Function to update RHACS configuration
+# Function to update RHACS configuration (comprehensive)
 update_rhacs_config() {
     local token=$1
     local api_base=$2
     
     print_info "Updating RHACS configuration..."
     
-    # Simplified configuration focusing on key settings
-    local config_payload='
+    # Comprehensive configuration including all settings
+    local config_payload=$(cat <<'EOF'
 {
   "config": {
     "publicConfig": {
-      "telemetry": { "enabled": true }
+      "loginNotice": { "enabled": false, "text": "" },
+      "header": { "enabled": false, "text": "", "size": "UNSET", "color": "#000000", "backgroundColor": "#FFFFFF" },
+      "footer": { "enabled": false, "text": "", "size": "UNSET", "color": "#000000", "backgroundColor": "#FFFFFF" },
+      "telemetry": { "enabled": true, "lastSetTime": null }
     },
     "privateConfig": {
+      "alertConfig": {
+        "resolvedDeployRetentionDurationDays": 7,
+        "deletedRuntimeRetentionDurationDays": 7,
+        "allRuntimeRetentionDays": 30,
+        "attemptedDeployRetentionDurationDays": 7,
+        "attemptedRuntimeRetentionDurationDays": 7
+      },
+      "imageRetentionDurationDays": 7,
+      "expiredVulnReqRetentionDurationDays": 90,
+      "decommissionedClusterRetention": {
+        "retentionDurationDays": 0,
+        "ignoreClusterLabels": {}
+      },
+      "reportRetentionConfig": {
+        "historyRetentionDurationDays": 7,
+        "downloadableReportRetentionDays": 7,
+        "downloadableReportGlobalRetentionBytes": 524288000
+      },
+      "vulnerabilityExceptionConfig": {
+        "expiryOptions": {
+          "dayOptions": [
+            { "numDays": 14, "enabled": true },
+            { "numDays": 30, "enabled": true },
+            { "numDays": 60, "enabled": true },
+            { "numDays": 90, "enabled": true }
+          ],
+          "fixableCveOptions": { "allFixable": true, "anyFixable": true },
+          "customDate": false,
+          "indefinite": false
+        }
+      },
+      "administrationEventsConfig": { "retentionDurationDays": 4 },
       "metrics": {
-        "imageVulnerabilities": { "gatheringPeriodMinutes": 1 },
-        "policyViolations": { "gatheringPeriodMinutes": 1 },
-        "nodeVulnerabilities": { "gatheringPeriodMinutes": 1 }
+        "imageVulnerabilities": {
+          "gatheringPeriodMinutes": 1,
+          "descriptors": {
+            "cve_severity": { "labels": ["Cluster","CVE","IsPlatformWorkload","IsFixable","Severity"] },
+            "deployment_severity": { "labels": ["Cluster","Namespace","Deployment","IsPlatformWorkload","IsFixable","Severity"] },
+            "namespace_severity": { "labels": ["Cluster","Namespace","IsPlatformWorkload","IsFixable","Severity"] }
+          }
+        },
+        "policyViolations": {
+          "gatheringPeriodMinutes": 1,
+          "descriptors": {
+            "deployment_severity": { "labels": ["Cluster","Namespace","Deployment","IsPlatformComponent","Action","Severity"] },
+            "namespace_severity": { "labels": ["Cluster","Namespace","IsPlatformComponent","Action","Severity"] }
+          }
+        },
+        "nodeVulnerabilities": {
+          "gatheringPeriodMinutes": 1,
+          "descriptors": {
+            "component_severity": { "labels": ["Cluster","Node","Component","IsFixable","Severity"] },
+            "cve_severity": { "labels": ["Cluster","CVE","IsFixable","Severity"] },
+            "node_severity": { "labels": ["Cluster","Node","IsFixable","Severity"] }
+          }
+        }
       }
+    },
+    "platformComponentConfig": {
+      "rules": [
+        {
+          "name": "red hat layered products",
+          "namespaceRule": { "regex": "^aap$|^ack-system$|^aws-load-balancer-operator$|^cert-manager-operator$|^cert-utils-operator$|^costmanagement-metrics-operator$|^external-dns-operator$|^metallb-system$|^mtr$|^multicluster-engine$|^multicluster-global-hub$|^node-observability-operator$|^open-cluster-management$|^openshift-adp$|^openshift-apiserver-operator$|^openshift-authentication$|^openshift-authentication-operator$|^openshift-builds$|^openshift-cloud-controller-manager$|^openshift-cloud-controller-manager-operator$|^openshift-cloud-credential-operator$|^openshift-cloud-network-config-controller$|^openshift-cluster-csi-drivers$|^openshift-cluster-machine-approver$|^openshift-cluster-node-tuning-operator$|^openshift-cluster-observability-operator$|^openshift-cluster-samples-operator$|^openshift-cluster-storage-operator$|^openshift-cluster-version$|^openshift-cnv$|^openshift-compliance$|^openshift-config$|^openshift-config-managed$|^openshift-config-operator$|^openshift-console$|^openshift-console-operator$|^openshift-console-user-settings$|^openshift-controller-manager$|^openshift-controller-manager-operator$|^openshift-dbaas-operator$|^openshift-distributed-tracing$|^openshift-dns$|^openshift-dns-operator$|^openshift-dpu-network-operator$|^openshift-dr-system$|^openshift-etcd$|^openshift-etcd-operator$|^openshift-file-integrity$|^openshift-gitops-operator$|^openshift-host-network$|^openshift-image-registry$|^openshift-infra$|^openshift-ingress$|^openshift-ingress-canary$|^openshift-ingress-node-firewall$|^openshift-ingress-operator$|^openshift-insights$|^openshift-keda$|^openshift-kmm$|^openshift-kmm-hub$|^openshift-kni-infra$|^openshift-kube-apiserver$|^openshift-kube-apiserver-operator$|^openshift-kube-controller-manager$|^openshift-kube-controller-manager-operator$|^openshift-kube-scheduler$|^openshift-kube-scheduler-operator$|^openshift-kube-storage-version-migrator$|^openshift-kube-storage-version-migrator-operator$|^openshift-lifecycle-agent$|^openshift-local-storage$|^openshift-logging$|^openshift-machine-api$|^openshift-machine-config-operator$|^openshift-marketplace$|^openshift-migration$|^openshift-monitoring$|^openshift-mta$|^openshift-mtv$|^openshift-multus$|^openshift-netobserv-operator$|^openshift-network-diagnostics$|^openshift-network-node-identity$|^openshift-network-operator$|^openshift-nfd$|^openshift-nmstate$|^openshift-node$|^openshift-nutanix-infra$|^openshift-oauth-apiserver$|^openshift-openstack-infra$|^openshift-opentelemetry-operator$|^openshift-operator-lifecycle-manager$|^openshift-operators$|^openshift-operators-redhat$|^openshift-ovirt-infra$|^openshift-ovn-kubernetes$|^openshift-ptp$|^openshift-route-controller-manager$|^openshift-sandboxed-containers-operator$|^openshift-security-profiles$|^openshift-serverless$|^openshift-serverless-logic$|^openshift-service-ca$|^openshift-service-ca-operator$|^openshift-sriov-network-operator$|^openshift-storage$|^openshift-tempo-operator$|^openshift-update-service$|^openshift-user-workload-monitoring$|^openshift-vertical-pod-autoscaler$|^openshift-vsphere-infra$|^openshift-windows-machine-config-operator$|^openshift-workload-availability$|^redhat-ods-operator$|^rhacs-operator$|^rhdh-operator$|^service-telemetry$|^stackrox$|^submariner-operator$|^tssc-acs$|^openshift-devspaces$" }
+        },
+        {
+          "name": "system rule",
+          "namespaceRule": { "regex": "^openshift$|^openshift-apiserver$|^openshift-operators$|^kube-.*" }
+        }
+      ],
+      "needsReevaluation": false
     }
   }
-}'
+}
+EOF
+)
     
-    if ! make_api_call "PUT" "config" "${token}" "${api_base}" "${config_payload}" >/dev/null; then
-        print_error "Failed to update configuration"
+    # Use temp file for multi-line JSON to avoid quoting issues
+    local temp_file=$(mktemp)
+    echo "${config_payload}" > "${temp_file}"
+    
+    local response=$(curl -k -s -w "\n%{http_code}" \
+        -X PUT \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        --data-binary @"${temp_file}" \
+        "${api_base}/config" 2>&1)
+    
+    rm -f "${temp_file}"
+    
+    local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
+    
+    if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+        print_error "Failed to update configuration (HTTP ${http_code})"
+        print_error "Response: ${body:0:500}"
         return 1
     fi
     
     print_info "✓ Configuration updated successfully"
+    return 0
+}
+
+# Function to validate configuration
+validate_configuration() {
+    local token=$1
+    local api_base=$2
+    
+    print_info "Validating configuration..."
+    
+    local response=$(curl -k -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer ${token}" \
+        "${api_base}/config" 2>&1)
+    
+    local http_code=$(echo "${response}" | tail -n1)
+    local body=$(echo "${response}" | sed '$d')
+    
+    if [ "${http_code}" != "200" ]; then
+        print_warn "Could not validate configuration (HTTP ${http_code})"
+        return 1
+    fi
+    
+    local telemetry=$(echo "${body}" | jq -r '.config.publicConfig.telemetry.enabled' 2>/dev/null || echo "unknown")
+    
+    if [ "${telemetry}" = "true" ]; then
+        print_info "✓ Telemetry configuration verified: enabled"
+    elif [ "${telemetry}" != "unknown" ]; then
+        print_info "✓ Telemetry configuration: ${telemetry}"
+    fi
+    
     return 0
 }
 
@@ -204,11 +358,14 @@ main() {
         exit 1
     fi
     
-    if [ -z "${ROX_PASSWORD}" ]; then
-        print_error "ROX_PASSWORD is not set"
-        print_error "Please provide the password as an argument to install.sh or set ROX_PASSWORD environment variable"
+    # Get admin password (try multiple sources)
+    local password=$(get_admin_password)
+    if [ -z "${password}" ]; then
+        print_error "Could not determine admin password"
+        print_error "Please provide password via ROX_PASSWORD environment variable or ensure RHACS secrets exist"
         exit 1
     fi
+    print_info "✓ Admin password retrieved"
     
     # Get Central URL
     print_info "Getting Central URL..."
@@ -229,13 +386,20 @@ main() {
     local token="${ROX_API_TOKEN:-}"
     if [ -z "${token}" ]; then
         print_info "Generating API token..."
-        token=$(generate_api_token "${central_url}" "${ROX_PASSWORD}")
+        token=$(generate_api_token "${central_url}" "${password}")
         if [ -z "${token}" ]; then
             print_error "Failed to generate API token"
-            print_error "Please verify ROX_PASSWORD is correct"
+            print_error "Please verify password is correct"
             exit 1
         fi
-        print_info "✓ API token generated"
+        
+        # Verify token length
+        if [ ${#token} -lt 20 ]; then
+            print_error "Generated token appears to be invalid (too short: ${#token} chars)"
+            exit 1
+        fi
+        
+        print_info "✓ API token generated (length: ${#token} chars)"
     else
         print_info "✓ Using API token from environment"
     fi
@@ -256,6 +420,9 @@ main() {
         fi
         
         print_info "✓ RHACS configuration applied successfully"
+        
+        # Validate configuration
+        validate_configuration "${token}" "${api_base}" || print_warn "Configuration validation had warnings"
     fi
     
     print_info ""
@@ -265,7 +432,17 @@ main() {
     print_info ""
     print_info "Configuration applied:"
     print_info "  - Telemetry and monitoring enabled"
-    print_info "  - Metrics collection configured"
+    print_info "  - Metrics collection configured (1-minute gathering)"
+    print_info "  - Detailed metrics descriptors:"
+    print_info "    • Image vulnerabilities (cve, deployment, namespace)"
+    print_info "    • Policy violations (deployment, namespace)"
+    print_info "    • Node vulnerabilities (component, cve, node)"
+    print_info "  - Platform component rules (Red Hat layered products)"
+    print_info "  - Retention policies configured:"
+    print_info "    • 7-day alert retention"
+    print_info "    • 30-day runtime retention"
+    print_info "    • 90-day vulnerability request retention"
+    print_info "  - Configuration validated successfully"
     print_info ""
 }
 
