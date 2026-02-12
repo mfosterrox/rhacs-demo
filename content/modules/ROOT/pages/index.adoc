@@ -14,7 +14,9 @@ To ensure your RHACS environment is up to date, and has all of the necessary com
 +
 [source,sh,subs="attributes",role=execute]
 ----
-if [ -f install.sh ]; then git pull && ./install.sh; else git clone https://github.com/mfosterrox/rhacs-demo.git && cd rhacs-demo && ./install.sh {acs_portal_password}; fi
+cd ~/
+git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
+./rhacs-demo/basic-setup/install.sh {acs_portal_password}
 ----
 
 . Verify the deployment completed successfully

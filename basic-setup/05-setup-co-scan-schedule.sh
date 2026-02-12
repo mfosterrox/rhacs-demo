@@ -73,46 +73,6 @@ get_central_url() {
     return 1
 }
 
-# Function to generate API token
-generate_api_token() {
-    local central_url=$1
-    local password=$2
-    
-    local api_host="${central_url#https://}"
-    api_host="${api_host#http://}"
-    
-    # All print statements go to stderr
-    print_info "Generating API token..." >&2
-    
-    local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
-        -X POST \
-        -u "admin:${password}" \
-        -H "Content-Type: application/json" \
-        "https://${api_host}/v1/apitokens/generate" \
-        -d '{"name":"compliance-scan-config-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
-    
-    local http_code=$(echo "${response}" | tail -n1)
-    local body=$(echo "${response}" | sed '$d')
-    
-    if [ "${http_code}" != "200" ]; then
-        print_error "Failed to generate API token (HTTP ${http_code})" >&2
-        print_error "URL: https://${api_host}/v1/apitokens/generate" >&2
-        print_error "Response: ${body:0:500}" >&2
-        return 1
-    fi
-    
-    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
-    if [ -z "${token}" ] || [ "${token}" = "null" ]; then
-        print_error "Could not extract token from response" >&2
-        print_error "Response: ${body:0:500}" >&2
-        return 1
-    fi
-    
-    # Only echo the token to stdout (for capture)
-    echo "${token}"
-    return 0
-}
-
 # Function to get cluster ID
 get_cluster_id() {
     local token=$1
@@ -436,19 +396,16 @@ main() {
     api_host="${api_host#http://}"
     local api_base="https://${api_host}"
     
-    # Use provided API token or generate new one
+    # Use API token from environment (required)
     local token="${ROX_API_TOKEN:-}"
     if [ -z "${token}" ]; then
-        print_info "Generating API token..."
-        token=$(generate_api_token "${central_url}" "${ROX_PASSWORD}")
-        if [ -z "${token}" ]; then
-            print_error "Failed to generate API token"
-            exit 1
-        fi
-        print_info "✓ API token generated"
-    else
-        print_info "✓ Using API token from environment"
+        print_error "ROX_API_TOKEN environment variable is not set"
+        print_error "Please set ROX_API_TOKEN before running this script"
+        print_error "You can generate a token using the RHACS UI or API"
+        exit 1
     fi
+    
+    print_info "✓ Using API token from environment"
     
     # Get cluster ID
     local cluster_id=$(get_cluster_id "${token}" "${api_base}")

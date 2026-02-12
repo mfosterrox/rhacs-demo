@@ -121,7 +121,7 @@ add_bashrc_vars_from_cluster() {
 
 # Function to export variables from ~/.bashrc without sourcing (avoids exit from /etc/bashrc etc)
 export_bashrc_vars() {
-    local vars=(ROX_CENTRAL_URL ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME KUBECONFIG GUID CLOUDUSER)
+    local vars=(ROX_CENTRAL_URL ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME KUBECONFIG GUID CLOUDUSER)
     [ ! -f ~/.bashrc ] && return 0
     
     for var in "${vars[@]}"; do
@@ -134,54 +134,6 @@ export_bashrc_vars() {
     done
 }
 
-# Function to generate RHACS API token and save to ~/.bashrc
-generate_rhacs_api_token() {
-    local save_to_bashrc="${1:-false}"
-    
-    # Check if we have required variables
-    if [ -z "${ROX_CENTRAL_URL:-}" ] || [ -z "${ROX_PASSWORD:-}" ]; then
-        return 1
-    fi
-    
-    # Remove https:// prefix for API call
-    local api_host="${ROX_CENTRAL_URL#https://}"
-    api_host="${api_host#http://}"
-    
-    # Generate API token
-    local response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
-        -X POST \
-        -u "admin:${ROX_PASSWORD}" \
-        -H "Content-Type: application/json" \
-        "https://${api_host}/v1/apitokens/generate" \
-        -d '{"name":"install-script-token-'$(date +%s)'","roles":["Admin"]}' 2>&1 || echo "")
-    
-    local http_code=$(echo "${response}" | tail -n1)
-    local body=$(echo "${response}" | sed '$d')
-    
-    if [ "${http_code}" != "200" ]; then
-        return 1
-    fi
-    
-    local token=$(echo "${body}" | jq -r '.token' 2>/dev/null || echo "")
-    if [ -z "${token}" ] || [ "${token}" = "null" ]; then
-        return 1
-    fi
-    
-    # Export token for subscripts
-    export ROX_API_TOKEN="${token}"
-    
-    # Save to ~/.bashrc if requested
-    if [ "${save_to_bashrc}" = "true" ]; then
-        touch ~/.bashrc
-        # Remove any existing ROX_API_TOKEN entries
-        sed -i.bak '/^export ROX_API_TOKEN=/d' ~/.bashrc 2>/dev/null || true
-        # Add new token
-        echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
-        print_info "✓ API token saved to ~/.bashrc"
-    fi
-    
-    return 0
-}
 
 # Save password to ~/.bashrc
 save_password_to_bashrc() {
@@ -316,16 +268,6 @@ main() {
     fi
     print_info ""
     
-    # Try to generate RHACS API token (for use by subscripts)
-    # This may fail if RHACS is not deployed yet - we'll retry after deployment
-    print_info "Attempting to generate RHACS API token for subscripts..."
-    if generate_rhacs_api_token false; then
-        print_info "✓ API token generated and exported"
-    else
-        print_warn "Could not generate API token yet (will retry after RHACS deployment)"
-    fi
-    print_info ""
-    
     # Run setup scripts in order
     print_info "Running setup scripts..."
     print_info "========================="
@@ -348,29 +290,7 @@ main() {
         fi
     done
     
-    # After all setup scripts complete, generate and save API token to ~/.bashrc
     print_info ""
-    print_info "Generating and saving RHACS API token..."
-    
-    # Reload variables from cluster in case they were updated during setup
-    if oc whoami &>/dev/null; then
-        trap - ERR
-        set +e
-        add_bashrc_vars_from_cluster || true
-        export_bashrc_vars || true
-        set -euo pipefail
-        trap 'echo "Error at line $LINENO"' ERR
-    fi
-    
-    # Generate token and save to ~/.bashrc
-    if generate_rhacs_api_token true; then
-        print_info "✓ API token generated and saved to ~/.bashrc"
-    else
-        print_warn "Could not generate API token - please verify ROX_CENTRAL_URL and ROX_PASSWORD are correct"
-        print_warn "You can manually generate a token later using the RHACS UI or API"
-    fi
-    print_info ""
-    
     print_info "======================================"
     print_info "RHACS Demo Environment Setup Complete!"
     print_info "======================================"
