@@ -23,7 +23,7 @@ readonly VM_NAME="${VM_NAME:-rhel-roxagent-vm}"
 readonly VM_CPUS="${VM_CPUS:-2}"
 readonly VM_MEMORY="${VM_MEMORY:-4Gi}"
 readonly VM_DISK_SIZE="${VM_DISK_SIZE:-30Gi}"
-readonly STORAGE_CLASS="${STORAGE_CLASS:-ocs-storagecluster-ceph-rbd}"
+STORAGE_CLASS="${STORAGE_CLASS:-ocs-storagecluster-ceph-rbd}"  # Not readonly - may be set by user input
 readonly RHEL_IMAGE="${RHEL_IMAGE:-registry.redhat.io/rhel9/rhel-guest-image:latest}"
 
 #================================================================
