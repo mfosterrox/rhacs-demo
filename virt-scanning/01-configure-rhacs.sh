@@ -112,11 +112,26 @@ patch_collector_daemonset() {
     # Patch the daemonset - target the compliance container specifically
     oc set env daemonset/collector -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true -c compliance
     
+    # CRITICAL: Enable hostNetwork for VSOCK access AND proper DNS policy
+    print_info "Enabling hostNetwork and ClusterFirstWithHostNet DNS policy for VSOCK..."
+    oc patch daemonset collector -n ${RHACS_NAMESPACE} --type='json' -p='[
+      {
+        "op": "replace",
+        "path": "/spec/template/spec/hostNetwork",
+        "value": true
+      },
+      {
+        "op": "add",
+        "path": "/spec/template/spec/dnsPolicy",
+        "value": "ClusterFirstWithHostNet"
+      }
+    ]'
+    
     # Wait for rollout
-    print_info "Waiting for Collector to restart..."
+    print_info "Waiting for Collector to restart with new network configuration..."
     oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
     
-    print_info "✓ Collector daemonset patched successfully"
+    print_info "✓ Collector daemonset patched successfully with hostNetwork and DNS policy"
 }
 
 #================================================================
