@@ -128,10 +128,11 @@ method_3_pause_hco() {
 }
 
 #================================================================
-# Method 4: Try to enable via KubeVirt feature gates config
+# Method 4: Patch KubeVirt with full feature gates array (per docs)
 #================================================================
 method_4_kubevirt_config() {
-    print_step "Method 4: Patch KubeVirt with full feature gates array"
+    print_step "Method 4: Patch KubeVirt with complete feature gates array"
+    print_info "Following official KubeVirt documentation approach"
     
     print_info "Getting current feature gates..."
     local current_gates=$(oc get kubevirt kubevirt-kubevirt-hyperconverged -n ${CNV_NAMESPACE} -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' 2>/dev/null || echo "[]")
@@ -143,26 +144,38 @@ method_4_kubevirt_config() {
     fi
     
     print_info "Current gates: ${current_gates}"
-    print_info "Attempting to add VSOCK..."
+    print_info "Creating new array with VSOCK added..."
     
-    # Try to replace the entire array with VSOCK added
-    local new_gates=$(echo "${current_gates}" | sed 's/\]/,"VSOCK"]/')
+    # Build the complete feature gates array with VSOCK
+    cat <<EOF | oc apply -f -
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt-kubevirt-hyperconverged
+  namespace: ${CNV_NAMESPACE}
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+        - "CPUManager"
+        - "Snapshot"
+        - "ExpandDisks"
+        - "HostDevices"
+        - "VMExport"
+        - "KubevirtSeccompProfile"
+        - "VMPersistentState"
+        - "InstancetypeReferencePolicy"
+        - "WithHostModelCPU"
+        - "HypervStrictCheck"
+        - "HotplugVolumes"
+        - "VSOCK"
+EOF
     
-    print_info "New gates: ${new_gates}"
-    
-    if oc patch kubevirt kubevirt-kubevirt-hyperconverged -n ${CNV_NAMESPACE} --type=merge -p "{
-      \"spec\": {
-        \"configuration\": {
-          \"developerConfiguration\": {
-            \"featureGates\": ${new_gates}
-          }
-        }
-      }
-    }" 2>/dev/null; then
-        print_success "Patch applied successfully"
+    if [ $? -eq 0 ]; then
+        print_success "KubeVirt resource updated with VSOCK"
         return 0
     else
-        print_error "Patch failed"
+        print_error "Failed to update KubeVirt resource"
         return 1
     fi
 }
