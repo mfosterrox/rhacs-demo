@@ -41,6 +41,7 @@ display_banner() {
     print_header "╚════════════════════════════════════════════════════════════╝"
     echo ""
     echo "This script will:"
+    echo "  0. Clean up any existing VMs (ensures fresh deployment)"
     echo "  1. Configure RHACS platform (Central, Sensor, Collector)"
     echo "  2. Enable VSOCK support in OpenShift Virtualization"
     echo "  3. Enable hostNetwork on Collector for VSOCK access"
@@ -65,6 +66,80 @@ display_configuration() {
     echo "  • Sample VMs deployment: ${DEPLOY_SAMPLE_VMS}"
     echo ""
     print_info "Starting automated setup..."
+    sleep 2
+}
+
+#================================================================
+# Cleanup existing VMs
+#================================================================
+cleanup_existing_vms() {
+    echo ""
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Cleaning up existing VMs for fresh deployment"
+    print_header "════════════════════════════════════════════════════════════"
+    echo ""
+    
+    local vms_to_delete=(
+        "rhel-roxagent-vm"
+        "rhel-webserver"
+        "rhel-database"
+        "rhel-devtools"
+        "rhel-monitoring"
+    )
+    
+    local found_vms=false
+    
+    # Check which VMs exist
+    print_info "Checking for existing VMs..."
+    for vm in "${vms_to_delete[@]}"; do
+        if oc get vm "$vm" -n default &>/dev/null; then
+            print_warn "Found existing VM: $vm"
+            found_vms=true
+        fi
+    done
+    
+    if [ "$found_vms" = false ]; then
+        print_info "No existing VMs found - clean slate!"
+        sleep 1
+        return 0
+    fi
+    
+    echo ""
+    print_info "Deleting existing VMs to ensure clean deployment..."
+    
+    # Delete all VMs (gracefully handle if they don't exist)
+    for vm in "${vms_to_delete[@]}"; do
+        if oc get vm "$vm" -n default &>/dev/null; then
+            print_info "Deleting VM: $vm"
+            oc delete vm "$vm" -n default --wait=false || true
+        fi
+    done
+    
+    # Wait for deletions to complete
+    print_info "Waiting for VM deletions to complete..."
+    local max_wait=60
+    local elapsed=0
+    
+    while [ $elapsed -lt $max_wait ]; do
+        local remaining=0
+        for vm in "${vms_to_delete[@]}"; do
+            if oc get vm "$vm" -n default &>/dev/null; then
+                ((remaining++))
+            fi
+        done
+        
+        if [ $remaining -eq 0 ]; then
+            print_info "✓ All VMs deleted successfully"
+            sleep 2
+            return 0
+        fi
+        
+        sleep 5
+        ((elapsed+=5))
+    done
+    
+    print_warn "Some VMs may still be deleting in background (timeout reached)"
+    print_info "Continuing with setup..."
     sleep 2
 }
 
@@ -229,6 +304,9 @@ handle_error() {
 main() {
     display_banner
     display_configuration
+    
+    # Clean up existing VMs first
+    cleanup_existing_vms || handle_error "Cleanup existing VMs"
     
     # Execute steps in order
     step_configure_rhacs || handle_error "Configure RHACS"
