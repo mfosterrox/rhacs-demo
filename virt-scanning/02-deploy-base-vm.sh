@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # Script: 02-build-vm-image.sh

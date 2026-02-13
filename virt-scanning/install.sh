@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Script: virt-scanning/install.sh
-# Description: Configure RHACS for virtual machine vulnerability management
+# Script: install.sh
+# Description: Complete RHACS VM vulnerability scanning setup
+# This is the main orchestration script that calls all sub-scripts
 
 set -euo pipefail
 
@@ -10,302 +11,239 @@ readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
+readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
 readonly NC='\033[0m'
 
-# Print functions
 print_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
+print_step() { echo -e "${CYAN}[STEP]${NC} $*"; }
+print_header() { echo -e "${BOLD}${BLUE}$*${NC}"; }
 
-# Error handler
-error_handler() {
-    local exit_code=$1
-    local line_number=$2
-    print_error "Error at line ${line_number} (exit code: ${exit_code})"
-    exit "${exit_code}"
-}
-
-trap 'error_handler $? $LINENO' ERR
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Configuration
-readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
-readonly CNV_NAMESPACE="openshift-cnv"
+DEPLOY_BASE_VM="${DEPLOY_BASE_VM:-true}"
+DEPLOY_SAMPLE_VMS="${DEPLOY_SAMPLE_VMS:-true}"
 
 #================================================================
-# Patch Central deployment
+# Display banner
 #================================================================
-patch_central_deployment() {
-    print_step "1. Patching Central deployment with ROX_VIRTUAL_MACHINES feature flag"
-    
-    # Check if already set
-    local current_value=$(oc get deployment central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
-    
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Central already has ROX_VIRTUAL_MACHINES=true"
-        return 0
-    fi
-    
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Central deployment..."
-    
-    # Patch the deployment
-    oc set env deployment/central -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
-    
-    # Wait for rollout
-    print_info "Waiting for Central to restart..."
-    oc rollout status deployment/central -n ${RHACS_NAMESPACE} --timeout=5m
-    
-    print_info "✓ Central deployment patched successfully"
+display_banner() {
+    clear
+    echo ""
+    print_header "╔════════════════════════════════════════════════════════════╗"
+    print_header "║                                                            ║"
+    print_header "║     RHACS Virtual Machine Vulnerability Scanning Setup    ║"
+    print_header "║                                                            ║"
+    print_header "╚════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "This script will:"
+    echo "  1. Configure RHACS platform (Central, Sensor, Collector)"
+    echo "  2. Enable VSOCK support in OpenShift Virtualization"
+    echo "  3. Enable hostNetwork on Collector for VSOCK access"
+    echo "  4. Deploy base RHEL VM with roxagent (optional)"
+    echo "  5. Deploy 4 sample VMs with different DNF packages (optional)"
+    echo ""
+    echo "Sample VMs include:"
+    echo "  • Web Server (httpd, nginx, php)"
+    echo "  • Database (postgresql, mariadb)"
+    echo "  • Dev Tools (git, gcc, python, nodejs, java)"
+    echo "  • Monitoring (grafana, telegraf, collectd)"
+    echo ""
 }
 
 #================================================================
-# Patch Sensor deployment
+# Display configuration
 #================================================================
-patch_sensor_deployment() {
-    print_step "2. Patching Sensor deployment with ROX_VIRTUAL_MACHINES feature flag"
-    
-    # Check if already set
-    local current_value=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
-    
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Sensor already has ROX_VIRTUAL_MACHINES=true"
-        return 0
-    fi
-    
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Sensor deployment..."
-    
-    # Patch the deployment
-    oc set env deployment/sensor -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
-    
-    # Wait for rollout
-    print_info "Waiting for Sensor to restart..."
-    oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=5m
-    
-    print_info "✓ Sensor deployment patched successfully"
+display_configuration() {
+    echo ""
+    print_info "Configuration:"
+    echo "  • Base VM deployment: ${DEPLOY_BASE_VM}"
+    echo "  • Sample VMs deployment: ${DEPLOY_SAMPLE_VMS}"
+    echo ""
+    print_info "Starting automated setup..."
+    sleep 2
 }
 
 #================================================================
-# Patch Collector daemonset compliance container
+# Step 1: Configure RHACS and VSOCK
 #================================================================
-patch_collector_daemonset() {
-    print_step "3. Patching Collector daemonset compliance container"
+step_configure_rhacs() {
+    echo ""
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Step 1: Configure RHACS Platform and Enable VSOCK"
+    print_header "════════════════════════════════════════════════════════════"
+    echo ""
     
-    # Check if compliance container exists
-    local has_compliance=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].name}' 2>/dev/null || echo "")
-    
-    if [ -z "${has_compliance}" ]; then
-        print_warn "⚠ Collector daemonset has no 'compliance' container"
-        print_info "  This might be expected depending on your RHACS version"
-        return 0
-    fi
-    
-    # Check if already set
-    local current_value=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
-    
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Collector compliance container already has ROX_VIRTUAL_MACHINES=true"
-        return 0
-    fi
-    
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Collector compliance container..."
-    
-    # Patch the daemonset - target the compliance container specifically
-    oc set env daemonset/collector -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true -c compliance
-    
-    # CRITICAL: Enable hostNetwork for VSOCK access
-    print_info "Enabling hostNetwork for VSOCK access..."
-    oc patch daemonset collector -n ${RHACS_NAMESPACE} --type='json' -p='[
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/hostNetwork",
-        "value": true
-      }
-    ]'
-    
-    # Wait for rollout
-    print_info "Waiting for Collector to restart..."
-    oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
-    
-    print_info "✓ Collector daemonset patched successfully with hostNetwork enabled"
-}
-
-#================================================================
-# Patch HyperConverged resource for vsock
-#================================================================
-patch_hyperconverged_vsock() {
-    print_step "4. Patching HyperConverged resource to enable vsock support"
-    
-    # Check if HyperConverged exists
-    if ! oc get hyperconverged -n ${CNV_NAMESPACE} >/dev/null 2>&1; then
-        print_error "HyperConverged resource not found"
-        print_error "Ensure OpenShift Virtualization operator is installed"
+    if [ ! -f "${SCRIPT_DIR}/01-configure-rhacs.sh" ]; then
+        print_error "01-configure-rhacs.sh not found in ${SCRIPT_DIR}"
         return 1
     fi
     
-    # Get HyperConverged name
-    local hco_name=$(oc get hyperconverged -n ${CNV_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
-    if [ -z "${hco_name}" ]; then
-        print_error "No HyperConverged resource found"
+    print_info "Running RHACS configuration..."
+    if ! bash "${SCRIPT_DIR}/01-configure-rhacs.sh"; then
+        print_error "RHACS configuration failed"
         return 1
     fi
     
-    print_info "Found HyperConverged resource: ${hco_name}"
-    print_info "Enabling VSOCK feature gate via HyperConverged annotation..."
-    
-    # Get the KubeVirt resource name for status checking
-    local kubevirt_name=$(oc get kubevirt -n ${CNV_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "kubevirt-kubevirt-hyperconverged")
-    
-    # Check if VSOCK is already enabled
-    local current_gates=$(oc get kubevirt ${kubevirt_name} -n ${CNV_NAMESPACE} -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' 2>/dev/null || echo "[]")
-    
-    if echo "${current_gates}" | grep -q "VSOCK"; then
-        print_info "✓ VSOCK feature gate already enabled"
-    else
-        print_info "Adding VSOCK via JSON patch annotation on HyperConverged..."
-        
-        # Use annotation method (this is what worked in testing)
-        oc annotate hyperconverged ${hco_name} -n ${CNV_NAMESPACE} --overwrite \
-            kubevirt.kubevirt.io/jsonpatch='[
-              {
-                "op":"add",
-                "path":"/spec/configuration/developerConfiguration/featureGates/-",
-                "value":"VSOCK"
-              }
-            ]'
-        
-        print_info "✓ Annotation applied to HyperConverged"
-        print_info "  Waiting for HCO to propagate changes (30s)..."
-        sleep 30
-        
-        # Verify it worked
-        local new_gates=$(oc get kubevirt ${kubevirt_name} -n ${CNV_NAMESPACE} -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' 2>/dev/null || echo "[]")
-        
-        if echo "${new_gates}" | grep -q "VSOCK"; then
-            print_info "✓ VSOCK successfully enabled!"
-        else
-            print_warn "⚠ VSOCK not yet visible - may need more time to reconcile"
-            print_info "  Run: ./enable-vsock.sh for advanced troubleshooting"
-        fi
+    print_info "✓ RHACS configuration complete"
+    sleep 2
+}
+
+#================================================================
+# Step 2: Deploy base VM
+#================================================================
+step_deploy_base_vm() {
+    if [ "${DEPLOY_BASE_VM}" != "true" ]; then
+        print_warn "Skipping base VM deployment (DEPLOY_BASE_VM=false)"
+        return 0
     fi
     
-    print_info "  Note: VMs must be configured with autoattachVSOCK: true"
-}
-
-#================================================================
-# Display VM configuration instructions
-#================================================================
-display_vm_instructions() {
-    print_step "5. Virtual Machine Configuration"
+    echo ""
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Step 2: Deploy Base RHEL VM"
+    print_header "════════════════════════════════════════════════════════════"
     echo ""
     
-    print_info "To enable vulnerability scanning on VMs, update each VM spec:"
+    if [ ! -f "${SCRIPT_DIR}/02-deploy-base-vm.sh" ]; then
+        print_error "02-deploy-base-vm.sh not found in ${SCRIPT_DIR}"
+        return 1
+    fi
+    
+    print_info "Deploying base RHEL VM with roxagent..."
+    if ! bash "${SCRIPT_DIR}/02-deploy-base-vm.sh"; then
+        print_error "Base VM deployment failed"
+        return 1
+    fi
+    
+    print_info "✓ Base VM deployment complete"
+    sleep 2
+}
+
+#================================================================
+# Step 3: Deploy sample VMs
+#================================================================
+step_deploy_sample_vms() {
+    if [ "${DEPLOY_SAMPLE_VMS}" != "true" ]; then
+        print_warn "Skipping sample VMs deployment (DEPLOY_SAMPLE_VMS=false)"
+        return 0
+    fi
+    
     echo ""
-    print_info "Example VM patch:"
-    cat <<'EOF'
-
-    oc patch vm <vm-name> -n <namespace> --type=merge -p '
-    {
-      "spec": {
-        "template": {
-          "spec": {
-            "domain": {
-              "devices": {
-                "autoattachVSOCK": true
-              }
-            }
-          }
-        }
-      }
-    }'
-
-EOF
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Step 3: Deploy Sample VMs with DNF Packages"
+    print_header "════════════════════════════════════════════════════════════"
     echo ""
-    print_info "Or add to VM YAML:"
-    cat <<'EOF'
+    
+    if [ ! -f "${SCRIPT_DIR}/03-deploy-sample-vms.sh" ]; then
+        print_error "03-deploy-sample-vms.sh not found in ${SCRIPT_DIR}"
+        return 1
+    fi
+    
+    print_info "Deploying 4 sample VMs with different package profiles..."
+    
+    # Export AUTO_CONFIRM to skip prompts
+    export AUTO_CONFIRM=true
+    
+    if ! bash "${SCRIPT_DIR}/03-deploy-sample-vms.sh"; then
+        print_error "Sample VMs deployment failed"
+        return 1
+    fi
+    
+    print_info "✓ Sample VMs deployment complete"
+    sleep 2
+}
 
-    spec:
-      template:
-        spec:
-          domain:
-            devices:
-              autoattachVSOCK: true
-
-EOF
+#================================================================
+# Display final summary
+#================================================================
+display_summary() {
     echo ""
-    print_info "Additional VM requirements:"
-    print_info "  • Must run Red Hat Enterprise Linux (RHEL)"
-    print_info "  • RHEL must have valid subscription"
-    print_info "  • Network access for CPE mappings"
+    print_header "════════════════════════════════════════════════════════════"
+    print_header "                    Setup Complete! ✓                       "
+    print_header "════════════════════════════════════════════════════════════"
+    echo ""
+    
+    print_info "What was configured:"
+    echo ""
+    echo "  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)"
+    echo "  ✓ OpenShift Virtualization VSOCK feature gate enabled"
+    echo "  ✓ Collector hostNetwork enabled for VSOCK access"
+    
+    if [ "${DEPLOY_BASE_VM}" == "true" ]; then
+        echo "  ✓ Base RHEL VM deployed (rhel-roxagent-vm)"
+    fi
+    
+    if [ "${DEPLOY_SAMPLE_VMS}" == "true" ]; then
+        echo "  ✓ Sample VMs deployed:"
+        echo "    • rhel-webserver (httpd, nginx, php)"
+        echo "    • rhel-database (postgresql, mariadb)"
+        echo "    • rhel-devtools (git, gcc, python, nodejs)"
+        echo "    • rhel-monitoring (grafana, telegraf, collectd)"
+    fi
+    
+    echo ""
+    print_header "Next Steps:"
+    echo ""
+    echo "  1. Wait 10-15 minutes for VMs to fully boot and install packages"
+    echo ""
+    echo "  2. Check VM status:"
+    echo "     $ oc get vmi -n default"
+    echo ""
+    echo "  3. View vulnerabilities in RHACS UI:"
+    echo "     Platform Configuration → Clusters → Virtual Machines"
+    echo ""
+    echo "  4. VMs need valid RHEL subscriptions for package updates:"
+    echo "     Inside each VM:"
+    echo "     $ subscription-manager register --username <user> --password <pass>"
+    echo "     $ subscription-manager attach --auto"
+    echo ""
+    
+    print_info "Documentation: ${SCRIPT_DIR}/README.md"
     echo ""
 }
 
 #================================================================
-# Main function
+# Handle errors
+#================================================================
+handle_error() {
+    local exit_code=$?
+    echo ""
+    print_error "Setup failed at step: $1"
+    print_info "Check the logs above for details"
+    echo ""
+    print_info "You can run individual scripts manually:"
+    echo "  • ${SCRIPT_DIR}/01-configure-rhacs.sh"
+    echo "  • ${SCRIPT_DIR}/02-deploy-base-vm.sh"
+    echo "  • ${SCRIPT_DIR}/03-deploy-sample-vms.sh"
+    echo ""
+    exit $exit_code
+}
+
+#================================================================
+# Main execution
 #================================================================
 main() {
-    print_info "=========================================="
-    print_info "RHACS VM Vulnerability Management Setup"
-    print_info "=========================================="
-    echo ""
+    display_banner
+    display_configuration
     
-    # Check prerequisites
-    if ! oc whoami &>/dev/null; then
-        print_error "Not connected to OpenShift cluster"
-        exit 1
-    fi
+    # Execute steps in order
+    step_configure_rhacs || handle_error "Configure RHACS"
+    step_deploy_base_vm || handle_error "Deploy Base VM"
+    step_deploy_sample_vms || handle_error "Deploy Sample VMs"
     
-    print_info "Connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
-    echo ""
-    
-    # Verify OpenShift Virtualization is installed
-    if ! oc get namespace ${CNV_NAMESPACE} >/dev/null 2>&1; then
-        print_error "OpenShift Virtualization not installed"
-        print_error "Install OpenShift Virtualization operator first"
-        exit 1
-    fi
-    
-    if ! oc get csv -n ${CNV_NAMESPACE} 2>/dev/null | grep -q "OpenShift Virtualization.*Succeeded"; then
-        print_error "OpenShift Virtualization operator not ready"
-        exit 1
-    fi
-    
-    print_info "✓ OpenShift Virtualization operator detected"
-    echo ""
-    
-    # Patch RHACS components
-    patch_central_deployment
-    echo ""
-    
-    patch_sensor_deployment
-    echo ""
-    
-    patch_collector_daemonset
-    echo ""
-    
-    patch_hyperconverged_vsock
-    echo ""
-    
-    # Display VM configuration instructions
-    display_vm_instructions
-    
-    print_info "=========================================="
-    print_info "VM Vulnerability Management Setup Complete"
-    print_info "=========================================="
-    echo ""
-    print_info "Feature flags configured:"
-    print_info "  ✓ Central: ROX_VIRTUAL_MACHINES=true"
-    print_info "  ✓ Sensor: ROX_VIRTUAL_MACHINES=true"
-    print_info "  ✓ Collector: ROX_VIRTUAL_MACHINES=true"
-    print_info "  ✓ HyperConverged: vsock support enabled"
-    echo ""
-    print_info "Next steps:"
-    print_info "  1. Configure VMs with vsock support (see instructions above)"
-    print_info "  2. Ensure VMs are running RHEL with valid subscriptions"
-    print_info "  3. Verify VM network access"
-    print_info "  4. Run: ./01-check-env.sh to verify configuration"
-    echo ""
+    # Show summary
+    display_summary
 }
 
-# Run main function
+# Check we're in the right directory
+if [ ! -f "${SCRIPT_DIR}/01-configure-rhacs.sh" ]; then
+    print_error "This script must be run from the virt-scanning directory"
+    print_info "Expected location: ${SCRIPT_DIR}/01-configure-rhacs.sh"
+    exit 1
+fi
+
 main "$@"
