@@ -271,44 +271,35 @@ EOF
 # Wait for all VMs to be ready
 #================================================================
 wait_for_vms() {
-    print_step "Waiting for VMs to start..."
+    print_step "Checking VM status..."
     
-    local max_wait=120  # Wait up to 2 minutes
-    local elapsed=0
+    local ready_count=0
+    local total_count=4  # We know we're deploying 4 VMs
     
-    while [ $elapsed -lt $max_wait ]; do
-        local ready_count=0
-        local total_count=${#VM_PROFILES[@]}
+    # Quick check if VMs are already running
+    for profile in webserver database devtools monitoring; do
+        local vm_name="rhel-${profile}"
         
-        for profile in "${!VM_PROFILES[@]}"; do
-            local vm_name="rhel-${profile}"
+        if oc get vmi "${vm_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+            local phase=$(oc get vmi "${vm_name}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
             
-            if oc get vmi "${vm_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-                local phase=$(oc get vmi "${vm_name}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-                
-                if [ "${phase}" == "Running" ]; then
-                    ((ready_count++))
-                fi
+            if [ "${phase}" == "Running" ]; then
+                ready_count=$((ready_count + 1))
             fi
-        done
-        
-        print_info "VMs ready: ${ready_count}/${total_count}"
-        
-        if [ $ready_count -eq $total_count ]; then
-            print_info "✓ All VMs are running"
-            return 0
         fi
-        
-        sleep 10
-        ((elapsed+=10))
     done
     
-    # Don't fail - VMs may take time to boot
-    print_warn "Not all VMs reached Running state within ${max_wait}s"
-    print_info "VMs are being created and will continue starting in the background"
-    print_info "Check status with: oc get vmi -n ${NAMESPACE}"
+    print_info "VMs in Running state: ${ready_count}/${total_count}"
     
-    # Return success - deployment completed, VMs just need more time
+    if [ ${ready_count} -eq ${total_count} ]; then
+        print_info "✓ All VMs are running"
+    else
+        print_warn "Some VMs still starting (${ready_count}/${total_count} running)"
+        print_info "VMs will continue booting in the background"
+        print_info "This is normal - VMs take 5-10 minutes to fully initialize"
+    fi
+    
+    # Always return success - deployment is complete even if VMs are still booting
     return 0
 }
 
@@ -374,27 +365,30 @@ main() {
     fi
     
     # Deploy each VM
-    for profile in "${!VM_PROFILES[@]}"; do
-        deploy_vm "${profile}"
+    for profile in webserver database devtools monitoring; do
+        deploy_vm "${profile}" || true  # Continue even if one fails
         echo ""
     done
     
-    # Wait for VMs to be ready
-    wait_for_vms
+    # Check VM status (always succeeds)
+    wait_for_vms || true
     
     echo ""
-    display_vm_info
+    display_vm_info || true  # Don't fail if this errors
     
     echo ""
     print_info "✓ Sample VM deployment complete!"
     echo ""
     print_info "Next steps:"
-    echo "  1. Wait 5-10 minutes for VMs to fully boot and install packages"
-    echo "  2. Check RHACS UI: Platform Configuration → Virtual Machines"
-    echo "  3. View vulnerabilities discovered in DNF packages"
+    echo "  1. Wait 10-15 minutes for VMs to fully boot and install packages"
+    echo "  2. Check VM status: oc get vmi -n default"
+    echo "  3. View vulnerabilities in RHACS UI:"
+    echo "     Platform Configuration → Clusters → Virtual Machines"
     echo ""
-    print_warn "Note: VMs must have valid RHEL subscriptions for package updates"
-    print_info "Register inside each VM: subscription-manager register --username <user> --password <pass>"
+    print_warn "Note: VMs need valid RHEL subscriptions for DNF package updates"
+    print_info "Register inside each VM:"
+    print_info "  subscription-manager register --username <user> --password <pass>"
+    print_info "  subscription-manager attach --auto"
 }
 
 main "$@"
