@@ -171,43 +171,6 @@ runcmd:
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   
-EOF
-
-    # Add subscription registration if credentials provided
-    if [ "${INSTALL_PACKAGES}" = "true" ]; then
-        if [ -n "${RH_USERNAME}" ] && [ -n "${RH_PASSWORD}" ]; then
-            cat <<EOF
-  # Register with Red Hat subscription (username/password)
-  - |
-    echo "Registering with Red Hat subscription..."
-    subscription-manager register \\
-      --username '${RH_USERNAME}' \\
-      --password '${RH_PASSWORD}' \\
-      --auto-attach || echo "Registration failed, continuing..."
-    subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms || true
-    subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms || true
-    dnf clean all
-    dnf makecache || true
-  
-EOF
-        elif [ -n "${RH_ORG_ID}" ] && [ -n "${RH_ACTIVATION_KEY}" ]; then
-            cat <<EOF
-  # Register with Red Hat subscription (org/activation key)
-  - |
-    echo "Registering with Red Hat subscription..."
-    subscription-manager register \\
-      --org='${RH_ORG_ID}' \\
-      --activationkey='${RH_ACTIVATION_KEY}' || echo "Registration failed, continuing..."
-    subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms || true
-    subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms || true
-    dnf clean all
-    dnf makecache || true
-  
-EOF
-        fi
-    fi
-
-    cat <<EOF
   # Create roxagent directory
   - mkdir -p /opt/roxagent
   - chmod 755 /opt/roxagent
@@ -245,31 +208,11 @@ EOF
   - systemctl enable roxagent
   - systemctl start roxagent
   
-EOF
-
-    # Install packages if enabled and credentials provided
-    if [ "${INSTALL_PACKAGES}" = "true" ] && { [ -n "${RH_USERNAME}" ] || [ -n "${RH_ORG_ID}" ]; }; then
-        cat <<EOF
-  # Install packages now (subscription registered above)
-  - |
-    echo "Installing packages for ${vm_profile} profile..."
-    dnf install -y ${packages} || echo "Some packages may have failed to install"
-    echo "Packages installed. Restarting roxagent to scan new packages..."
-    systemctl restart roxagent
-  
-  # Log completion
-  - echo "VM profile '${vm_profile}' configured with packages installed"
-  - echo "roxagent service started and will scan installed packages"
-
-final_message: "RHEL VM '${vm_profile}' is ready with packages installed. roxagent scanning."
-EOF
-    else
-        cat <<EOF
-  # Create package install script for later use (if manual registration needed)
+  # Create package install script for later use
   - |
     cat > /root/install-packages.sh <<'PKG_SCRIPT'
     #!/bin/bash
-    # Run this after registering RHEL subscription
+    # Run this after VM is booted to install packages
     echo "Installing packages for ${vm_profile} profile..."
     dnf install -y ${packages}
     echo "Packages installed. Restarting roxagent to scan new packages..."
@@ -281,13 +224,10 @@ EOF
   # Log completion
   - echo "VM profile '${vm_profile}' configured"
   - echo "roxagent service started"
-  - echo "To install packages, register with subscription-manager and run /root/install-packages.sh"
 
-final_message: "RHEL VM '${vm_profile}' is ready. roxagent running. Register RHEL subscription to install packages."
+final_message: "RHEL VM '${vm_profile}' is ready. roxagent running."
 EOF
-    fi
-    
-    echo "EOF"
+}
 }
 
 #================================================================
