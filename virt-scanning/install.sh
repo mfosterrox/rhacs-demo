@@ -25,8 +25,12 @@ print_header() { echo -e "${BOLD}${BLUE}$*${NC}"; }
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Configuration
-DEPLOY_BASE_VM="${DEPLOY_BASE_VM:-true}"
+DEPLOY_BASE_VM="${DEPLOY_BASE_VM:-false}"  # Base VM not needed for demo
 DEPLOY_SAMPLE_VMS="${DEPLOY_SAMPLE_VMS:-true}"
+
+# Red Hat subscription credentials (will be prompted)
+RH_USERNAME=""
+RH_PASSWORD=""
 
 #================================================================
 # Display banner
@@ -40,34 +44,64 @@ display_banner() {
     print_header "║                                                            ║"
     print_header "╚════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "This script will:"
-    echo "  0. Clean up any existing VMs (ensures fresh deployment)"
-    echo "  1. Configure RHACS platform (Central, Sensor, Collector)"
-    echo "  2. Enable VSOCK support in OpenShift Virtualization"
-    echo "  3. Enable hostNetwork on Collector for VSOCK access"
-    echo "  4. Deploy base RHEL VM with roxagent (optional)"
-    echo "  5. Deploy 4 sample VMs with different DNF packages (optional)"
+    echo "This automated script will:"
+    echo "  1. Prompt for Red Hat subscription credentials"
+    echo "  2. Configure RHACS for VM scanning"
+    echo "  3. Enable VSOCK in OpenShift Virtualization"
+    echo "  4. Deploy 4 RHEL VMs with packages installed"
+    echo "  5. Start vulnerability scanning automatically"
     echo ""
-    echo "Sample VMs include:"
-    echo "  • Web Server (httpd, nginx, php)"
-    echo "  • Database (postgresql, mariadb)"
-    echo "  • Dev Tools (git, gcc, python, nodejs, java)"
-    echo "  • Monitoring (grafana, telegraf, collectd)"
+    echo "Sample VMs (with packages):"
+    echo "  • rhel-webserver: httpd, nginx, php"
+    echo "  • rhel-database: postgresql, mariadb"
+    echo "  • rhel-devtools: git, gcc, python, nodejs"
+    echo "  • rhel-monitoring: grafana, telegraf, net-snmp"
+    echo ""
+    echo "⏱️  Total time: ~15 minutes"
     echo ""
 }
 
 #================================================================
-# Display configuration
+# Prompt for Red Hat credentials
 #================================================================
-display_configuration() {
+prompt_credentials() {
     echo ""
-    print_info "Configuration:"
-    echo "  • Base VM deployment: ${DEPLOY_BASE_VM}"
-    echo "  • Sample VMs deployment: ${DEPLOY_SAMPLE_VMS}"
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Red Hat Subscription Credentials"
+    print_header "════════════════════════════════════════════════════════════"
     echo ""
-    print_info "Starting automated setup..."
+    
+    print_info "VMs will automatically register and install packages during deployment"
+    print_info "Credentials are used only during VM setup (stored in cloud-init secrets)"
+    echo ""
+    
+    read -p "Red Hat Username: " RH_USERNAME
+    read -sp "Red Hat Password: " RH_PASSWORD
+    echo ""
+    echo ""
+    
+    if [ -z "$RH_USERNAME" ] || [ -z "$RH_PASSWORD" ]; then
+        print_warn "Credentials not provided"
+        print_warn "VMs will deploy but packages will NOT be installed"
+        print_warn "You'll need to register and install packages manually"
+        echo ""
+        read -p "Continue without credentials? (y/N): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Setup cancelled"
+            exit 1
+        fi
+        export INSTALL_PACKAGES="false"
+    else
+        print_info "✓ Credentials received"
+        export INSTALL_PACKAGES="true"
+        export RH_USERNAME
+        export RH_PASSWORD
+    fi
+    
     sleep 2
 }
+
 
 #================================================================
 # Cleanup existing VMs
@@ -80,7 +114,6 @@ cleanup_existing_vms() {
     echo ""
     
     local vms_to_delete=(
-        "rhel-roxagent-vm"
         "rhel-webserver"
         "rhel-database"
         "rhel-devtools"
@@ -169,47 +202,12 @@ step_configure_rhacs() {
 }
 
 #================================================================
-# Step 2: Deploy base VM
-#================================================================
-step_deploy_base_vm() {
-    if [ "${DEPLOY_BASE_VM}" != "true" ]; then
-        print_warn "Skipping base VM deployment (DEPLOY_BASE_VM=false)"
-        return 0
-    fi
-    
-    echo ""
-    print_header "════════════════════════════════════════════════════════════"
-    print_step "Step 2: Deploy Base RHEL VM"
-    print_header "════════════════════════════════════════════════════════════"
-    echo ""
-    
-    if [ ! -f "${SCRIPT_DIR}/02-deploy-base-vm.sh" ]; then
-        print_error "02-deploy-base-vm.sh not found in ${SCRIPT_DIR}"
-        return 1
-    fi
-    
-    print_info "Deploying base RHEL VM with roxagent..."
-    if ! bash "${SCRIPT_DIR}/02-deploy-base-vm.sh"; then
-        print_error "Base VM deployment failed"
-        return 1
-    fi
-    
-    print_info "✓ Base VM deployment complete"
-    sleep 2
-}
-
-#================================================================
-# Step 3: Deploy sample VMs
+# Step 2: Deploy VMs
 #================================================================
 step_deploy_sample_vms() {
-    if [ "${DEPLOY_SAMPLE_VMS}" != "true" ]; then
-        print_warn "Skipping sample VMs deployment (DEPLOY_SAMPLE_VMS=false)"
-        return 0
-    fi
-    
     echo ""
     print_header "════════════════════════════════════════════════════════════"
-    print_step "Step 3: Deploy Sample VMs with DNF Packages"
+    print_step "Step 2: Deploy VMs with Packages"
     print_header "════════════════════════════════════════════════════════════"
     echo ""
     
@@ -246,36 +244,47 @@ display_summary() {
     echo ""
     echo "  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)"
     echo "  ✓ OpenShift Virtualization VSOCK feature gate enabled"
-    echo "  ✓ Collector hostNetwork enabled for VSOCK access"
+    echo "  ✓ Collector hostNetwork + DNS configured for VSOCK"
+    echo "  ✓ 4 RHEL VMs deployed with roxagent:"
+    echo "    • rhel-webserver (httpd, nginx, php)"
+    echo "    • rhel-database (postgresql, mariadb)"
+    echo "    • rhel-devtools (git, gcc, python, nodejs)"
+    echo "    • rhel-monitoring (grafana, telegraf, net-snmp)"
     
-    if [ "${DEPLOY_BASE_VM}" == "true" ]; then
-        echo "  ✓ Base RHEL VM deployed (rhel-roxagent-vm)"
-    fi
-    
-    if [ "${DEPLOY_SAMPLE_VMS}" == "true" ]; then
-        echo "  ✓ Sample VMs deployed:"
-        echo "    • rhel-webserver (httpd, nginx, php)"
-        echo "    • rhel-database (postgresql, mariadb)"
-        echo "    • rhel-devtools (git, gcc, python, nodejs)"
-        echo "    • rhel-monitoring (grafana, telegraf, collectd)"
+    if [ "${INSTALL_PACKAGES}" == "true" ]; then
+        echo "  ✓ VMs registered with Red Hat subscription"
+        echo "  ✓ Packages installing via cloud-init (background)"
+    else
+        echo "  ⚠ No credentials provided - packages NOT installed"
     fi
     
     echo ""
     print_header "Next Steps:"
     echo ""
-    echo "  1. Wait 5-10 minutes for VMs to fully boot"
+    echo "  1. Wait 10-15 minutes for:"
+    echo "     • VMs to fully boot"
+    if [ "${INSTALL_PACKAGES}" == "true" ]; then
+        echo "     • Cloud-init to register subscription and install packages"
+    fi
+    echo "     • roxagent to complete first scan"
+    echo ""
+    echo "  2. Check VM status:"
     echo "     $ oc get vmi -n default"
-    echo ""
-    echo "  2. Install packages for vulnerability demo (OPTIONAL):"
-    echo "     $ ./setup-demo-packages.sh"
-    echo "     This will register VMs and install DNF packages"
-    echo "     (Requires Red Hat subscription credentials)"
-    echo ""
-    echo "  3. View VMs in RHACS UI:"
-    echo "     Platform Configuration → Clusters → Virtual Machines"
-    echo ""
-    echo "  4. Check status:"
     echo "     $ ./check-vm-status.sh"
+    echo ""
+    echo "  3. View results in RHACS UI:"
+    CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
+    echo "     ${CENTRAL_URL}"
+    echo "     → Platform Configuration → Clusters → Virtual Machines"
+    echo ""
+    
+    if [ "${INSTALL_PACKAGES}" != "true" ]; then
+        print_warn "To see vulnerability data, VMs need packages installed"
+        print_warn "You can manually register inside each VM with:"
+        print_warn "  virtctl console <vm-name> -n default"
+        print_warn "  sudo subscription-manager register"
+        print_warn "  sudo dnf install <packages>"
+    fi
     echo ""
     
     print_info "Documentation: ${SCRIPT_DIR}/README.md"
@@ -293,7 +302,6 @@ handle_error() {
     echo ""
     print_info "You can run individual scripts manually:"
     echo "  • ${SCRIPT_DIR}/01-configure-rhacs.sh"
-    echo "  • ${SCRIPT_DIR}/02-deploy-base-vm.sh"
     echo "  • ${SCRIPT_DIR}/03-deploy-sample-vms.sh"
     echo ""
     exit $exit_code
@@ -304,14 +312,13 @@ handle_error() {
 #================================================================
 main() {
     display_banner
-    display_configuration
+    prompt_credentials
     
     # Clean up existing VMs first
     cleanup_existing_vms || handle_error "Cleanup existing VMs"
     
     # Execute steps in order
     step_configure_rhacs || handle_error "Configure RHACS"
-    step_deploy_base_vm || handle_error "Deploy Base VM"
     step_deploy_sample_vms || handle_error "Deploy Sample VMs"
     
     # Show summary
