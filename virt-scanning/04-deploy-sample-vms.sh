@@ -273,7 +273,7 @@ EOF
 wait_for_vms() {
     print_step "Waiting for VMs to start..."
     
-    local max_wait=300
+    local max_wait=120  # Wait up to 2 minutes
     local elapsed=0
     
     while [ $elapsed -lt $max_wait ]; do
@@ -303,8 +303,13 @@ wait_for_vms() {
         ((elapsed+=10))
     done
     
-    print_warn "Timeout waiting for all VMs to start"
-    print_info "Some VMs may still be booting. Check status with: oc get vmi -n ${NAMESPACE}"
+    # Don't fail - VMs may take time to boot
+    print_warn "Not all VMs reached Running state within ${max_wait}s"
+    print_info "VMs are being created and will continue starting in the background"
+    print_info "Check status with: oc get vmi -n ${NAMESPACE}"
+    
+    # Return success - deployment completed, VMs just need more time
+    return 0
 }
 
 #================================================================
