@@ -92,13 +92,13 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 
 ### Master Script Options
 
-Control the automated setup with environment variables:
+The script runs fully automatically with no prompts. Control what gets deployed with environment variables:
 
 ```bash
-# Run in fully automated mode (no prompts)
-AUTO_MODE=true ./setup-virt-scanning.sh
+# Default: deploys both base VM and 4 sample VMs
+./setup-virt-scanning.sh
 
-# Skip environment check
+# Skip environment check (not recommended)
 SKIP_ENV_CHECK=true ./setup-virt-scanning.sh
 
 # Deploy only sample VMs (skip base VM)
@@ -108,7 +108,7 @@ DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
 DEPLOY_SAMPLE_VMS=false ./setup-virt-scanning.sh
 
 # Combine options
-AUTO_MODE=true DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
+DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
 ```
 
 ### Individual VM Deployment Options

@@ -29,7 +29,6 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SKIP_ENV_CHECK="${SKIP_ENV_CHECK:-false}"
 DEPLOY_BASE_VM="${DEPLOY_BASE_VM:-true}"
 DEPLOY_SAMPLE_VMS="${DEPLOY_SAMPLE_VMS:-true}"
-AUTO_MODE="${AUTO_MODE:-false}"
 
 #================================================================
 # Display banner
@@ -60,35 +59,16 @@ display_banner() {
 }
 
 #================================================================
-# Prompt for confirmation
+# Display configuration
 #================================================================
-prompt_confirmation() {
-    if [ "${AUTO_MODE}" == "true" ]; then
-        return 0
-    fi
-    
+display_configuration() {
     echo ""
-    read -p "Do you want to proceed with the full setup? (y/N): " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Setup cancelled by user"
-        exit 0
-    fi
-    
+    print_info "Configuration:"
+    echo "  • Base VM deployment: ${DEPLOY_BASE_VM}"
+    echo "  • Sample VMs deployment: ${DEPLOY_SAMPLE_VMS}"
     echo ""
-    read -p "Deploy base VM? (Y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        DEPLOY_BASE_VM="false"
-    fi
-    
-    echo ""
-    read -p "Deploy 4 sample VMs with different packages? (Y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        DEPLOY_SAMPLE_VMS="false"
-    fi
+    print_info "Starting automated setup..."
+    sleep 2
 }
 
 #================================================================
@@ -138,19 +118,8 @@ step_verify_environment() {
     
     print_info "Running environment checks..."
     if ! bash "${SCRIPT_DIR}/01-check-env.sh"; then
-        print_error "Environment check failed"
-        print_warn "Some prerequisites are not met. Continue anyway?"
-        
-        if [ "${AUTO_MODE}" == "true" ]; then
-            print_warn "Auto mode: continuing despite warnings"
-        else
-            read -p "Continue? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Setup cancelled"
-                return 1
-            fi
-        fi
+        print_warn "Some prerequisites not met - continuing anyway"
+        print_info "Note: Setup may encounter issues if prerequisites are missing"
     fi
     
     print_info "✓ Environment verification complete"
@@ -330,7 +299,7 @@ handle_error() {
 #================================================================
 main() {
     display_banner
-    prompt_confirmation
+    display_configuration
     
     # Execute steps in order
     step_configure_platform || handle_error "Configure Platform"
