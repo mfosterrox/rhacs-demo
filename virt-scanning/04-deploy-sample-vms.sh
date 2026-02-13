@@ -224,7 +224,7 @@ metadata:
     profile: ${vm_profile}
     roxagent: enabled
 spec:
-  running: true
+  runStrategy: Always
   template:
     metadata:
       labels:

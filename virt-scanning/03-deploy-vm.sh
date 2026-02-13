@@ -130,7 +130,7 @@ metadata:
   annotations:
     description: "RHEL VM with RHACS roxagent for vulnerability scanning"
 spec:
-  running: true
+  runStrategy: Always
   template:
     metadata:
       labels:
