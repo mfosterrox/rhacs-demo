@@ -30,9 +30,23 @@ cd virt-scanning
 ./02-build-vm-image.sh
 # Select: 1 for cloud-init (recommended)
 
-# 4. Deploy VM
+# 4. Deploy a single VM (basic)
 ./03-deploy-vm.sh
+
+# OR: Deploy 4 sample VMs with different packages (demo)
+./04-deploy-sample-vms.sh
 ```
+
+### Sample VMs for Demonstration
+
+The `04-deploy-sample-vms.sh` script deploys 4 VMs with different DNF packages installed:
+
+- **webserver**: Apache (httpd), Nginx, PHP - web server vulnerabilities
+- **database**: PostgreSQL, MariaDB - database server packages  
+- **devtools**: Git, GCC, Python, Node.js, Java - development tools
+- **monitoring**: Grafana, Telegraf, Collectd - monitoring stack
+
+Each VM automatically installs packages via DNF and runs roxagent for vulnerability scanning.
 
 ## What Gets Configured
 
@@ -148,13 +162,36 @@ subscription-manager status
 | `01-check-env.sh` | Validate all prerequisites (9 checks) |
 | `install.sh` | Configure RHACS components and enable VSOCK |
 | `02-build-vm-image.sh` | Prepare cloud-init configuration |
-| `03-deploy-vm.sh` | Deploy VM with roxagent auto-configuration |
+| `03-deploy-vm.sh` | Deploy single VM with roxagent |
+| `04-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
 
 ### Reference Files
 
 | File | Purpose |
 |------|---------|
 | `vm-template-rhacm.yaml` | Complete VM template for manual RHACM deployment |
+
+## Understanding DNF Package Scanning
+
+**Important**: RHACS only scans vulnerabilities in DNF packages from Red Hat repositories.
+
+- ✅ **Scanned**: Packages installed via `dnf install` (tracked in DNF database)
+- ❌ **Not scanned**: System packages pre-installed in the VM image
+- ❌ **Not scanned**: Manually compiled binaries or tarballs
+
+### Why DNF packages matter
+
+The `04-deploy-sample-vms.sh` script uses cloud-init to install packages via DNF:
+
+```bash
+# Inside cloud-init
+packages:
+  - httpd
+  - nginx
+  - postgresql
+```
+
+This ensures RHACS can detect and report vulnerabilities. Pre-installed system packages are not tracked by the DNF database and won't appear in vulnerability reports.
 
 ## Troubleshooting
 
