@@ -15,46 +15,39 @@ RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent bina
 
 ## Quick Start
 
-### Option 1: Automated Setup (Recommended)
+### Automated Setup (Recommended)
 
-Run the master script to set up everything automatically:
+Run the main script to set up everything automatically:
 
 ```bash
 cd virt-scanning
 
-# One command to set up complete environment
-./setup-virt-scanning.sh
+# Complete setup - configure RHACS + deploy base VM + deploy 4 sample VMs
+./install.sh
 ```
 
 This will:
-1. Configure RHACS platform and enable VSOCK
-2. Verify environment prerequisites
-3. Prepare cloud-init configuration
+1. Configure RHACS platform (Central, Sensor, Collector) with ROX_VIRTUAL_MACHINES=true
+2. Enable VSOCK in OpenShift Virtualization
+3. Enable hostNetwork on Collector for VSOCK access
 4. Deploy base RHEL VM with roxagent
 5. Deploy 4 sample VMs with different DNF packages
 
-### Option 2: Manual Step-by-Step
+### Manual Step-by-Step
 
-Run the scripts individually in order:
+Run the sub-scripts individually:
 
 ```bash
 cd virt-scanning
 
-# 1. Configure RHACS platform and enable VSOCK
-./install.sh
+# 1. Configure RHACS and enable VSOCK
+./01-configure-rhacs.sh
 
-# 2. Check prerequisites (optional)
-./01-check-env.sh
+# 2. Deploy base VM with roxagent (optional)
+./02-deploy-base-vm.sh
 
-# 3. Prepare VM image configuration
-./02-build-vm-image.sh
-# Select: 1 for cloud-init (recommended)
-
-# 4. Deploy a single VM (basic)
-./03-deploy-vm.sh
-
-# OR: Deploy 4 sample VMs with different packages (demo)
-./04-deploy-sample-vms.sh
+# 3. Deploy 4 sample VMs with different packages (optional)
+./03-deploy-sample-vms.sh
 ```
 
 ### Sample VMs for Demonstration
@@ -90,25 +83,22 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 
 ## Configuration Options
 
-### Master Script Options
+### Configuration Options
 
-The script runs fully automatically with no prompts. Control what gets deployed with environment variables:
+The install script runs fully automatically with no prompts. Control what gets deployed with environment variables:
 
 ```bash
-# Default: deploys both base VM and 4 sample VMs
-./setup-virt-scanning.sh
-
-# Skip environment check (not recommended)
-SKIP_ENV_CHECK=true ./setup-virt-scanning.sh
+# Default: configure RHACS + deploy both base VM and 4 sample VMs
+./install.sh
 
 # Deploy only sample VMs (skip base VM)
-DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
+DEPLOY_BASE_VM=false ./install.sh
 
 # Deploy only base VM (skip sample VMs)
-DEPLOY_SAMPLE_VMS=false ./setup-virt-scanning.sh
+DEPLOY_SAMPLE_VMS=false ./install.sh
 
-# Combine options
-DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
+# Only configure RHACS (no VMs)
+DEPLOY_BASE_VM=false DEPLOY_SAMPLE_VMS=false ./install.sh
 ```
 
 ### Individual VM Deployment Options
@@ -202,12 +192,10 @@ subscription-manager status
 
 | Script | Purpose |
 |--------|---------|
-| `setup-virt-scanning.sh` | **Master script** - runs complete setup automatically |
-| `install.sh` | Configure RHACS components and enable VSOCK |
-| `01-check-env.sh` | Validate all prerequisites (9 checks) |
-| `02-build-vm-image.sh` | Prepare cloud-init configuration |
-| `03-deploy-vm.sh` | Deploy single VM with roxagent |
-| `04-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
+| `install.sh` | **Main script** - orchestrates complete setup |
+| `01-configure-rhacs.sh` | Configure RHACS components and enable VSOCK |
+| `02-deploy-base-vm.sh` | Deploy single VM with roxagent |
+| `03-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
 
 ### Reference Files
 
