@@ -21,12 +21,18 @@ print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
 readonly NAMESPACE="${NAMESPACE:-default}"
-IMAGE_METHOD="${IMAGE_METHOD:-}"  # Not readonly - set by user selection
+IMAGE_METHOD="${IMAGE_METHOD:-cloud-init}"  # Default to cloud-init (recommended)
 
 #================================================================
 # Display method selection
 #================================================================
 select_build_method() {
+    # If IMAGE_METHOD is already set (e.g., via environment variable), use it
+    if [ "${IMAGE_METHOD}" == "cloud-init" ] || [ "${IMAGE_METHOD}" == "custom" ]; then
+        print_info "Using image preparation method: ${IMAGE_METHOD}"
+        return 0
+    fi
+    
     print_step "VM Image Preparation Method Selection"
     echo ""
     
@@ -47,17 +53,15 @@ Choose how to prepare RHEL VMs with roxagent:
 
 EOF
     
-    if [ -z "${IMAGE_METHOD_PRESET:-}" ]; then
-        read -p "Select method (1=cloud-init, 2=custom): " choice
-        case "$choice" in
-            1) IMAGE_METHOD="cloud-init" ;;
-            2) IMAGE_METHOD="custom" ;;
-            *) 
-                print_error "Invalid choice"
-                exit 1
-                ;;
-        esac
-    fi
+    read -p "Select method (1=cloud-init, 2=custom): " choice
+    case "$choice" in
+        1) IMAGE_METHOD="cloud-init" ;;
+        2) IMAGE_METHOD="custom" ;;
+        *) 
+            print_error "Invalid choice"
+            exit 1
+            ;;
+    esac
     
     print_info "Selected method: ${IMAGE_METHOD}"
 }

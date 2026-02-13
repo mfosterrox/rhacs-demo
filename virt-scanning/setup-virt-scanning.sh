@@ -172,18 +172,12 @@ step_build_vm_image() {
         return 1
     fi
     
-    print_info "Running VM image preparation..."
+    print_info "Running VM image preparation (using cloud-init method)..."
     
-    # Auto-select cloud-init method (option 1)
-    if [ "${AUTO_MODE}" == "true" ]; then
-        print_info "Auto mode: selecting cloud-init method"
-        echo "1" | bash "${SCRIPT_DIR}/02-build-vm-image.sh"
-    else
-        print_info "Select image build method (cloud-init recommended)"
-        bash "${SCRIPT_DIR}/02-build-vm-image.sh"
-    fi
+    # Always use cloud-init method (recommended)
+    export IMAGE_METHOD=cloud-init
     
-    if [ $? -ne 0 ]; then
+    if ! bash "${SCRIPT_DIR}/02-build-vm-image.sh"; then
         print_error "VM image preparation failed"
         return 1
     fi
@@ -244,15 +238,10 @@ step_deploy_sample_vms() {
     
     print_info "Deploying 4 sample VMs with different package profiles..."
     
-    # Auto-confirm deployment in auto mode
-    if [ "${AUTO_MODE}" == "true" ]; then
-        print_info "Auto mode: auto-confirming sample VM deployment"
-        echo "y" | bash "${SCRIPT_DIR}/04-deploy-sample-vms.sh"
-    else
-        bash "${SCRIPT_DIR}/04-deploy-sample-vms.sh"
-    fi
+    # Export AUTO_CONFIRM to skip prompts
+    export AUTO_CONFIRM=true
     
-    if [ $? -ne 0 ]; then
+    if ! bash "${SCRIPT_DIR}/04-deploy-sample-vms.sh"; then
         print_error "Sample VMs deployment failed"
         return 1
     fi

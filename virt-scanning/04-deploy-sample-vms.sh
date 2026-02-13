@@ -25,6 +25,7 @@ STORAGE_CLASS="${STORAGE_CLASS:-ocs-external-storagecluster-ceph-rbd}"
 readonly RHEL_IMAGE="${RHEL_IMAGE:-registry.redhat.io/rhel9/rhel-guest-image:latest}"
 readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
+readonly AUTO_CONFIRM="${AUTO_CONFIRM:-false}"  # Skip confirmation prompts
 
 # VM profiles with different package sets
 declare -A VM_PROFILES=(
@@ -193,15 +194,22 @@ deploy_vm() {
     # Check if VM already exists
     if oc get vm "${vm_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
         print_warn "VM '${vm_name}' already exists"
-        read -p "Delete and recreate? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Deleting existing VM..."
+        
+        if [ "${AUTO_CONFIRM}" != "true" ]; then
+            read -p "Delete and recreate? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Deleting existing VM..."
+                oc delete vm "${vm_name}" -n "${NAMESPACE}" --wait=false
+                sleep 5
+            else
+                print_info "Skipping ${vm_name}"
+                return 0
+            fi
+        else
+            print_info "Auto-confirm enabled: deleting existing VM"
             oc delete vm "${vm_name}" -n "${NAMESPACE}" --wait=false
             sleep 5
-        else
-            print_info "Skipping ${vm_name}"
-            return 0
         fi
     fi
     
@@ -360,15 +368,20 @@ main() {
     done
     
     echo ""
-    read -p "Deploy all 4 VMs? (y/N): " -n 1 -r
-    echo
     
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Deployment cancelled"
-        exit 0
+    if [ "${AUTO_CONFIRM}" != "true" ]; then
+        read -p "Deploy all 4 VMs? (y/N): " -n 1 -r
+        echo
+        
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Deployment cancelled"
+            exit 0
+        fi
+        echo ""
+    else
+        print_info "Auto-confirm enabled: deploying all 4 VMs"
+        echo ""
     fi
-    
-    echo ""
     
     # Deploy each VM
     for profile in "${!VM_PROFILES[@]}"; do
