@@ -25,12 +25,7 @@ print_header() { echo -e "${BOLD}${BLUE}$*${NC}"; }
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Configuration
-DEPLOY_BASE_VM="${DEPLOY_BASE_VM:-false}"  # Base VM not needed for demo
 DEPLOY_SAMPLE_VMS="${DEPLOY_SAMPLE_VMS:-true}"
-
-# Red Hat subscription credentials (will be prompted)
-RH_USERNAME=""
-RH_PASSWORD=""
 
 #================================================================
 # Display banner
@@ -45,62 +40,23 @@ display_banner() {
     print_header "╚════════════════════════════════════════════════════════════╝"
     echo ""
     echo "This automated script will:"
-    echo "  1. Prompt for Red Hat subscription credentials"
-    echo "  2. Configure RHACS for VM scanning"
-    echo "  3. Enable VSOCK in OpenShift Virtualization"
-    echo "  4. Deploy 4 RHEL VMs with packages installed"
-    echo "  5. Start vulnerability scanning automatically"
+    echo "  1. Configure RHACS for VM scanning"
+    echo "  2. Enable VSOCK in OpenShift Virtualization"
+    echo "  3. Deploy 4 RHEL VMs with roxagent"
     echo ""
-    echo "Sample VMs (with packages):"
-    echo "  • rhel-webserver: httpd, nginx, php"
-    echo "  • rhel-database: postgresql, mariadb"
-    echo "  • rhel-devtools: git, gcc, python, nodejs"
-    echo "  • rhel-monitoring: grafana, telegraf, net-snmp"
+    echo "Sample VMs:"
+    echo "  • rhel-webserver"
+    echo "  • rhel-database"
+    echo "  • rhel-devtools"
+    echo "  • rhel-monitoring"
     echo ""
-    echo "⏱️  Total time: ~15 minutes"
+    echo "After deployment, you'll register VMs and install packages"
+    echo "to populate vulnerability data in RHACS."
+    echo ""
+    echo "⏱️  Total time: ~5 minutes"
     echo ""
 }
 
-#================================================================
-# Prompt for Red Hat credentials
-#================================================================
-prompt_credentials() {
-    echo ""
-    print_header "════════════════════════════════════════════════════════════"
-    print_step "Red Hat Subscription Credentials"
-    print_header "════════════════════════════════════════════════════════════"
-    echo ""
-    
-    print_info "VMs will automatically register and install packages during deployment"
-    print_info "Credentials are used only during VM setup (stored in cloud-init secrets)"
-    echo ""
-    
-    read -p "Red Hat Username: " RH_USERNAME
-    read -sp "Red Hat Password: " RH_PASSWORD
-    echo ""
-    echo ""
-    
-    if [ -z "$RH_USERNAME" ] || [ -z "$RH_PASSWORD" ]; then
-        print_warn "Credentials not provided"
-        print_warn "VMs will deploy but packages will NOT be installed"
-        print_warn "You'll need to register and install packages manually"
-        echo ""
-        read -p "Continue without credentials? (y/N): " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_error "Setup cancelled"
-            exit 1
-        fi
-        export INSTALL_PACKAGES="false"
-    else
-        print_info "✓ Credentials received"
-        export INSTALL_PACKAGES="true"
-        export RH_USERNAME
-        export RH_PASSWORD
-    fi
-    
-    sleep 2
-}
 
 
 #================================================================
@@ -211,17 +167,17 @@ step_deploy_sample_vms() {
     print_header "════════════════════════════════════════════════════════════"
     echo ""
     
-    if [ ! -f "${SCRIPT_DIR}/03-deploy-sample-vms.sh" ]; then
-        print_error "03-deploy-sample-vms.sh not found in ${SCRIPT_DIR}"
+    if [ ! -f "${SCRIPT_DIR}/02-deploy-sample-vms.sh" ]; then
+        print_error "02-deploy-sample-vms.sh not found in ${SCRIPT_DIR}"
         return 1
     fi
     
-    print_info "Deploying 4 sample VMs with different package profiles..."
+    print_info "Deploying 4 sample VMs..."
     
     # Export AUTO_CONFIRM to skip prompts
     export AUTO_CONFIRM=true
     
-    if ! bash "${SCRIPT_DIR}/03-deploy-sample-vms.sh"; then
+    if ! bash "${SCRIPT_DIR}/02-deploy-sample-vms.sh"; then
         print_error "Sample VMs deployment failed"
         return 1
     fi
@@ -246,48 +202,40 @@ display_summary() {
     echo "  ✓ OpenShift Virtualization VSOCK feature gate enabled"
     echo "  ✓ Collector hostNetwork + DNS configured for VSOCK"
     echo "  ✓ 4 RHEL VMs deployed with roxagent:"
-    echo "    • rhel-webserver (httpd, nginx, php)"
-    echo "    • rhel-database (postgresql, mariadb)"
-    echo "    • rhel-devtools (git, gcc, python, nodejs)"
-    echo "    • rhel-monitoring (grafana, telegraf, net-snmp)"
-    
-    if [ "${INSTALL_PACKAGES}" == "true" ]; then
-        echo "  ✓ VMs registered with Red Hat subscription"
-        echo "  ✓ Packages installing via cloud-init (background)"
-    else
-        echo "  ⚠ No credentials provided - packages NOT installed"
-    fi
+    echo "    • rhel-webserver"
+    echo "    • rhel-database"
+    echo "    • rhel-devtools"
+    echo "    • rhel-monitoring"
     
     echo ""
     print_header "⏱️  Deployment Timeline:"
     echo ""
-    echo "  Now      VMs are starting (deploying in background)"
-    echo "  +5 min   VMs booting, cloud-init running"
-    if [ "${INSTALL_PACKAGES}" == "true" ]; then
-        echo "  +8 min   Subscription registration + package installation"
-    fi
-    echo "  +10 min  roxagent first scan"
-    echo "  +12 min  Vulnerability data appears in RHACS"
+    echo "  Now      VMs deploying"
+    echo "  +3 min   VMs booting, cloud-init running"
+    echo "  +5 min   roxagent running, VMs visible in RHACS (no packages yet)"
     echo ""
     print_header "Next Steps:"
     echo ""
-    echo "  1. Wait 10-15 minutes, then check status:"
+    echo "  1. Wait 5 minutes for VMs to boot, then check:"
     echo "     $ oc get vmi -n default"
-    echo "     $ ./check-vm-status.sh"
     echo ""
-    echo "  2. View results in RHACS UI:"
+    echo "  2. Access VMs with console (password: redhat):"
+    echo "     $ virtctl console rhel-webserver -n default"
+    echo ""
+    echo "  3. Register each VM and install packages:"
+    echo "     Inside VM console:"
+    echo "     $ sudo subscription-manager register --username <user> --password <pass> --auto-attach"
+    echo "     $ sudo subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms --enable rhel-9-for-x86_64-appstream-rpms"
+    echo "     $ sudo dnf install -y <packages>  # httpd nginx php, etc."
+    echo "     $ sudo systemctl restart roxagent"
+    echo ""
+    echo "  4. Wait 2-3 minutes, then view results in RHACS UI:"
     CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
     echo "     ${CENTRAL_URL}"
     echo "     → Platform Configuration → Clusters → Virtual Machines"
     echo ""
-    
-    if [ "${INSTALL_PACKAGES}" != "true" ]; then
-        print_warn "To see vulnerability data, VMs need packages installed"
-        print_warn "You can manually register inside each VM with:"
-        print_warn "  virtctl console <vm-name> -n default"
-        print_warn "  sudo subscription-manager register"
-        print_warn "  sudo dnf install <packages>"
-    fi
+    print_info "VMs will show in RHACS immediately (without vulnerabilities)"
+    print_info "After installing packages, vulnerability data will appear"
     echo ""
     
     print_info "Documentation: ${SCRIPT_DIR}/README.md"
@@ -305,7 +253,7 @@ handle_error() {
     echo ""
     print_info "You can run individual scripts manually:"
     echo "  • ${SCRIPT_DIR}/01-configure-rhacs.sh"
-    echo "  • ${SCRIPT_DIR}/03-deploy-sample-vms.sh"
+    echo "  • ${SCRIPT_DIR}/02-deploy-sample-vms.sh"
     echo ""
     exit $exit_code
 }
@@ -315,7 +263,9 @@ handle_error() {
 #================================================================
 main() {
     display_banner
-    prompt_credentials
+    
+    echo ""
+    read -p "Press Enter to continue..."
     
     # Clean up existing VMs first
     cleanup_existing_vms || handle_error "Cleanup existing VMs"

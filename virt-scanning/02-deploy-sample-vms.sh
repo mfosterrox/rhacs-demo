@@ -17,15 +17,6 @@ print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
-# Get script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-# Load configuration if available
-if [ -f "${SCRIPT_DIR}/vm-config.env" ]; then
-    print_info "Loading configuration from vm-config.env"
-    source "${SCRIPT_DIR}/vm-config.env"
-fi
-
 # Configuration
 readonly NAMESPACE="${NAMESPACE:-default}"
 readonly VM_CPUS="${VM_CPUS:-2}"
@@ -35,13 +26,6 @@ readonly RHEL_IMAGE="${RHEL_IMAGE:-registry.redhat.io/rhel9/rhel-guest-image:lat
 readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
 readonly AUTO_CONFIRM="${AUTO_CONFIRM:-false}"  # Skip confirmation prompts
-
-# Subscription configuration (from vm-config.env)
-readonly INSTALL_PACKAGES="${INSTALL_PACKAGES:-false}"
-readonly RH_USERNAME="${RH_USERNAME:-}"
-readonly RH_PASSWORD="${RH_PASSWORD:-}"
-readonly RH_ORG_ID="${RH_ORG_ID:-}"
-readonly RH_ACTIVATION_KEY="${RH_ACTIVATION_KEY:-}"
 
 # VM profiles with different package sets
 declare -A VM_PROFILES=(
@@ -57,32 +41,6 @@ declare -A VM_DESCRIPTIONS=(
     ["devtools"]="Development Tools (Git, GCC, Python, Node.js, Java)"
     ["monitoring"]="Monitoring Stack (Grafana, Telegraf, Collectd)"
 )
-
-#================================================================
-# Display configuration
-#================================================================
-display_config() {
-    echo ""
-    print_info "Deployment Configuration:"
-    echo "  • Package installation: ${INSTALL_PACKAGES}"
-    if [ "${INSTALL_PACKAGES}" = "true" ]; then
-        if [ -n "${RH_USERNAME}" ]; then
-            echo "  • Auth method: Username/Password"
-            echo "  • Username: ${RH_USERNAME}"
-        elif [ -n "${RH_ORG_ID}" ]; then
-            echo "  • Auth method: Org ID/Activation Key"
-            echo "  • Org ID: ${RH_ORG_ID}"
-        else
-            print_warn "  • Package installation enabled but NO credentials provided!"
-            print_warn "  • VMs will deploy but packages will NOT be installed"
-            print_warn "  • Create vm-config.env with credentials or set INSTALL_PACKAGES=false"
-        fi
-    else
-        echo "  • VMs will deploy with roxagent but NO packages"
-        echo "  • To enable packages: create vm-config.env with credentials"
-    fi
-    echo ""
-}
 
 #================================================================
 # Check prerequisites
@@ -228,7 +186,6 @@ runcmd:
 final_message: "RHEL VM '${vm_profile}' is ready. roxagent running."
 EOF
 }
-}
 
 #================================================================
 # Deploy a single VM
@@ -240,7 +197,6 @@ deploy_vm() {
     
     print_step "Deploying VM: ${vm_name}"
     print_info "Profile: ${description}"
-    print_info "Packages: ${VM_PROFILES[$vm_profile]}"
     
     # Check if VM already exists
     if oc get vm "${vm_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
@@ -386,18 +342,16 @@ main() {
     echo ""
     echo "=========================================="
     echo "  RHACS VM Vulnerability Scanning Demo"
-    echo "  Deploy Sample VMs with DNF Packages"
+    echo "  Deploy Sample VMs"
     echo "=========================================="
     echo ""
     
     check_prerequisites
-    display_config
     
     echo ""
     print_step "VM Profiles to Deploy:"
     for profile in "${!VM_PROFILES[@]}"; do
         echo "  • ${profile}: ${VM_DESCRIPTIONS[$profile]}"
-        echo "    Packages: ${VM_PROFILES[$profile]}"
     done
     
     echo ""
@@ -427,20 +381,12 @@ main() {
     print_info "VMs are now starting in the background..."
     echo ""
     
-    if [ "${INSTALL_PACKAGES}" == "true" ]; then
-        print_info "Cloud-init will automatically:"
-        echo "  • Register VMs with Red Hat subscription"
-        echo "  • Install DNF packages"
-        echo "  • Start roxagent scanning"
-        echo ""
-        print_info "This happens during first boot (takes 10-15 minutes total)"
-    else
-        print_warn "No credentials provided - packages will NOT be installed"
-        print_info "To add packages manually, console into each VM:"
-        print_info "  subscription-manager register --username <user> --password <pass>"
-        print_info "  subscription-manager attach --auto"
-        print_info "  dnf install <packages>"
-    fi
+    print_info "Cloud-init will:"
+    echo "  • Create cloud-user with password 'redhat'"
+    echo "  • Download and start roxagent"
+    echo ""
+    print_info "VMs will boot in 3-5 minutes"
+    print_info "To add vulnerability data, register and install packages inside each VM"
 }
 
 main "$@"
