@@ -15,15 +15,45 @@ RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent bina
 
 ## Quick Start
 
-### Automated Setup (Recommended)
+### Fully Automated Setup (NEW! ⚡)
 
-Run the main script to set up everything automatically:
+**One command, complete demo with vulnerabilities in 15 minutes!**
 
 ```bash
 cd virt-scanning
 
-# Complete setup - configure RHACS + deploy base VM + deploy 4 sample VMs
+# 1. Configure credentials (one-time setup)
+cp vm-config.env.example vm-config.env
+vi vm-config.env  # Add your Red Hat subscription credentials
+
+# 2. Run install
 ./install.sh
+
+# That's it! Wait 15 minutes for complete setup with vulnerability data
+```
+
+**What happens automatically:**
+1. ✅ Configure RHACS platform (Central, Sensor, Collector)
+2. ✅ Enable VSOCK in OpenShift Virtualization  
+3. ✅ Deploy 4 RHEL VMs with roxagent
+4. ✅ **Auto-register VMs with Red Hat subscription**
+5. ✅ **Auto-install DNF packages** (httpd, nginx, postgresql, etc.)
+6. ✅ **Vulnerability data appears in RHACS automatically!**
+
+📖 **See [AUTOMATED-SETUP.md](AUTOMATED-SETUP.md) for complete guide**
+
+---
+
+### Standard Setup (Without Package Installation)
+
+Run without `vm-config.env` to deploy infrastructure only:
+
+```bash
+cd virt-scanning
+./install.sh
+
+# VMs will appear in RHACS but without packages/vulnerabilities
+# Then optionally run: ./setup-demo-packages.sh to add packages
 ```
 
 This will:
@@ -31,7 +61,7 @@ This will:
 2. Enable VSOCK in OpenShift Virtualization
 3. Enable hostNetwork on Collector for VSOCK access
 4. Deploy base RHEL VM with roxagent
-5. Deploy 4 sample VMs with different DNF packages
+5. Deploy 4 sample VMs (no packages installed)
 
 ### Manual Step-by-Step
 
