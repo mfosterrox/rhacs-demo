@@ -118,8 +118,12 @@ fqdn: rhel-${vm_profile}.local
 users:
   - name: cloud-user
     sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys:
-      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... # Add your SSH key if needed
+    lock_passwd: false
+
+chpasswd:
+  list: |
+    cloud-user:redhat
+  expire: false
 
 # Install base packages and additional packages for this profile
 packages:

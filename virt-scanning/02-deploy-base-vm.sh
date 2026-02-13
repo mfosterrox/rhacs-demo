@@ -107,6 +107,13 @@ stringData:
         shell: /bin/bash
         sudo: ['ALL=(ALL) NOPASSWD:ALL']
         lock_passwd: false
+        plain_text_passwd: redhat
+    
+    chpasswd:
+      list: |
+        rhacs:redhat
+        cloud-user:redhat
+      expire: false
     
     packages:
       - curl
