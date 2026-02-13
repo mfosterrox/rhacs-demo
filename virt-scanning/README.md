@@ -1,316 +1,235 @@
-# Virtual Machine Vulnerability Scanning Setup
+# Virtual Machine Vulnerability Scanning
 
-This folder contains automated scripts for configuring Red Hat Advanced Cluster Security (RHACS) for virtual machine vulnerability management and deploying RHEL VMs with roxagent.
+Automated setup for RHACS virtual machine vulnerability management with OpenShift Virtualization.
 
 ## Overview
 
-RHACS can scan virtual machines running on OpenShift Virtualization for vulnerabilities. This requires:
-1. RHACS platform configuration (feature flags, vsock support)
-2. RHEL VMs with roxagent binary running inside
-3. Proper network and subscription configuration
+RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent binary and VSOCK communication.
 
 ## Prerequisites
 
 - OpenShift cluster with admin access
-- RHACS installed (from basic-setup)
+- RHACS installed (run `basic-setup` first)
 - OpenShift Virtualization operator installed
-- `oc` CLI configured and authenticated
+- `oc` CLI authenticated
 
-## Quick Start - Automated Workflow
+## Quick Start
 
-Run the scripts in order for fully automated setup:
+Run the scripts in order:
 
 ```bash
 cd virt-scanning
 
-# 1. Check prerequisites
+# 1. Check prerequisites (optional)
 ./01-check-env.sh
 
-# 2. Configure RHACS platform
+# 2. Configure RHACS platform and enable VSOCK
 ./install.sh
 
-# 3. Prepare VM image (cloud-init recommended)
+# 3. Prepare VM image configuration
 ./02-build-vm-image.sh
+# Select: 1 for cloud-init (recommended)
 
 # 4. Deploy VM
 ./03-deploy-vm.sh
 ```
 
-That's it! Your VM will automatically install roxagent on first boot and start scanning.
-
-## Scripts
-
-### Main Workflow (Run in Order)
-
-#### `01-check-env.sh`
-
-**Purpose:** Verify prerequisites before starting
-
-Checks all 9 requirements for VM vulnerability scanning:
-- ✓ Central deployment has `ROX_VIRTUAL_MACHINES=true`
-- ✓ Sensor deployment has `ROX_VIRTUAL_MACHINES=true`
-- ✓ Collector compliance container has `ROX_VIRTUAL_MACHINES=true`
-- ✓ OpenShift Virtualization operator is installed
-- ✓ HyperConverged resource has vsock support enabled
-- ✓ Virtual machines have vsock configured
-- ✓ VMs are running RHEL
-- ⚠ VM network access (manual check)
-- ✓ Metal nodes available (recommended)
-
-**Usage:**
-```bash
-./01-check-env.sh
-```
-
-#### `install.sh`
-
-**Purpose:** Configure RHACS and OpenShift platform
-
-Configures the environment for VM vulnerability scanning:
-1. Adds `ROX_VIRTUAL_MACHINES=true` to Central, Sensor, and Collector
-2. Patches HyperConverged resource to enable vsock support
-3. Provides VM configuration guidance
-
-**Usage:**
-```bash
-./install.sh
-```
-
-#### `02-build-vm-image.sh`
-
-**Purpose:** Prepare VM image with roxagent
-
-**Automated workflow** that handles image preparation:
-- **Cloud-init method (recommended)**: Creates Kubernetes Secret with roxagent configuration - no image building needed!
-- **Custom image method**: Guides through building QCOW2 with pre-installed roxagent
-
-**What it does:**
-- Downloads roxagent from Red Hat mirror (v4.9.2)
-- Creates systemd service for daemon mode (5-minute scan intervals)
-- Configures environment variables (VSOCK port 818, 16KB max)
-- Creates cloud-init Secret in cluster
-
-**Usage:**
-```bash
-./02-build-vm-image.sh
-# Select: 1 for cloud-init (recommended) or 2 for custom QCOW2
-```
-
-#### `03-deploy-vm.sh`
-
-**Purpose:** Deploy VM to OpenShift cluster
-
-**Fully automated deployment** that:
-1. Creates DataVolume from RHEL base image
-2. Deploys VM with vsock enabled
-3. Attaches cloud-init configuration
-4. Verifies deployment
-5. Displays access information
-
-**Configuration options** (environment variables):
-```bash
-export NAMESPACE="default"          # Target namespace
-export VM_NAME="rhel-roxagent-vm"   # VM name
-export VM_CPUS="2"                  # CPU cores
-export VM_MEMORY="4Gi"              # Memory
-export VM_DISK_SIZE="30Gi"          # Disk size
-export STORAGE_CLASS="ocs-storagecluster-ceph-rbd"
-export RHEL_IMAGE="registry.redhat.io/rhel9/rhel-guest-image:latest"
-```
-
-**Usage:**
-```bash
-# Use defaults
-./03-deploy-vm.sh
-
-# Or customize
-VM_NAME="my-rhel-vm" VM_CPUS=4 VM_MEMORY=8Gi ./03-deploy-vm.sh
-```
-
-### Reference Files
-
-#### `cloud-init-roxagent.yaml`
-
-Standalone cloud-init configuration (for reference). The `02-build-vm-image.sh` script uses this automatically.
-
-#### `vm-template-rhacm.yaml`
-
-Complete VM template for manual RHACM deployment. Use the automated scripts instead for easier deployment.
-
-#### `build-custom-image.sh`
-
-Advanced script for building custom QCOW2 images. Called automatically by `02-build-vm-image.sh` when custom method is selected.
-
-#### `IMAGE-BUILD-GUIDE.md`
-
-Comprehensive reference guide covering manual and alternative approaches. Useful for understanding different options but **not needed for the automated workflow**.
-
 ## What Gets Configured
 
-### Platform Configuration (install.sh)
-- Central deployment: `ROX_VIRTUAL_MACHINES=true`
-- Sensor deployment: `ROX_VIRTUAL_MACHINES=true`
-- Collector daemonset compliance container: `ROX_VIRTUAL_MACHINES=true`
-- HyperConverged resource: vsock feature gate enabled
+### Platform (install.sh)
+- Central: `ROX_VIRTUAL_MACHINES=true`
+- Sensor: `ROX_VIRTUAL_MACHINES=true`
+- Collector compliance container: `ROX_VIRTUAL_MACHINES=true`
+- HyperConverged: VSOCK feature gate enabled
 
-### VM Configuration (03-deploy-vm.sh)
-Each deployed VM includes:
-- **vsock enabled**: `autoattachVSOCK: true` (required for RHACS communication)
-- **Cloud-init configuration**: Downloads and installs roxagent on first boot
-- **Systemd service**: Runs roxagent in daemon mode with 5-minute scan intervals
-- **Environment variables**: VSOCK port 818, 16KB max connection size
-- **Auto-start**: roxagent starts automatically on boot
+### VM Image (02-build-vm-image.sh)
+- Creates Kubernetes Secret with cloud-init configuration
+- Cloud-init downloads roxagent on first boot
+- Installs systemd service for continuous scanning (5-minute intervals)
+- Configures VSOCK environment variables
 
-## Architecture
+### VM Deployment (03-deploy-vm.sh)
+- Deploys RHEL 9 VM with vsock enabled (`autoattachVSOCK: true`)
+- Uses containerDisk for fast startup
+- Attaches cloud-init for roxagent installation
+- Configurable via environment variables
 
-### Automated Workflow
+## Configuration Options
+
+Customize VM deployment with environment variables:
+
+```bash
+# Example: Deploy larger VM with custom name
+VM_NAME="security-scan-vm" VM_CPUS=4 VM_MEMORY=8Gi ./03-deploy-vm.sh
+
+# Available variables:
+# - NAMESPACE (default: default)
+# - VM_NAME (default: rhel-roxagent-vm)
+# - VM_CPUS (default: 2)
+# - VM_MEMORY (default: 4Gi)
+# - VM_DISK_SIZE (default: 30Gi)
+# - STORAGE_CLASS (default: auto-detected)
+# - RHEL_IMAGE (default: registry.redhat.io/rhel9/rhel-guest-image:latest)
 ```
-┌─────────────────────────────────────────────────┐
-│ 1. Check Prerequisites (01-check-env.sh)        │
-│    - Verify operators, feature flags, vsock     │
-└──────────────────┬──────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────┐
-│ 2. Configure Platform (install.sh)              │
-│    - Enable ROX_VIRTUAL_MACHINES on RHACS       │
-│    - Enable vsock on HyperConverged             │
-└──────────────────┬──────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────┐
-│ 3. Prepare Image (02-build-vm-image.sh)         │
-│    - Cloud-init: Create K8s Secret              │
-│    - Custom: Build QCOW2 with roxagent          │
-└──────────────────┬──────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────┐
-│ 4. Deploy VM (03-deploy-vm.sh)                  │
-│    - Create DataVolume + VM                     │
-│    - Auto-install roxagent via cloud-init       │
-│    - Start continuous scanning                  │
-└─────────────────────────────────────────────────┘
-```
-
-### VM Requirements
-
-VMs deployed by these scripts automatically meet requirements:
-
-1. ✅ **Run Red Hat Enterprise Linux (RHEL)** - Uses RHEL 9 guest image
-2. ⚠ **Have valid RHEL subscription** - Must be configured by user
-3. ✅ **Have network access** - For roxagent download and CPE mappings
-4. ✅ **Have vsock enabled** - Automatically set by deployment script
-5. ✅ **Run roxagent binary** - Installed via cloud-init on first boot
-
-## Infrastructure Recommendations
-
-- **Metal nodes** are recommended to host VMs for optimal performance
-- VMs can run on standard nodes but may experience performance degradation
 
 ## Verification
 
-### After Deployment
-
+### Check environment is ready
 ```bash
-# 1. Check environment is fully configured
 ./01-check-env.sh
+```
 
-# 2. Access VM console
+### Access VM and verify roxagent
+```bash
+# Console access
 virtctl console rhel-roxagent-vm -n default
 
-# 3. Inside VM, check roxagent service
+# Inside VM - check roxagent service
 systemctl status roxagent
 journalctl -u roxagent -f
 
-# 4. Verify vsock configuration
-oc get vm rhel-roxagent-vm -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
-# Expected: true
-
-# 5. Check RHACS sees the VM
-oc logs -n stackrox deployment/central | grep -i "virtual machine"
+# Check roxagent logs for scan results
+journalctl -u roxagent --since "5 minutes ago"
 ```
 
-### Expected Timeline
-- **0-2 minutes**: VM boots, cloud-init starts
-- **2-3 minutes**: roxagent downloaded and installed
-- **3-5 minutes**: First scan completes
-- **5+ minutes**: Vulnerabilities appear in RHACS UI
+### Verify vsock configuration
+```bash
+# Check VM has vsock enabled
+oc get vm rhel-roxagent-vm -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
+# Should return: true
+
+# Check VSOCK CID assigned
+oc get vmi rhel-roxagent-vm -n default -o jsonpath='{.status.VSOCKCID}'
+# Should return a number like: 123
+```
+
+### Check RHACS integration
+```bash
+# View VMs in RHACS (requires UI or API access)
+# Platform Configuration → Clusters → Virtual Machines
+```
+
+## Expected Timeline
+
+- **0-1 min**: VM boots
+- **1-3 min**: Cloud-init downloads and installs roxagent
+- **3-5 min**: First vulnerability scan completes
+- **5+ min**: Vulnerabilities appear in RHACS UI
+
+## VM Requirements
+
+VMs deployed by these scripts automatically meet requirements:
+
+1. ✅ Run RHEL 9
+2. ✅ Have vsock enabled
+3. ✅ Run roxagent in daemon mode
+4. ⚠️ **Must have valid RHEL subscription** (configure inside VM)
+5. ✅ Have network access (for roxagent download and CPE mappings)
+
+### Activating RHEL Subscription (Required)
+
+After VM boots, activate RHEL:
+
+```bash
+# Inside VM console
+subscription-manager register --username <rh-username> --password <rh-password>
+subscription-manager attach --auto
+
+# Verify
+subscription-manager status
+```
+
+## Files
+
+### Core Workflow Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `01-check-env.sh` | Validate all prerequisites (9 checks) |
+| `install.sh` | Configure RHACS components and enable VSOCK |
+| `02-build-vm-image.sh` | Prepare cloud-init configuration |
+| `03-deploy-vm.sh` | Deploy VM with roxagent auto-configuration |
+
+### Reference Files
+
+| File | Purpose |
+|------|---------|
+| `vm-template-rhacm.yaml` | Complete VM template for manual RHACM deployment |
 
 ## Troubleshooting
 
-### VMs not appearing in RHACS
+### VM not starting
 
-1. Verify feature flags are set:
-   ```bash
-   oc get deployment central -n stackrox -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}'
-   ```
+```bash
+# Check VM status
+oc get vm rhel-roxagent-vm -n default
+oc get vmi rhel-roxagent-vm -n default
 
-2. Check VM has vsock enabled:
-   ```bash
-   oc get vm <vm-name> -n <namespace> -o yaml | grep autoattachVSOCK
-   ```
-
-3. Verify VM is running RHEL:
-   ```bash
-   oc get vm <vm-name> -n <namespace> -o yaml | grep -i rhel
-   ```
-
-### Vulnerabilities not detected
-
-1. Ensure VM has valid RHEL subscription:
-   ```bash
-   # Inside the VM
-   subscription-manager status
-   ```
-
-2. Check VM can reach Red Hat repositories:
-   ```bash
-   # Inside the VM
-   curl -I https://access.redhat.com
-   ```
-
-3. Review Collector logs:
-   ```bash
-   oc logs -n stackrox daemonset/collector -c compliance | grep -i "virtual\|vsock"
-   ```
+# Check events
+oc get events -n default | grep rhel-roxagent-vm
+```
 
 ### roxagent not running
 
 ```bash
 # Inside VM
 systemctl status roxagent
-journalctl -u roxagent -n 50
-```
 
-### Cloud-init failed
-
-```bash
-# Inside VM
+# Check cloud-init logs
 cloud-init status
-cloud-init analyze show
-tail -f /var/log/cloud-init.log
+tail -f /var/log/cloud-init-output.log
+
+# Manually trigger scan
+/opt/roxagent/roxagent --verbose
 ```
 
-### HyperConverged patching fails
-
-If the HyperConverged patch fails, you may need to adjust the feature gate fields based on your OpenShift Virtualization version. Check the HyperConverged CRD:
+### VSOCK not enabled
 
 ```bash
-oc get crd hyperconvergeds.hco.kubevirt.io -o yaml
+# Verify VSOCK feature gate
+oc get kubevirt kubevirt-kubevirt-hyperconverged -n openshift-cnv \
+  -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' | grep VSOCK
+
+# Re-run platform configuration
+./install.sh
+```
+
+### VMs not appearing in RHACS
+
+1. Verify feature flags on RHACS components:
+   ```bash
+   oc get deployment central -n stackrox \
+     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}'
+   ```
+
+2. Check Collector logs:
+   ```bash
+   oc logs -n stackrox daemonset/collector -c compliance | grep -i "virtual\|vsock"
+   ```
+
+3. Verify RHEL subscription inside VM
+
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│ RHACS Central/Sensor/Collector      │
+│ ROX_VIRTUAL_MACHINES=true           │
+└───────────────┬─────────────────────┘
+                │
+                │ VSOCK (port 818)
+                │
+┌───────────────▼─────────────────────┐
+│ RHEL VM                             │
+│ - vsock enabled                     │
+│ - roxagent daemon (5min scans)      │
+│ - Reports vulnerabilities to RHACS  │
+└─────────────────────────────────────┘
 ```
 
 ## References
 
-- [RHACS Virtual Machine Scanning Documentation](https://docs.openshift.com/acs/)
-- [OpenShift Virtualization Documentation](https://docs.openshift.com/container-platform/latest/virt/about-virt.html)
-- [VSOCK Support in KubeVirt](https://kubevirt.io/)
+- [RHACS VM Scanning Docs](https://docs.openshift.com/acs/)
+- [OpenShift Virtualization](https://docs.openshift.com/container-platform/latest/virt/about-virt.html)
+- [KubeVirt VSOCK](https://kubevirt.io/user-guide/virtual_machines/vsock/)
 - [roxagent Downloads](https://mirror.openshift.com/pub/rhacs/assets/)
-- [RHEL Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/composing_a_customized_rhel_system_image/)
-- [RHACM VM Management](https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes/)
-
-## Support
-
-For issues or questions:
-1. Run `01-check-env.sh` to diagnose configuration
-2. Check RHACS and OpenShift Virtualization operator logs
-3. Verify all prerequisites are met
-4. Consult RHACS and OpenShift Virtualization documentation
-5. See `IMAGE-BUILD-GUIDE.md` for image building troubleshooting
