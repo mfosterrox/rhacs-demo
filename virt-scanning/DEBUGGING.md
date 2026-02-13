@@ -9,6 +9,8 @@ Run the automated debug tool:
 
 ## Immediate Diagnostic Commands
 
+**Expected VMs:** rhel-webserver, rhel-database, rhel-devtools, rhel-monitoring
+
 ### 1. Check if VMs are running and have VSOCK
 
 ```bash
@@ -19,10 +21,10 @@ oc get vm -n default
 oc get vmi -n default
 
 # Check specific VM for VSOCK CID
-oc get vmi rhel-roxagent-vm -n default -o jsonpath='{.status.VSOCKCID}'
+oc get vmi rhel-webserver -n default -o jsonpath='{.status.VSOCKCID}'
 
 # Verify VM has autoattachVSOCK enabled
-oc get vm rhel-roxagent-vm -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
+oc get vm rhel-webserver -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
 ```
 
 Expected: Each VMI should have a VSOCK CID (number like 3, 4, 5, etc.)
@@ -55,8 +57,8 @@ If not, run: `./install.sh`
 
 ```bash
 # Access VM console
-virtctl console rhel-roxagent-vm -n default
-# Login as: cloud-user (no password initially)
+virtctl console rhel-webserver -n default
+# Login as: cloud-user / password: redhat
 
 # Inside VM:
 
