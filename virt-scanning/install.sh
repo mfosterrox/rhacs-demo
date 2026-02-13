@@ -141,17 +141,10 @@ patch_hyperconverged_vsock() {
     fi
     
     print_info "Found HyperConverged resource: ${hco_name}"
-    print_info "Enabling VSOCK feature gate in KubeVirt..."
+    print_info "Enabling VSOCK feature gate via HyperConverged annotation..."
     
-    # Get the KubeVirt resource name
-    local kubevirt_name=$(oc get kubevirt -n ${CNV_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
-    if [ -z "${kubevirt_name}" ]; then
-        print_error "KubeVirt resource not found"
-        return 1
-    fi
-    
-    print_info "Found KubeVirt resource: ${kubevirt_name}"
+    # Get the KubeVirt resource name for status checking
+    local kubevirt_name=$(oc get kubevirt -n ${CNV_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "kubevirt-kubevirt-hyperconverged")
     
     # Check if VSOCK is already enabled
     local current_gates=$(oc get kubevirt ${kubevirt_name} -n ${CNV_NAMESPACE} -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' 2>/dev/null || echo "[]")
@@ -159,23 +152,34 @@ patch_hyperconverged_vsock() {
     if echo "${current_gates}" | grep -q "VSOCK"; then
         print_info "✓ VSOCK feature gate already enabled"
     else
-        print_info "Adding VSOCK to feature gates..."
+        print_info "Adding VSOCK via JSON patch annotation on HyperConverged..."
         
-        # Patch KubeVirt to add VSOCK feature gate
-        oc patch kubevirt ${kubevirt_name} -n ${CNV_NAMESPACE} --type=json -p '[
-          {
-            "op": "add",
-            "path": "/spec/configuration/developerConfiguration/featureGates/-",
-            "value": "VSOCK"
-          }
-        ]'
+        # Use annotation method (this is what worked in testing)
+        oc annotate hyperconverged ${hco_name} -n ${CNV_NAMESPACE} --overwrite \
+            kubevirt.kubevirt.io/jsonpatch='[
+              {
+                "op":"add",
+                "path":"/spec/configuration/developerConfiguration/featureGates/-",
+                "value":"VSOCK"
+              }
+            ]'
         
-        print_info "✓ VSOCK feature gate enabled"
-        print_info "  Waiting for KubeVirt to reconcile (30s)..."
+        print_info "✓ Annotation applied to HyperConverged"
+        print_info "  Waiting for HCO to propagate changes (30s)..."
         sleep 30
+        
+        # Verify it worked
+        local new_gates=$(oc get kubevirt ${kubevirt_name} -n ${CNV_NAMESPACE} -o jsonpath='{.spec.configuration.developerConfiguration.featureGates}' 2>/dev/null || echo "[]")
+        
+        if echo "${new_gates}" | grep -q "VSOCK"; then
+            print_info "✓ VSOCK successfully enabled!"
+        else
+            print_warn "⚠ VSOCK not yet visible - may need more time to reconcile"
+            print_info "  Run: ./enable-vsock.sh for advanced troubleshooting"
+        fi
     fi
     
-    print_info "  Note: VMs must still be configured with autoattachVSOCK: true"
+    print_info "  Note: VMs must be configured with autoattachVSOCK: true"
 }
 
 #================================================================
