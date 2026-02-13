@@ -15,16 +15,36 @@ RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent bina
 
 ## Quick Start
 
-Run the scripts in order:
+### Option 1: Automated Setup (Recommended)
+
+Run the master script to set up everything automatically:
 
 ```bash
 cd virt-scanning
 
-# 1. Check prerequisites (optional)
-./01-check-env.sh
+# One command to set up complete environment
+./setup-virt-scanning.sh
+```
 
-# 2. Configure RHACS platform and enable VSOCK
+This will:
+1. Configure RHACS platform and enable VSOCK
+2. Verify environment prerequisites
+3. Prepare cloud-init configuration
+4. Deploy base RHEL VM with roxagent
+5. Deploy 4 sample VMs with different DNF packages
+
+### Option 2: Manual Step-by-Step
+
+Run the scripts individually in order:
+
+```bash
+cd virt-scanning
+
+# 1. Configure RHACS platform and enable VSOCK
 ./install.sh
+
+# 2. Check prerequisites (optional)
+./01-check-env.sh
 
 # 3. Prepare VM image configuration
 ./02-build-vm-image.sh
@@ -69,6 +89,29 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 - Configurable via environment variables
 
 ## Configuration Options
+
+### Master Script Options
+
+Control the automated setup with environment variables:
+
+```bash
+# Run in fully automated mode (no prompts)
+AUTO_MODE=true ./setup-virt-scanning.sh
+
+# Skip environment check
+SKIP_ENV_CHECK=true ./setup-virt-scanning.sh
+
+# Deploy only sample VMs (skip base VM)
+DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
+
+# Deploy only base VM (skip sample VMs)
+DEPLOY_SAMPLE_VMS=false ./setup-virt-scanning.sh
+
+# Combine options
+AUTO_MODE=true DEPLOY_BASE_VM=false ./setup-virt-scanning.sh
+```
+
+### Individual VM Deployment Options
 
 Customize VM deployment with environment variables:
 
@@ -159,8 +202,9 @@ subscription-manager status
 
 | Script | Purpose |
 |--------|---------|
-| `01-check-env.sh` | Validate all prerequisites (9 checks) |
+| `setup-virt-scanning.sh` | **Master script** - runs complete setup automatically |
 | `install.sh` | Configure RHACS components and enable VSOCK |
+| `01-check-env.sh` | Validate all prerequisites (9 checks) |
 | `02-build-vm-image.sh` | Prepare cloud-init configuration |
 | `03-deploy-vm.sh` | Deploy single VM with roxagent |
 | `04-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
