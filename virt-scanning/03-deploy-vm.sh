@@ -104,19 +104,9 @@ deploy_vm() {
     
     # Check if VM already exists
     if oc get vm "${VM_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-        print_warn "VM already exists: ${VM_NAME}"
-        read -p "Delete and recreate? (y/n): " answer
-        if [[ "${answer}" =~ ^[Yy] ]]; then
-            oc delete vm "${VM_NAME}" -n "${NAMESPACE}"
-            # Wait for deletion
-            while oc get vm "${VM_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1; do
-                print_info "Waiting for VM deletion..."
-                sleep 2
-            done
-        else
-            print_info "Skipping VM creation"
-            return 0
-        fi
+        print_warn "VM '${VM_NAME}' already exists - skipping creation"
+        print_info "To recreate, first delete with: oc delete vm ${VM_NAME} -n ${NAMESPACE}"
+        return 0
     fi
     
     print_info "Creating VM with:"

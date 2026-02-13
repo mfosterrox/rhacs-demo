@@ -296,10 +296,20 @@ check_metal_nodes() {
     print_step "9. Checking for metal nodes (recommended for VM hosting)"
     
     # Check node labels for metal/baremetal
-    local metal_nodes=$(oc get nodes -l 'node-role.kubernetes.io/worker' -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.metal}{"\n"}{end}' 2>/dev/null | grep -c "true" || echo "0")
+    local metal_nodes=0
+    metal_nodes=$(oc get nodes -l 'node-role.kubernetes.io/worker' -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.metal}{"\n"}{end}' 2>/dev/null | grep -c "true" 2>/dev/null || echo "0")
     
     # Also check for baremetal provider
-    local baremetal_nodes=$(oc get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.providerID}{"\n"}{end}' 2>/dev/null | grep -c "baremetalmachine" || echo "0")
+    local baremetal_nodes=0
+    baremetal_nodes=$(oc get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.providerID}{"\n"}{end}' 2>/dev/null | grep -c "baremetalmachine" 2>/dev/null || echo "0")
+    
+    # Clean up variables (remove any whitespace)
+    metal_nodes=$(echo "${metal_nodes}" | tr -d '[:space:]')
+    baremetal_nodes=$(echo "${baremetal_nodes}" | tr -d '[:space:]')
+    
+    # Ensure they're numbers
+    metal_nodes=${metal_nodes:-0}
+    baremetal_nodes=${baremetal_nodes:-0}
     
     local total_metal=$((metal_nodes + baremetal_nodes))
     

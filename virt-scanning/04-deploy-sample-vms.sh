@@ -193,24 +193,9 @@ deploy_vm() {
     
     # Check if VM already exists
     if oc get vm "${vm_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-        print_warn "VM '${vm_name}' already exists"
-        
-        if [ "${AUTO_CONFIRM}" != "true" ]; then
-            read -p "Delete and recreate? (y/N): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Deleting existing VM..."
-                oc delete vm "${vm_name}" -n "${NAMESPACE}" --wait=false
-                sleep 5
-            else
-                print_info "Skipping ${vm_name}"
-                return 0
-            fi
-        else
-            print_info "Auto-confirm enabled: deleting existing VM"
-            oc delete vm "${vm_name}" -n "${NAMESPACE}" --wait=false
-            sleep 5
-        fi
+        print_warn "VM '${vm_name}' already exists - skipping creation"
+        print_info "To recreate, first delete with: oc delete vm ${vm_name} -n ${NAMESPACE}"
+        return 0
     fi
     
     # Create cloud-init secret
