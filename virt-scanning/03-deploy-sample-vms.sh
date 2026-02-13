@@ -486,16 +486,21 @@ main() {
     print_info "✓ Sample VM deployment complete!"
     print_info "VMs are now starting in the background..."
     echo ""
-    print_info "Next steps:"
-    echo "  1. Wait 10-15 minutes for VMs to fully boot and install packages"
-    echo "  2. Check VM status: oc get vmi -n default"
-    echo "  3. View vulnerabilities in RHACS UI:"
-    echo "     Platform Configuration → Clusters → Virtual Machines"
-    echo ""
-    print_warn "Note: VMs need valid RHEL subscriptions for DNF package updates"
-    print_info "Register inside each VM:"
-    print_info "  subscription-manager register --username <user> --password <pass>"
-    print_info "  subscription-manager attach --auto"
+    
+    if [ "${INSTALL_PACKAGES}" == "true" ]; then
+        print_info "Cloud-init will automatically:"
+        echo "  • Register VMs with Red Hat subscription"
+        echo "  • Install DNF packages"
+        echo "  • Start roxagent scanning"
+        echo ""
+        print_info "This happens during first boot (takes 10-15 minutes total)"
+    else
+        print_warn "No credentials provided - packages will NOT be installed"
+        print_info "To add packages manually, console into each VM:"
+        print_info "  subscription-manager register --username <user> --password <pass>"
+        print_info "  subscription-manager attach --auto"
+        print_info "  dnf install <packages>"
+    fi
 }
 
 main "$@"
