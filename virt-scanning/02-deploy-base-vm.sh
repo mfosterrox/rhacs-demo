@@ -115,15 +115,13 @@ stringData:
         cloud-user:redhat
       expire: false
     
-    packages:
-      - curl
-      - wget
-      - systemd
-    
     runcmd:
-      # Download roxagent binary
+      # Wait for network
+      - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
+      
+      # Download roxagent binary (no package dependencies)
       - mkdir -p /opt/roxagent
-      - curl -L -o /opt/roxagent/roxagent ${ROXAGENT_URL}
+      - curl -k -L -o /opt/roxagent/roxagent ${ROXAGENT_URL}
       - chmod +x /opt/roxagent/roxagent
       
       # Create systemd service
@@ -166,8 +164,18 @@ stringData:
         content: |
           #!/bin/bash
           /opt/roxagent/roxagent --verbose
+      
+      - path: /root/register-rhel.sh
+        permissions: '0755'
+        content: |
+          #!/bin/bash
+          echo "Register RHEL and install packages for vulnerability scanning"
+          echo "Run: subscription-manager register --username <user> --password <pass>"
+          echo "Then: subscription-manager attach --auto"
+          echo "Then install packages with: dnf install -y <package-names>"
+          echo "roxagent will automatically scan new packages on next cycle (5 min)"
     
-    final_message: "RHACS roxagent VM ready!"
+    final_message: "RHACS roxagent VM ready! roxagent is running. Register RHEL to install scannable packages."
 EOF
     
     print_info "✓ Cloud-init secret created: rhel-roxagent-cloudinit"

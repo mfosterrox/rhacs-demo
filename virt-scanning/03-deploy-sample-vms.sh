@@ -125,24 +125,16 @@ chpasswd:
     cloud-user:redhat
   expire: false
 
-# Install base packages and additional packages for this profile
-packages:
-  - curl
-  - wget
-  - systemd
-  - subscription-manager
-$(for pkg in $packages; do echo "  - $pkg"; done)
-
-# Configure roxagent and install additional packages
+# Configure roxagent first (no package dependencies)
 runcmd:
   # Wait for network
-  - until ping -c 1 google.com &> /dev/null; do sleep 2; done
+  - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   
   # Create roxagent directory
   - mkdir -p /opt/roxagent
   - chmod 755 /opt/roxagent
   
-  # Download roxagent binary
+  # Download roxagent binary (standalone, no package dependencies)
   - |
     echo "Downloading roxagent ${ROXAGENT_VERSION}..."
     curl -k -L -o /opt/roxagent/roxagent "${ROXAGENT_URL}"
@@ -175,11 +167,25 @@ runcmd:
   - systemctl enable roxagent
   - systemctl start roxagent
   
+  # Create package install script for later use (after RHEL registration)
+  - |
+    cat > /root/install-packages.sh <<'PKG_SCRIPT'
+    #!/bin/bash
+    # Run this after registering RHEL subscription
+    echo "Installing packages for ${vm_profile} profile..."
+    dnf install -y ${packages}
+    echo "Packages installed. Restarting roxagent to scan new packages..."
+    systemctl restart roxagent
+    PKG_SCRIPT
+  
+  - chmod +x /root/install-packages.sh
+  
   # Log completion
-  - echo "VM profile '${vm_profile}' configured with packages: ${packages}"
+  - echo "VM profile '${vm_profile}' configured"
   - echo "roxagent service started"
+  - echo "To install packages: sudo subscription-manager register && sudo /root/install-packages.sh"
 
-final_message: "RHEL VM '${vm_profile}' is ready with roxagent and DNF packages installed"
+final_message: "RHEL VM '${vm_profile}' is ready. roxagent running. Run /root/install-packages.sh after RHEL registration to install packages."
 EOF
 }
 
