@@ -47,3 +47,4 @@ node_modules
 
 # RHACS init bundles (contain sensitive TLS certificates)
 setup-files/init-bundles/
+virt-scanning/vm-config.env

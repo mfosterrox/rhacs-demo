@@ -17,6 +17,15 @@ print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
+# Get script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Load configuration if available
+if [ -f "${SCRIPT_DIR}/vm-config.env" ]; then
+    print_info "Loading configuration from vm-config.env"
+    source "${SCRIPT_DIR}/vm-config.env"
+fi
+
 # Configuration
 readonly NAMESPACE="${NAMESPACE:-default}"
 readonly VM_CPUS="${VM_CPUS:-2}"
@@ -26,6 +35,13 @@ readonly RHEL_IMAGE="${RHEL_IMAGE:-registry.redhat.io/rhel9/rhel-guest-image:lat
 readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
 readonly AUTO_CONFIRM="${AUTO_CONFIRM:-false}"  # Skip confirmation prompts
+
+# Subscription configuration (from vm-config.env)
+readonly INSTALL_PACKAGES="${INSTALL_PACKAGES:-false}"
+readonly RH_USERNAME="${RH_USERNAME:-}"
+readonly RH_PASSWORD="${RH_PASSWORD:-}"
+readonly RH_ORG_ID="${RH_ORG_ID:-}"
+readonly RH_ACTIVATION_KEY="${RH_ACTIVATION_KEY:-}"
 
 # VM profiles with different package sets
 declare -A VM_PROFILES=(
@@ -41,6 +57,32 @@ declare -A VM_DESCRIPTIONS=(
     ["devtools"]="Development Tools (Git, GCC, Python, Node.js, Java)"
     ["monitoring"]="Monitoring Stack (Grafana, Telegraf, Collectd)"
 )
+
+#================================================================
+# Display configuration
+#================================================================
+display_config() {
+    echo ""
+    print_info "Deployment Configuration:"
+    echo "  • Package installation: ${INSTALL_PACKAGES}"
+    if [ "${INSTALL_PACKAGES}" = "true" ]; then
+        if [ -n "${RH_USERNAME}" ]; then
+            echo "  • Auth method: Username/Password"
+            echo "  • Username: ${RH_USERNAME}"
+        elif [ -n "${RH_ORG_ID}" ]; then
+            echo "  • Auth method: Org ID/Activation Key"
+            echo "  • Org ID: ${RH_ORG_ID}"
+        else
+            print_warn "  • Package installation enabled but NO credentials provided!"
+            print_warn "  • VMs will deploy but packages will NOT be installed"
+            print_warn "  • Create vm-config.env with credentials or set INSTALL_PACKAGES=false"
+        fi
+    else
+        echo "  • VMs will deploy with roxagent but NO packages"
+        echo "  • To enable packages: create vm-config.env with credentials"
+    fi
+    echo ""
+}
 
 #================================================================
 # Check prerequisites
@@ -125,11 +167,47 @@ chpasswd:
     cloud-user:redhat
   expire: false
 
-# Configure roxagent first (no package dependencies)
 runcmd:
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   
+EOF
+
+    # Add subscription registration if credentials provided
+    if [ "${INSTALL_PACKAGES}" = "true" ]; then
+        if [ -n "${RH_USERNAME}" ] && [ -n "${RH_PASSWORD}" ]; then
+            cat <<EOF
+  # Register with Red Hat subscription (username/password)
+  - |
+    echo "Registering with Red Hat subscription..."
+    subscription-manager register \\
+      --username '${RH_USERNAME}' \\
+      --password '${RH_PASSWORD}' \\
+      --auto-attach || echo "Registration failed, continuing..."
+    subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms || true
+    subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms || true
+    dnf clean all
+    dnf makecache || true
+  
+EOF
+        elif [ -n "${RH_ORG_ID}" ] && [ -n "${RH_ACTIVATION_KEY}" ]; then
+            cat <<EOF
+  # Register with Red Hat subscription (org/activation key)
+  - |
+    echo "Registering with Red Hat subscription..."
+    subscription-manager register \\
+      --org='${RH_ORG_ID}' \\
+      --activationkey='${RH_ACTIVATION_KEY}' || echo "Registration failed, continuing..."
+    subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms || true
+    subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms || true
+    dnf clean all
+    dnf makecache || true
+  
+EOF
+        fi
+    fi
+
+    cat <<EOF
   # Create roxagent directory
   - mkdir -p /opt/roxagent
   - chmod 755 /opt/roxagent
@@ -167,7 +245,27 @@ runcmd:
   - systemctl enable roxagent
   - systemctl start roxagent
   
-  # Create package install script for later use (after RHEL registration)
+EOF
+
+    # Install packages if enabled and credentials provided
+    if [ "${INSTALL_PACKAGES}" = "true" ] && { [ -n "${RH_USERNAME}" ] || [ -n "${RH_ORG_ID}" ]; }; then
+        cat <<EOF
+  # Install packages now (subscription registered above)
+  - |
+    echo "Installing packages for ${vm_profile} profile..."
+    dnf install -y ${packages} || echo "Some packages may have failed to install"
+    echo "Packages installed. Restarting roxagent to scan new packages..."
+    systemctl restart roxagent
+  
+  # Log completion
+  - echo "VM profile '${vm_profile}' configured with packages installed"
+  - echo "roxagent service started and will scan installed packages"
+
+final_message: "RHEL VM '${vm_profile}' is ready with packages installed. roxagent scanning."
+EOF
+    else
+        cat <<EOF
+  # Create package install script for later use (if manual registration needed)
   - |
     cat > /root/install-packages.sh <<'PKG_SCRIPT'
     #!/bin/bash
@@ -183,10 +281,13 @@ runcmd:
   # Log completion
   - echo "VM profile '${vm_profile}' configured"
   - echo "roxagent service started"
-  - echo "To install packages, run /root/install-packages.sh after RHEL registration"
+  - echo "To install packages, register with subscription-manager and run /root/install-packages.sh"
 
-final_message: "RHEL VM '${vm_profile}' is ready. roxagent running. Run /root/install-packages.sh after RHEL registration to install packages."
+final_message: "RHEL VM '${vm_profile}' is ready. roxagent running. Register RHEL subscription to install packages."
 EOF
+    fi
+    
+    echo "EOF"
 }
 
 #================================================================
@@ -350,6 +451,7 @@ main() {
     echo ""
     
     check_prerequisites
+    display_config
     
     echo ""
     print_step "VM Profiles to Deploy:"
