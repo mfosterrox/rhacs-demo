@@ -1,0 +1,18 @@
+# Still inside the VM console, run these:
+
+# 1. Test network connectivity
+ping -c 3 8.8.8.8
+
+# 2. Test DNS resolution
+nslookup mirror.openshift.com || echo "nslookup not found, trying ping"
+ping -c 3 mirror.openshift.com
+
+# 3. See the full runcmd error from cloud-init
+sudo grep -A 30 "Running module runcmd" /var/log/cloud-init.log | tail -50
+
+# 4. Try the exact curl command that cloud-init should be running
+curl -v -k -L -o /tmp/test-roxagent https://mirror.openshift.com/pub/rhacs/assets/4.9.0/bin/linux/roxagent
+
+# 5. Check if it downloaded
+ls -lh /tmp/test-roxagent
+file /tmp/test-roxagent

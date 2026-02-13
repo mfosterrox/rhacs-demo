@@ -183,7 +183,7 @@ runcmd:
   # Log completion
   - echo "VM profile '${vm_profile}' configured"
   - echo "roxagent service started"
-  - echo "To install packages: sudo subscription-manager register && sudo /root/install-packages.sh"
+  - echo "To install packages, run /root/install-packages.sh after RHEL registration"
 
 final_message: "RHEL VM '${vm_profile}' is ready. roxagent running. Run /root/install-packages.sh after RHEL registration to install packages."
 EOF
