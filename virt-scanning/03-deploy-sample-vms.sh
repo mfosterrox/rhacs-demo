@@ -482,14 +482,9 @@ main() {
         echo ""
     done
     
-    # Check VM status (always succeeds)
-    wait_for_vms || true
-    
-    echo ""
-    display_vm_info || true  # Don't fail if this errors
-    
     echo ""
     print_info "✓ Sample VM deployment complete!"
+    print_info "VMs are now starting in the background..."
     echo ""
     print_info "Next steps:"
     echo "  1. Wait 10-15 minutes for VMs to fully boot and install packages"

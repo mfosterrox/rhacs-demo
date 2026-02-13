@@ -259,20 +259,23 @@ display_summary() {
     fi
     
     echo ""
+    print_header "⏱️  Deployment Timeline:"
+    echo ""
+    echo "  Now      VMs are starting (deploying in background)"
+    echo "  +5 min   VMs booting, cloud-init running"
+    if [ "${INSTALL_PACKAGES}" == "true" ]; then
+        echo "  +8 min   Subscription registration + package installation"
+    fi
+    echo "  +10 min  roxagent first scan"
+    echo "  +12 min  Vulnerability data appears in RHACS"
+    echo ""
     print_header "Next Steps:"
     echo ""
-    echo "  1. Wait 10-15 minutes for:"
-    echo "     • VMs to fully boot"
-    if [ "${INSTALL_PACKAGES}" == "true" ]; then
-        echo "     • Cloud-init to register subscription and install packages"
-    fi
-    echo "     • roxagent to complete first scan"
-    echo ""
-    echo "  2. Check VM status:"
+    echo "  1. Wait 10-15 minutes, then check status:"
     echo "     $ oc get vmi -n default"
     echo "     $ ./check-vm-status.sh"
     echo ""
-    echo "  3. View results in RHACS UI:"
+    echo "  2. View results in RHACS UI:"
     CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
     echo "     ${CENTRAL_URL}"
     echo "     → Platform Configuration → Clusters → Virtual Machines"
