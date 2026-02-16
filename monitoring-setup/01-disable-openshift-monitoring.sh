@@ -234,9 +234,9 @@ verify_monitoring_disabled() {
     local method=$1
     
     # Check for ServiceMonitor resources
-    local sm_count=$(oc get servicemonitor -n ${RHACS_NAMESPACE} -l app.kubernetes.io/name=stackrox 2>/dev/null | grep -v NAME | wc -l || echo "0")
+    local sm_count=$(oc get servicemonitor -n ${RHACS_NAMESPACE} -l app.kubernetes.io/name=stackrox 2>/dev/null | grep -v NAME | wc -l | tr -d ' \n' || echo "0")
     
-    if [ "${sm_count}" -eq 0 ]; then
+    if [ "${sm_count}" -eq 0 ] 2>/dev/null; then
         print_info "✓ No RHACS ServiceMonitor resources found"
     else
         print_warn "⚠ Found ${sm_count} ServiceMonitor resource(s)"
