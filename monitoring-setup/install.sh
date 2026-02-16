@@ -36,6 +36,28 @@ error_handler() {
 trap 'error_handler $? $LINENO' ERR
 
 #================================================================
+# Export variables from ~/.bashrc
+#================================================================
+export_bashrc_vars() {
+    local vars=(ROX_CENTRAL_URL ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME)
+    [ ! -f ~/.bashrc ] && return 0
+    
+    for var in "${vars[@]}"; do
+        # Skip if already set in environment
+        if [ -n "${!var:-}" ]; then
+            continue
+        fi
+        
+        local line
+        line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1)
+        if [ -n "$line" ]; then
+            [[ "$line" =~ ^export[[:space:]]+ ]] || line="export $line"
+            eval "$line" 2>/dev/null || true
+        fi
+    done
+}
+
+#================================================================
 # Main Function
 #================================================================
 main() {
@@ -51,6 +73,10 @@ main() {
     print_info "  4. Prometheus authentication + MonitoringStack"
     print_info "  5. Perses dashboards in OpenShift console"
     echo ""
+    
+    # Load variables from ~/.bashrc
+    print_info "Loading variables from ~/.bashrc..."
+    export_bashrc_vars || true
     
     # Check prerequisites
     if ! command -v oc >/dev/null 2>&1; then
@@ -85,23 +111,34 @@ main() {
         print_error "  - Script 03: Configure metrics endpoints"
         print_error "  - Script 04: Configure RBAC (Permission Sets, Roles)"
         print_error ""
-        print_error "To generate an API token:"
+        print_error "Options to resolve:"
+        print_error ""
+        print_error "Option 1: Run basic-setup first (RECOMMENDED)"
+        print_error "  cd ../basic-setup"
+        print_error "  ./install.sh [PASSWORD]"
+        print_error "  # This will automatically generate and save ROX_API_TOKEN"
+        print_error ""
+        print_error "Option 2: Check if token exists in ~/.bashrc"
+        print_error "  grep ROX_API_TOKEN ~/.bashrc"
+        print_error "  # If found, run: source ~/.bashrc"
+        print_error ""
+        print_error "Option 3: Generate token manually"
         print_error "  1. Get admin password:"
         print_error "     ROX_PASSWORD=\$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d)"
         print_error "  2. Get Central URL:"
         print_error "     CENTRAL_URL=\$(oc get route central -n stackrox -o jsonpath='{.spec.host}')"
         print_error "  3. Generate token:"
-        print_error "     curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
+        print_error "     export ROX_API_TOKEN=\$(curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
         print_error "       -H \"Content-Type: application/json\" \\"
         print_error "       \"https://\${CENTRAL_URL}/v1/apitokens/generate\" \\"
-        print_error "       -d '{\"name\":\"monitoring-setup\",\"roles\":[\"Admin\"]}' | jq -r '.token'"
-        print_error "  4. Export the token:"
-        print_error "     export ROX_API_TOKEN=<token>"
+        print_error "       -d '{\"name\":\"monitoring-setup\",\"roles\":[\"Admin\"]}' | jq -r '.token')"
+        print_error "  4. Save to ~/.bashrc:"
+        print_error "     echo \"export ROX_API_TOKEN=\\\"\${ROX_API_TOKEN}\\\"\" >> ~/.bashrc"
         print_error ""
         exit 1
     fi
     
-    print_info "✓ ROX_API_TOKEN found"
+    print_info "✓ ROX_API_TOKEN found (length: ${#ROX_API_TOKEN} chars)"
     
     print_info ""
     print_info "Running setup scripts..."

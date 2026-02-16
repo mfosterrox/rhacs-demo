@@ -73,47 +73,65 @@ monitoring-setup/
 ```bash
 cd monitoring-setup
 
-# Generate RHACS API Token (required)
-ROX_PASSWORD=$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d)
-CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='{.spec.host}')
-
-export ROX_API_TOKEN=$(curl -k -X POST -u "admin:${ROX_PASSWORD}" \
-  -H "Content-Type: application/json" \
-  "https://${CENTRAL_URL}/v1/apitokens/generate" \
-  -d '{"name":"monitoring-setup","roles":["Admin"]}' | jq -r '.token')
-
-# Run the complete setup
+# Run the installation (automatically loads ROX_API_TOKEN from ~/.bashrc)
 ./install.sh
 ```
 
+**Prerequisites**:
+- Run `../basic-setup/install.sh` first (generates and saves `ROX_API_TOKEN`)
+- Or ensure `ROX_API_TOKEN` is set in `~/.bashrc`
+- Or manually export `ROX_API_TOKEN` before running
+
+**What the Script Does**:
+1. **Loads Variables** - Automatically reads `ROX_API_TOKEN` from `~/.bashrc` if not in environment
+2. **Validates Token** - Ensures API token is available (exits with error if missing)
+3. **Runs Setup Scripts** - Executes scripts 01-05 in sequence
+4. **Configures Monitoring** - Sets up complete observability stack
+
 **Authentication Requirements**:
 - `ROX_API_TOKEN` is **REQUIRED** for scripts 03 and 04
-- RHACS requires API tokens (not basic auth) for write operations like:
+- Token is automatically loaded from `~/.bashrc` if present
+- RHACS requires API tokens (not basic auth) for write operations:
   - Configuring metrics endpoints
   - Creating Permission Sets and Roles
   - Configuring RBAC for ServiceAccounts
+
+**Recommended Setup Order**:
+1. Run `../basic-setup/install.sh` first (generates and saves token)
+2. Run `./install.sh` second (uses the saved token)
 
 ### Individual Script Usage
 
 You can also run scripts individually for troubleshooting:
 
 ```bash
+# First: Ensure ROX_API_TOKEN is set
+source ~/.bashrc  # Load token from ~/.bashrc
+echo $ROX_API_TOKEN  # Verify it's set
+
+# If not set, run basic-setup first:
+# cd ../basic-setup && ./install.sh
+
 # Step 1: Disable default OpenShift monitoring (REQUIRED FIRST)
 bash 01-disable-openshift-monitoring.sh
 
 # Step 2: Install operator
 bash 02-install-cluster-observability-operator.sh
 
-# Step 3: Configure metrics (requires ROX_API_TOKEN)
-export ROX_API_TOKEN="your-token"
+# Step 3: Configure metrics (uses ROX_API_TOKEN from environment)
 bash 03-configure-rhacs-metrics.sh
 
-# Step 4: Deploy monitoring stack
+# Step 4: Deploy monitoring stack (uses ROX_API_TOKEN from environment)
 bash 04-deploy-monitoring-stack.sh
 
 # Step 5: Deploy dashboard
 bash 05-deploy-perses-dashboard.sh
 ```
+
+**Important**:
+- `ROX_API_TOKEN` is **required** for scripts 03 and 04
+- The main install script automatically loads it from `~/.bashrc`
+- For individual scripts, ensure you've sourced `~/.bashrc` or run basic-setup first
 
 ## Script Details
 
