@@ -73,20 +73,25 @@ monitoring-setup/
 ```bash
 cd monitoring-setup
 
-# Option 1: Provide password as argument (recommended)
-./install.sh <admin-password>
+# Generate RHACS API Token (required)
+ROX_PASSWORD=$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d)
+CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='{.spec.host}')
 
-# Option 2: Set environment variables
-export ROX_PASSWORD="your-admin-password"
-export ROX_API_TOKEN="your-api-token"
-./install.sh
+export ROX_API_TOKEN=$(curl -k -X POST -u "admin:${ROX_PASSWORD}" \
+  -H "Content-Type: application/json" \
+  "https://${CENTRAL_URL}/v1/apitokens/generate" \
+  -d '{"name":"monitoring-setup","roles":["Admin"]}' | jq -r '.token')
 
-# Option 3: Let script retrieve password from cluster
-export ROX_API_TOKEN="your-api-token"
+# Run the complete setup
 ./install.sh
 ```
 
-**Note**: The password is required for script 04 (RBAC configuration via API). If not provided, the script will attempt to retrieve it from the `central-htpasswd` secret.
+**Authentication Requirements**:
+- `ROX_API_TOKEN` is **REQUIRED** for scripts 03 and 04
+- RHACS requires API tokens (not basic auth) for write operations like:
+  - Configuring metrics endpoints
+  - Creating Permission Sets and Roles
+  - Configuring RBAC for ServiceAccounts
 
 ### Individual Script Usage
 
@@ -158,11 +163,15 @@ Deploys Prometheus authentication and the MonitoringStack.
 - Creates ServiceAccount: `sample-stackrox-prometheus`
 - Creates token secret for authentication
 - **Configures RHACS RBAC via API** (Permission Set, Role, Auth Provider)
+  - Uses Bearer Token authentication (API token required)
+  - Creates "Prometheus Server" Permission Set with READ_ACCESS to metrics
+  - Creates "Prometheus Server" Role
+  - Maps ServiceAccount to Role
 - Deploys MonitoringStack CR
 - Deploys ScrapeConfig CR for RHACS metrics
 - Tests metrics endpoint accessibility
 
-**Requirements**: Admin password (passed as argument, environment variable, or auto-retrieved from cluster)
+**Requirements**: `ROX_API_TOKEN` environment variable (basic auth not supported for write operations)
 
 ### 05-deploy-perses-dashboard.sh
 Deploys Perses dashboard and verifies the complete installation.
@@ -189,7 +198,10 @@ Deploys Perses dashboard and verifies the complete installation.
 #### 3. RHACS Authentication
 - **ServiceAccount**: `sample-stackrox-prometheus`
 - **Secret**: `sample-stackrox-prometheus-token` (long-lived token)
-- **ConfigMap**: Declarative RBAC configuration for metrics access
+- **RBAC via API**: Permission Set, Role, and Auth Provider configured via RHACS API
+  - Permission Set: "Prometheus Server" with READ_ACCESS to metrics resources
+  - Role: "Prometheus Server" with unrestricted access scope
+  - Auth Provider: Maps ServiceAccount to Role
 
 #### 4. MonitoringStack
 - Dedicated Prometheus instance in `stackrox` namespace

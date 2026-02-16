@@ -4,6 +4,8 @@
 
 == Setup Instructions (15 minutes)
 
+=== RHACS Basic Setup
+
 To ensure your RHACS environment is up to date, and has all of the necessary components, run the following command in the *Bastion* tab.
 
 *Procedure*
@@ -16,7 +18,7 @@ To ensure your RHACS environment is up to date, and has all of the necessary com
 ----
 cd ~/
 git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
-./rhacs-demo/basic-setup/install.sh {acs_portal_password}
+./rhacs-demo/basic-setup/install.sh -p {acs_portal_password}
 ----
 
 . Verify the deployment completed successfully
@@ -34,6 +36,39 @@ git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
 [INFO] Admin Password: {acs_portal_password}
 [INFO] RHACS Version: 4.9.2
 ----
+
+=== RHACS Monitoring Setup
+
+Run the following command in the *Bastion* tab.
+
+*Procedure*
+
+[start=1]
+. Switch to the *Bastion* tab, located on the right side of the screen.
+. Run the following
++
+[source,sh,subs="attributes",role=execute]
+----
+cd ~/rhacs-demo/monitoring-setup
+git pull && ./install.sh -p {acs_portal_password}
+----
+
+. Verify the deployment completed successfully
++
+.**OUTPUT**
+[source,sh,subs="attributes"]
+----
+[INFO] ======================================
+[INFO] RHACS Demo Environment Setup Complete!
+[INFO] ======================================
+[INFO] 
+[INFO] RHACS Central Access Information:
+[INFO] ==================================
+[INFO] Central URL: {acs_route}
+[INFO] Admin Password: {acs_portal_password}
+[INFO] RHACS Version: 4.9.2
+----
+
 
 
 == Accessing the Consoles

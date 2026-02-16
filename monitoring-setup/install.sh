@@ -77,41 +77,31 @@ main() {
     print_info "Connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     echo ""
     
-    # Check for ROX_PASSWORD (needed for script 04 - RBAC configuration)
-    if [ -z "${ROX_PASSWORD}" ]; then
-        print_warn "ROX_PASSWORD not provided"
-        print_info "Attempting to retrieve from cluster secret..."
-        
-        local retrieved_pass=$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
-        if [ -n "${retrieved_pass}" ]; then
-            ROX_PASSWORD="${retrieved_pass}"
-            print_info "✓ Password retrieved from cluster"
-        else
-            print_error "Could not retrieve password"
-            print_error "Please run: ./install.sh <PASSWORD>"
-            exit 1
-        fi
+    # Check for ROX_API_TOKEN (required for scripts 03 and 04)
+    if [ -z "${ROX_API_TOKEN:-}" ]; then
+        print_error "ROX_API_TOKEN is required for RHACS configuration"
+        print_error ""
+        print_error "RHACS requires API tokens for:"
+        print_error "  - Script 03: Configure metrics endpoints"
+        print_error "  - Script 04: Configure RBAC (Permission Sets, Roles)"
+        print_error ""
+        print_error "To generate an API token:"
+        print_error "  1. Get admin password:"
+        print_error "     ROX_PASSWORD=\$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d)"
+        print_error "  2. Get Central URL:"
+        print_error "     CENTRAL_URL=\$(oc get route central -n stackrox -o jsonpath='{.spec.host}')"
+        print_error "  3. Generate token:"
+        print_error "     curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
+        print_error "       -H \"Content-Type: application/json\" \\"
+        print_error "       \"https://\${CENTRAL_URL}/v1/apitokens/generate\" \\"
+        print_error "       -d '{\"name\":\"monitoring-setup\",\"roles\":[\"Admin\"]}' | jq -r '.token'"
+        print_error "  4. Export the token:"
+        print_error "     export ROX_API_TOKEN=<token>"
+        print_error ""
+        exit 1
     fi
     
-    # Check for ROX_API_TOKEN (needed for script 03)
-    if [ -z "${ROX_API_TOKEN:-}" ]; then
-        print_warn "ROX_API_TOKEN is not set"
-        print_warn "Script 03 (configure-rhacs-metrics) will fail without it"
-        print_warn ""
-        print_warn "To generate a token, run:"
-        print_warn "  curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
-        print_warn "    -H \"Content-Type: application/json\" \\"
-        print_warn "    \"\${ROX_CENTRAL_URL}/v1/apitokens/generate\" \\"
-        print_warn "    -d '{\"name\":\"dashboard-token\",\"roles\":[\"Admin\"]}'"
-        print_warn ""
-        
-        read -p "Continue anyway? (y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Exiting. Please set ROX_API_TOKEN and try again."
-            exit 0
-        fi
-    fi
+    print_info "✓ ROX_API_TOKEN found"
     
     print_info ""
     print_info "Running setup scripts..."
@@ -123,22 +113,13 @@ main() {
         if [ -f "${script}" ]; then
             print_info "Executing: $(basename "${script}")"
             
-            # Pass password to script 04 (deploy-monitoring-stack)
-            if [[ "$(basename "${script}")" == "04-deploy-monitoring-stack.sh" ]]; then
-                if bash "${script}" "${ROX_PASSWORD}"; then
-                    print_info "✓ Successfully completed: $(basename "${script}")"
-                else
-                    print_error "✗ Failed: $(basename "${script}")"
-                    exit 1
-                fi
+            if bash "${script}"; then
+                print_info "✓ Successfully completed: $(basename "${script}")"
             else
-                if bash "${script}"; then
-                    print_info "✓ Successfully completed: $(basename "${script}")"
-                else
-                    print_error "✗ Failed: $(basename "${script}")"
-                    exit 1
-                fi
+                print_error "✗ Failed: $(basename "${script}")"
+                exit 1
             fi
+            
             print_info ""
         fi
     done

@@ -2,7 +2,8 @@
 
 # Script: 04-deploy-monitoring-stack.sh
 # Description: Deploy Prometheus authentication and MonitoringStack
-# Usage: ./04-deploy-monitoring-stack.sh [PASSWORD]
+# Usage: ./04-deploy-monitoring-stack.sh
+# Requirements: ROX_API_TOKEN must be set
 
 set -euo pipefail
 
@@ -17,9 +18,6 @@ readonly NC='\033[0m'
 readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly MONITORING_DIR="${SCRIPT_DIR}/monitoring"
-
-# Get password from argument or environment
-readonly ROX_PASSWORD="${1:-${ROX_PASSWORD:-}}"
 
 # Print functions
 print_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -38,25 +36,25 @@ error_handler() {
 trap 'error_handler $? $LINENO' ERR
 
 #================================================================
-# Get RHACS credentials
+# Get RHACS API Token (Required for RBAC operations)
 #================================================================
-get_rhacs_credentials() {
-    local password="${ROX_PASSWORD}"
-    
-    # If no password provided, try to get from secret
-    if [ -z "${password}" ]; then
-        print_info "No password provided, retrieving from cluster..."
-        password=$(oc get secret central-htpasswd -n ${RHACS_NAMESPACE} -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
-        
-        if [ -z "${password}" ]; then
-            print_error "Could not retrieve admin password"
-            print_error "Please run: ./04-deploy-monitoring-stack.sh <PASSWORD>"
-            print_error "Or set: export ROX_PASSWORD=<password>"
-            exit 1
-        fi
+get_rhacs_token() {
+    if [ -z "${ROX_API_TOKEN:-}" ]; then
+        print_error "ROX_API_TOKEN is required for RBAC configuration"
+        print_error "RHACS requires API tokens for write operations (creating permission sets, roles)"
+        print_error ""
+        print_error "To generate an API token:"
+        print_error "  1. Get admin password: oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d"
+        print_error "  2. Generate token:"
+        print_error "     curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
+        print_error "       -H \"Content-Type: application/json\" \\"
+        print_error "       \"https://\${CENTRAL_URL}/v1/apitokens/generate\" \\"
+        print_error "       -d '{\"name\":\"monitoring-setup\",\"roles\":[\"Admin\"]}' | jq -r '.token'"
+        print_error "  3. Export the token: export ROX_API_TOKEN=<token>"
+        exit 1
     fi
     
-    echo "${password}"
+    echo "${ROX_API_TOKEN}"
 }
 
 #================================================================
@@ -94,8 +92,8 @@ configure_rhacs_rbac() {
     print_step "Configuring RHACS RBAC for Prometheus via API"
     echo "================================================================"
     
-    # Get credentials
-    local password=$(get_rhacs_credentials)
+    # Get API token
+    local token=$(get_rhacs_token)
     local central_url=$(oc get route central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
     
     if [ -z "${central_url}" ]; then
@@ -104,10 +102,11 @@ configure_rhacs_rbac() {
     fi
     
     print_info "Central URL: https://${central_url}"
+    print_info "Authentication: Bearer Token"
     
     # Step 1: Create Permission Set
     print_info "Creating Permission Set..."
-    local perm_response=$(curl -k -s -u "admin:${password}" -X POST \
+    local perm_response=$(curl -k -s -H "Authorization: Bearer ${token}" -X POST \
         "https://${central_url}/v1/permissionsets" \
         -H "Content-Type: application/json" \
         -d '{
@@ -134,7 +133,7 @@ configure_rhacs_rbac() {
     fi
     
     # Get Permission Set ID
-    local perm_set_id=$(curl -k -s -u "admin:${password}" \
+    local perm_set_id=$(curl -k -s -H "Authorization: Bearer ${token}" \
         "https://${central_url}/v1/permissionsets" | \
         jq -r '.permissionSets[] | select(.name=="Prometheus Server") | .id' 2>/dev/null || echo "")
     
@@ -148,7 +147,7 @@ configure_rhacs_rbac() {
     
     # Step 2: Create Role
     print_info "Creating Role..."
-    local role_response=$(curl -k -s -u "admin:${password}" -X POST \
+    local role_response=$(curl -k -s -H "Authorization: Bearer ${token}" -X POST \
         "https://${central_url}/v1/roles" \
         -H "Content-Type: application/json" \
         -d "{
@@ -166,7 +165,7 @@ configure_rhacs_rbac() {
     
     # Step 3: Create Auth Provider (Machine Access)
     print_info "Creating Auth Provider for ServiceAccount..."
-    local auth_response=$(curl -k -s -u "admin:${password}" -X POST \
+    local auth_response=$(curl -k -s -H "Authorization: Bearer ${token}" -X POST \
         "https://${central_url}/v1/groups/attributes" \
         -H "Content-Type: application/json" \
         -d "{
