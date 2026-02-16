@@ -103,6 +103,12 @@ check_prerequisites() {
 get_rox_central_url() {
     log_info "Getting ROX Central URL..."
     
+    # Check if already set in environment
+    if [ -n "${ROX_CENTRAL_URL:-}" ]; then
+        log_info "✓ ROX Central URL already set: $ROX_CENTRAL_URL"
+        return 0
+    fi
+    
     # Try to get the route (OpenShift)
     if $KUBE_CMD get route central -n "$NAMESPACE" &> /dev/null; then
         ROX_CENTRAL_URL="https://$($KUBE_CMD get route central -n "$NAMESPACE" -o jsonpath='{.spec.host}')"
@@ -120,6 +126,8 @@ get_rox_central_url() {
     # Store in ~/.bashrc if not already there
     if [ -f ~/.bashrc ]; then
         if ! grep -q "export ROX_CENTRAL_URL=" ~/.bashrc; then
+            echo "" >> ~/.bashrc
+            echo "# RHACS Monitoring Configuration" >> ~/.bashrc
             echo "export ROX_CENTRAL_URL='$ROX_CENTRAL_URL'" >> ~/.bashrc
             log "✓ ROX_CENTRAL_URL added to ~/.bashrc"
         fi
@@ -129,25 +137,31 @@ get_rox_central_url() {
 load_or_create_api_token() {
     log_step "Checking for ROX_API_TOKEN..."
     
-    # Load from ~/.bashrc if available
-    if [ -f ~/.bashrc ] && grep -q "export ROX_API_TOKEN=" ~/.bashrc; then
-        # shellcheck disable=SC1090
-        source ~/.bashrc
-        if [ -n "${ROX_API_TOKEN:-}" ]; then
-            log "✓ Loaded ROX_API_TOKEN from ~/.bashrc"
-            return 0
-        fi
-    fi
-    
-    # Check if already set in environment
+    # Check if already set in environment first
     if [ -n "${ROX_API_TOKEN:-}" ]; then
         log "✓ ROX_API_TOKEN already set in environment"
         # Store in ~/.bashrc
         if [ -f ~/.bashrc ] && ! grep -q "export ROX_API_TOKEN=" ~/.bashrc; then
+            if ! grep -q "# RHACS Monitoring Configuration" ~/.bashrc; then
+                echo "" >> ~/.bashrc
+                echo "# RHACS Monitoring Configuration" >> ~/.bashrc
+            fi
             echo "export ROX_API_TOKEN='$ROX_API_TOKEN'" >> ~/.bashrc
             log "✓ ROX_API_TOKEN added to ~/.bashrc"
         fi
         return 0
+    fi
+    
+    # Load from ~/.bashrc if available
+    if [ -f ~/.bashrc ] && grep -q "export ROX_API_TOKEN=" ~/.bashrc; then
+        log "Found ROX_API_TOKEN in ~/.bashrc, extracting..."
+        # Extract token directly from file instead of sourcing (avoids /etc/bashrc issues)
+        ROX_API_TOKEN=$(grep "export ROX_API_TOKEN=" ~/.bashrc | head -1 | sed "s/export ROX_API_TOKEN=//g" | tr -d "'" | tr -d '"')
+        if [ -n "${ROX_API_TOKEN:-}" ]; then
+            export ROX_API_TOKEN
+            log "✓ Loaded ROX_API_TOKEN from ~/.bashrc"
+            return 0
+        fi
     fi
     
     # Try to generate API token automatically
@@ -202,6 +216,10 @@ load_or_create_api_token() {
             # Store in ~/.bashrc
             if [ -f ~/.bashrc ]; then
                 if ! grep -q "export ROX_API_TOKEN=" ~/.bashrc; then
+                    if ! grep -q "# RHACS Monitoring Configuration" ~/.bashrc; then
+                        echo "" >> ~/.bashrc
+                        echo "# RHACS Monitoring Configuration" >> ~/.bashrc
+                    fi
                     echo "export ROX_API_TOKEN='$ROX_API_TOKEN'" >> ~/.bashrc
                     log "✓ ROX_API_TOKEN added to ~/.bashrc"
                 fi
