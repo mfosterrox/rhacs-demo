@@ -36,8 +36,8 @@ trap 'error_handler $? $LINENO' ERR
 # Check installation method
 #================================================================
 check_installation_method() {
-    print_step "Detecting RHACS installation method"
-    echo "================================================================"
+    print_step "Detecting RHACS installation method" >&2
+    echo "================================================================" >&2
     
     local installation_method=""
     
@@ -46,8 +46,8 @@ check_installation_method() {
         local central_name=$(oc get central -n ${RHACS_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
         if [ -n "${central_name}" ]; then
             installation_method="operator"
-            print_info "✓ Detected Operator installation"
-            print_info "  Central CR: ${central_name}"
+            print_info "✓ Detected Operator installation" >&2
+            print_info "  Central CR: ${central_name}" >&2
         fi
     fi
     
@@ -56,7 +56,7 @@ check_installation_method() {
         if command -v helm >/dev/null 2>&1; then
             if helm list -n ${RHACS_NAMESPACE} 2>/dev/null | grep -q "stackrox-central-services\|rhacs-central-services"; then
                 installation_method="helm"
-                print_info "✓ Detected Helm installation"
+                print_info "✓ Detected Helm installation" >&2
             fi
         fi
     fi
@@ -65,7 +65,7 @@ check_installation_method() {
     if [ -z "${installation_method}" ]; then
         if oc get deployment central -n ${RHACS_NAMESPACE} >/dev/null 2>&1; then
             installation_method="manifest"
-            print_info "✓ Detected manifest installation"
+            print_info "✓ Detected manifest installation" >&2
         fi
     fi
     
@@ -82,8 +82,8 @@ check_installation_method() {
 # Check current monitoring status
 #================================================================
 check_monitoring_status() {
-    print_step "Checking current monitoring configuration"
-    echo "================================================================"
+    print_step "Checking current monitoring configuration" >&2
+    echo "================================================================" >&2
     
     local method=$1
     local monitoring_enabled="unknown"
@@ -93,13 +93,13 @@ check_monitoring_status() {
         monitoring_enabled=$(oc get central ${central_name} -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.monitoring.openshift.enabled}' 2>/dev/null || echo "not-set")
         
         if [ "${monitoring_enabled}" = "not-set" ] || [ -z "${monitoring_enabled}" ]; then
-            print_info "OpenShift monitoring: enabled (default)"
+            print_info "OpenShift monitoring: enabled (default)" >&2
             monitoring_enabled="true"
         else
-            print_info "OpenShift monitoring: ${monitoring_enabled}"
+            print_info "OpenShift monitoring: ${monitoring_enabled}" >&2
         fi
     else
-        print_info "Manual monitoring check required for ${method} installation"
+        print_info "Manual monitoring check required for ${method} installation" >&2
         monitoring_enabled="unknown"
     fi
     
