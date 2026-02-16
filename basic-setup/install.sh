@@ -28,6 +28,7 @@ trap 'echo "Error at line $LINENO"' ERR
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Script directory (install.sh is now in basic-setup folder)
@@ -46,6 +47,85 @@ print_warn() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_step() {
+    echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+#================================================================
+# Install roxctl CLI
+#================================================================
+install_roxctl() {
+    print_step "Installing roxctl CLI"
+    echo "================================================================"
+    
+    if command -v roxctl >/dev/null 2>&1; then
+        local version=$(roxctl version 2>/dev/null | grep "roxctl version" || echo "unknown")
+        print_info "✓ roxctl already installed: ${version}"
+        return 0
+    fi
+    
+    print_info "Downloading roxctl..."
+    
+    # Detect OS and architecture
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local arch=$(uname -m)
+    
+    case "${arch}" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) print_error "Unsupported architecture: ${arch}"; exit 1 ;;
+    esac
+    
+    # Get Central URL to download roxctl
+    local central_route=$(oc get route central -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    if [ -z "${central_route}" ]; then
+        print_error "Could not get Central route - is RHACS installed?"
+        exit 1
+    fi
+    
+    local roxctl_url="https://${central_route}/api/cli/download/roxctl-${os}"
+    print_info "Downloading from: ${roxctl_url}"
+    
+    # Download to temporary location
+    local temp_dir=$(mktemp -d)
+    if curl -k -s -o "${temp_dir}/roxctl" "${roxctl_url}"; then
+        chmod +x "${temp_dir}/roxctl"
+        
+        # Move to /usr/local/bin or ~/.local/bin
+        if [ -w "/usr/local/bin" ]; then
+            mv "${temp_dir}/roxctl" /usr/local/bin/roxctl
+            print_info "✓ roxctl installed to /usr/local/bin/roxctl"
+        else
+            mkdir -p ~/.local/bin
+            mv "${temp_dir}/roxctl" ~/.local/bin/roxctl
+            print_info "✓ roxctl installed to ~/.local/bin/roxctl"
+            
+            # Add to PATH if not already there
+            if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                print_info "Adding ~/.local/bin to PATH in ~/.bashrc"
+                echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            fi
+        fi
+        
+        rm -rf "${temp_dir}"
+    else
+        print_error "Failed to download roxctl"
+        rm -rf "${temp_dir}"
+        exit 1
+    fi
+    
+    # Verify installation
+    if command -v roxctl >/dev/null 2>&1; then
+        local version=$(roxctl version 2>/dev/null | grep "roxctl version" || echo "installed")
+        print_info "✓ roxctl successfully installed: ${version}"
+    else
+        print_warn "roxctl installed but not in current PATH"
+        print_info "Please run: source ~/.bashrc"
+    fi
+    
+    echo ""
 }
 
 # Function to check if a variable exists in ~/.bashrc or current environment
@@ -311,6 +391,9 @@ main() {
     fi
     print_info ""
     
+    # Install roxctl CLI if not present
+    install_roxctl
+    
     # Check if ROX_API_TOKEN is needed and generate if missing
     if [ -z "${ROX_API_TOKEN:-}" ]; then
         print_info "ROX_API_TOKEN not set - attempting to generate..."
@@ -375,6 +458,20 @@ main() {
     print_info "======================================"
     print_info "RHACS Demo Environment Setup Complete!"
     print_info "======================================"
+    print_info ""
+    
+    # Display setup summary
+    print_info "Setup Summary:"
+    print_info "=============="
+    print_info "  ✓ roxctl CLI installed"
+    if [ -n "${ROX_API_TOKEN:-}" ]; then
+        print_info "  ✓ ROX_API_TOKEN generated and saved to ~/.bashrc"
+    fi
+    print_info "  ✓ RHACS installation verified"
+    print_info "  ✓ Compliance Operator installed"
+    print_info "  ✓ Demo applications deployed"
+    print_info "  ✓ RHACS settings configured"
+    print_info "  ✓ Compliance scan schedules created"
     print_info ""
     
     # Display important connection information

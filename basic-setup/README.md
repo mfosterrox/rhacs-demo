@@ -6,7 +6,15 @@ This folder contains the core installation and configuration scripts for the RHA
 
 The `install.sh` script orchestrates the execution of all numbered setup scripts in sequence, providing a complete RHACS demo environment configuration.
 
+**The install script automatically:**
+- Installs `roxctl` CLI if not present
+- Generates `ROX_API_TOKEN` using admin credentials
+- Saves token to `~/.bashrc` for persistence
+- Runs all configuration scripts in sequence
+
 ## Installation
+
+### Quick Start
 
 From the **project root**, run:
 
@@ -21,18 +29,30 @@ cd basic-setup
 ./install.sh [PASSWORD]
 ```
 
+**Password options:**
+- **Provide as argument**: `./install.sh myPassword123` (recommended)
+- **Set as environment variable**: `export ROX_PASSWORD="myPassword123" && ./install.sh`
+- **Auto-retrieve from cluster**: The script will attempt to fetch it from cluster secrets
+
+**What happens automatically:**
+1. ✅ Installs `roxctl` CLI (if not already present)
+2. ✅ Generates `ROX_API_TOKEN` and saves to `~/.bashrc`
+3. ✅ Runs all 6 setup scripts in sequence
+4. ✅ Configures complete RHACS demo environment
+
 ## Setup Scripts
 
 The following scripts are executed in numerical order:
 
-| Script | Description |
-|--------|-------------|
-| `install.sh` | Main orchestrator - runs all numbered scripts in sequence |
-| `01-verify-rhacs-install.sh` | Verifies RHACS installation, checks version, ensures TLS encryption |
-| `02-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning |
-| `03-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo |
-| `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) |
-| `05-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules |
+| Script | Description | Requires Token |
+|--------|-------------|----------------|
+| `install.sh` | Main orchestrator - installs roxctl, generates token, runs all scripts | N/A |
+| `01-verify-rhacs-install.sh` | Verifies RHACS installation, checks version, ensures TLS encryption | No |
+| `02-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No |
+| `03-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No |
+| `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** |
+| `05-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** |
+| `06-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** |
 
 ## What Gets Configured
 
@@ -62,6 +82,17 @@ The following scripts are executed in numerical order:
 
 ## Requirements
 
+### Cluster Access
+- Must be logged into OpenShift cluster via `oc login`
+- Requires cluster-admin or equivalent permissions
+- RHACS must be already installed (Central and Scanner pods running)
+
+### Required Tools
+- `oc` CLI (OpenShift command-line tool)
+- `jq` (JSON processor)
+- `curl` (for API calls)
+- Internet connectivity (for downloading roxctl)
+
 ### Environment Variables
 
 The install script checks for required variables in this order:
@@ -71,34 +102,56 @@ The install script checks for required variables in this order:
 4. Auto-detection from cluster
 
 #### Required
-- `ROX_PASSWORD` - RHACS admin password (can be passed as argument)
-- `ROX_CENTRAL_URL` - RHACS Central URL (auto-detected if not provided)
+- `ROX_PASSWORD` - RHACS admin password
+  - Can be passed as argument: `./install.sh <PASSWORD>`
+  - Can be set as env var: `export ROX_PASSWORD="..."`
+  - Will be auto-retrieved from cluster if not provided
+- `ROX_CENTRAL_URL` - RHACS Central URL
+  - Auto-detected from cluster route if not provided
 
 #### Optional
 - `RHACS_NAMESPACE` - RHACS namespace (default: `stackrox`)
 - `RHACS_ROUTE_NAME` - Route name (default: `central`)
 - `RHACS_VERSION` - Target version (default: `4.9.2`)
 
-### Cluster Access
-- Must be logged into OpenShift cluster via `oc login`
-- Requires cluster-admin or equivalent permissions
+#### Auto-Generated
+- `ROX_API_TOKEN` - API token for RHACS operations
+  - Automatically generated during installation
+  - Saved to `~/.bashrc` for persistence
+  - Used by scripts 04, 05, and 06
 
 ## Individual Script Execution
 
 You can run individual scripts for testing or troubleshooting:
 
 ```bash
-# Verify RHACS
+# First: Ensure environment is set up
+source ~/.bashrc  # Load ROX_API_TOKEN if previously generated
+
+# Verify RHACS (no token needed)
 bash basic-setup/01-verify-rhacs-install.sh
 
-# Configure RHACS settings only
+# Install Compliance Operator (no token needed)
+bash basic-setup/02-compliance-operator-install.sh
+
+# Deploy applications (no token needed)
+bash basic-setup/03-deploy-applications.sh
+
+# Configure RHACS settings (REQUIRES ROX_API_TOKEN)
 bash basic-setup/04-configure-rhacs-settings.sh
 
-# Setup compliance scanning only
+# Setup compliance scanning (REQUIRES ROX_API_TOKEN)
 bash basic-setup/05-setup-co-scan-schedule.sh
+
+# Trigger compliance scan (REQUIRES ROX_API_TOKEN)
+bash basic-setup/06-trigger-compliance-scan.sh
 ```
 
-**Note**: Individual scripts assume RHACS is already installed and accessible.
+**Important Notes:**
+- Individual scripts assume RHACS is already installed and accessible
+- Scripts 04, 05, and 06 **require** `ROX_API_TOKEN` to be set
+- Run the main `install.sh` once to generate and save the token
+- Or manually generate: see "API Token Generation" section below
 
 ## Troubleshooting
 
@@ -139,6 +192,43 @@ curl -k -u "admin:YOUR_PASSWORD" \
   https://your-central-url/v1/apitokens/generate \
   -X POST -H "Content-Type: application/json" \
   -d '{"name":"test","roles":["Admin"]}'
+```
+
+### Manual API Token Generation
+If automatic generation doesn't work, generate manually:
+
+```bash
+# Get password
+ROX_PASSWORD=$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' | base64 -d)
+
+# Get Central URL
+CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='{.spec.host}')
+
+# Generate token
+export ROX_API_TOKEN=$(curl -k -X POST -u "admin:${ROX_PASSWORD}" \
+  -H "Content-Type: application/json" \
+  "https://${CENTRAL_URL}/v1/apitokens/generate" \
+  -d '{"name":"manual-setup","roles":["Admin"]}' | jq -r '.token')
+
+# Save to ~/.bashrc
+echo "export ROX_API_TOKEN=\"${ROX_API_TOKEN}\"" >> ~/.bashrc
+
+# Verify
+echo "Token saved: ${#ROX_API_TOKEN} characters"
+```
+
+### roxctl Not Found After Installation
+If roxctl is not in PATH after installation:
+
+```bash
+# Reload your shell configuration
+source ~/.bashrc
+
+# Or add manually
+export PATH="$HOME/.local/bin:$PATH"
+
+# Verify
+roxctl version
 ```
 
 ## Related Documentation
