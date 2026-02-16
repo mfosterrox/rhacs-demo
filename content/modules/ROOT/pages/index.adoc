@@ -18,7 +18,7 @@ To ensure your RHACS environment is up to date, and has all of the necessary com
 ----
 cd ~/
 git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
-./rhacs-demo/basic-setup/install.sh -p {acs_portal_password}
+./rhacs-demo/basic-setup/install.sh {acs_portal_password}
 ----
 
 . Verify the deployment completed successfully
@@ -50,7 +50,7 @@ Run the following command in the *Bastion* tab.
 [source,sh,subs="attributes",role=execute]
 ----
 cd ~/rhacs-demo/monitoring-setup
-git pull && ./install.sh -p {acs_portal_password}
+git pull && ./install.sh {acs_portal_password}
 ----
 
 . Verify the deployment completed successfully
