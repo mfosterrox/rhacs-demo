@@ -1,8 +1,8 @@
 [[labname]]
 
-= {lab_name}
+= Advanced Cluster Security Demo 
 
-== Setup Instructions (5 minutes)
+== Setup Instructions (15 minutes)
 
 To ensure your RHACS environment is up to date, and has all of the necessary components, run the following command in the *Bastion* tab.
 
@@ -33,9 +33,6 @@ git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
 [INFO] Central URL: {acs_route}
 [INFO] Admin Password: {acs_portal_password}
 [INFO] RHACS Version: 4.9.2
-[INFO] 
-[INFO] Username: admin
-[INFO] 
 ----
 
 

@@ -198,10 +198,107 @@ patch_hyperconverged_vsock() {
 }
 
 #================================================================
+# Check and fix sensor networking for hostNetwork pods
+#================================================================
+configure_sensor_networking() {
+    print_step "5. Configuring Sensor networking for hostNetwork access"
+    
+    print_info "When collector uses hostNetwork=true, it may not reach ClusterIP services"
+    print_info "Checking sensor reachability from host network..."
+    
+    # Get sensor service IP
+    local sensor_svc_ip=$(oc get svc sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+    
+    if [ -z "${sensor_svc_ip}" ]; then
+        print_error "Cannot find sensor service"
+        return 1
+    fi
+    
+    print_info "Sensor service ClusterIP: ${sensor_svc_ip}"
+    
+    # Check if sensor already has a hostPort configured
+    local host_port=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].ports[?(@.name=="api")].hostPort}' 2>/dev/null || echo "")
+    
+    if [ -n "${host_port}" ]; then
+        print_info "✓ Sensor already configured with hostPort: ${host_port}"
+        return 0
+    fi
+    
+    print_info "Configuring sensor with hostPort for host network access..."
+    
+    # Patch sensor deployment to add hostPort
+    oc patch deployment sensor -n ${RHACS_NAMESPACE} --type='json' -p='[
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/ports/0/hostPort",
+        "value": 8443
+      }
+    ]'
+    
+    # Wait for rollout
+    print_info "Waiting for Sensor to restart with hostPort..."
+    oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=5m
+    
+    print_info "✓ Sensor configured with hostPort 8443"
+    
+    # Update collector to use localhost:8443
+    print_info "Updating collector to use sensor via hostPort..."
+    
+    # Update GRPC_SERVER and ROX_ADVERTISED_ENDPOINT to use localhost
+    oc set env daemonset/collector -n ${RHACS_NAMESPACE} \
+        GRPC_SERVER=localhost:8443 \
+        SNI_HOSTNAME=sensor.stackrox.svc \
+        ROX_ADVERTISED_ENDPOINT=localhost:8443 \
+        -c compliance
+    
+    # Wait for collector rollout
+    print_info "Waiting for Collector to restart with new sensor endpoint..."
+    oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
+    
+    print_info "✓ Collector updated to reach sensor via localhost:8443"
+}
+
+#================================================================
+# Verify sensor connectivity from hostNetwork
+#================================================================
+verify_sensor_connectivity() {
+    print_step "6. Verifying collector → sensor connectivity"
+    
+    print_info "Waiting 30 seconds for pods to stabilize..."
+    sleep 30
+    
+    # Find a collector pod
+    local collector_pod=$(oc get pods -n ${RHACS_NAMESPACE} -l app=collector -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    
+    if [ -z "${collector_pod}" ]; then
+        print_warn "⚠ No collector pod found to test connectivity"
+        return 0
+    fi
+    
+    print_info "Testing from collector pod: ${collector_pod}"
+    
+    # Check compliance container logs for connection errors
+    print_info "Checking for VSOCK relay connections..."
+    
+    if oc logs ${collector_pod} -n ${RHACS_NAMESPACE} -c compliance --tail=50 2>/dev/null | grep -q "Handling vsock connection"; then
+        print_info "✓ VSOCK connections detected"
+        
+        if oc logs ${collector_pod} -n ${RHACS_NAMESPACE} -c compliance --tail=100 2>/dev/null | grep -q "i/o timeout\|connection refused\|connection error"; then
+            print_warn "⚠ Connection errors detected in collector logs"
+            print_info "  This may resolve after sensor hostPort configuration"
+        else
+            print_info "✓ No connection errors detected"
+        fi
+    else
+        print_info "  No VSOCK connections yet (VMs may not be deployed)"
+    fi
+}
+
+#================================================================
 # Display VM configuration instructions
 #================================================================
 display_vm_instructions() {
-    print_step "5. Virtual Machine Configuration"
+    print_step "7. Virtual Machine Configuration"
     echo ""
     
     print_info "To enable vulnerability scanning on VMs, update each VM spec:"
@@ -291,6 +388,14 @@ main() {
     patch_hyperconverged_vsock
     echo ""
     
+    # Configure sensor networking for hostNetwork access
+    configure_sensor_networking
+    echo ""
+    
+    # Verify connectivity
+    verify_sensor_connectivity
+    echo ""
+    
     # Display VM configuration instructions
     display_vm_instructions
     
@@ -303,6 +408,8 @@ main() {
     print_info "  ✓ Sensor: ROX_VIRTUAL_MACHINES=true"
     print_info "  ✓ Collector: ROX_VIRTUAL_MACHINES=true"
     print_info "  ✓ HyperConverged: vsock support enabled"
+    print_info "  ✓ Sensor: hostPort configured for host network access"
+    print_info "  ✓ Collector: configured to reach sensor via localhost"
     echo ""
     print_info "Next steps:"
     print_info "  1. Configure VMs with vsock support (see instructions above)"

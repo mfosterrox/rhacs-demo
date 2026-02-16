@@ -93,6 +93,9 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 - Sensor: `ROX_VIRTUAL_MACHINES=true`
 - Collector compliance container: `ROX_VIRTUAL_MACHINES=true`
 - HyperConverged: VSOCK feature gate enabled
+- Collector: `hostNetwork=true`, `dnsPolicy=ClusterFirstWithHostNet` for VSOCK access
+- Sensor: `hostPort=8443` configured for host network connectivity
+- Collector: Configured to reach sensor via `localhost:8443`
 
 ### VM Image (02-build-vm-image.sh)
 - Creates Kubernetes Secret with cloud-init configuration
@@ -218,7 +221,8 @@ subscription-manager status
 | Script | Purpose |
 |--------|---------|
 | `install.sh` | **Main script** - orchestrates complete setup |
-| `01-configure-rhacs.sh` | Configure RHACS components and enable VSOCK |
+| `01-configure-rhacs.sh` | Configure RHACS components, enable VSOCK, and fix networking |
+| `01-check-env.sh` | Verify RHACS VM scanning environment and connectivity |
 | `02-deploy-base-vm.sh` | Deploy single VM with roxagent |
 | `03-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
 
@@ -303,6 +307,58 @@ oc get kubevirt kubevirt-kubevirt-hyperconverged -n openshift-cnv \
 
 3. Verify RHEL subscription inside VM
 
+### Collector → Sensor connectivity issues
+
+**Symptoms**: Collector logs show `i/o timeout` or `connection refused` when trying to reach sensor:
+```
+virtualmachines/relay: Error sending index report to sensor: 
+  rpc error: code = Unavailable desc = connection error: 
+  desc = "transport: Error while dialing: dial tcp 172.231.132.191:443: i/o timeout"
+```
+
+**Root Cause**: When collector uses `hostNetwork: true` (required for VSOCK access), it may not be able to reach ClusterIP services depending on the CNI configuration.
+
+**Solution**: The configure script automatically:
+1. Configures sensor with `hostPort: 8443` so it's reachable from host network
+2. Updates collector to reach sensor via `localhost:8443`
+
+To apply the fix:
+```bash
+./01-configure-rhacs.sh
+```
+
+**Verify the fix**:
+```bash
+# Check sensor hostPort
+oc get deployment sensor -n stackrox \
+  -o jsonpath='{.spec.template.spec.containers[0].ports[?(@.name=="api")]}'
+
+# Check collector endpoint configuration
+oc get daemonset collector -n stackrox \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="GRPC_SERVER")].value}'
+
+# Should show: localhost:8443
+
+# Check collector logs for successful connections
+COLLECTOR_POD=$(oc get pods -n stackrox -l app=collector -o jsonpath='{.items[0].metadata.name}')
+oc logs $COLLECTOR_POD -n stackrox -c compliance --tail=50 | grep "Handling vsock connection"
+```
+
+### Comprehensive environment check
+
+Run the automated check script to verify all configuration:
+```bash
+./01-check-env.sh
+```
+
+This will verify:
+- ✓ RHACS components running
+- ✓ Feature flags configured
+- ✓ Collector networking (hostNetwork, dnsPolicy)
+- ✓ Sensor hostPort configuration
+- ✓ Collector → Sensor connectivity
+- ✓ VSOCK connections from VMs
+
 ## Architecture
 
 ```
@@ -327,3 +383,8 @@ oc get kubevirt kubevirt-kubevirt-hyperconverged -n openshift-cnv \
 - [OpenShift Virtualization](https://docs.openshift.com/container-platform/latest/virt/about-virt.html)
 - [KubeVirt VSOCK](https://kubevirt.io/user-guide/virtual_machines/vsock/)
 - [roxagent Downloads](https://mirror.openshift.com/pub/rhacs/assets/)
+
+sudo subscription-manager register --username mfoster@redhat.com --password '_.vLx4eVbKde!_ARpprJ' --auto-attach
+sudo subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms --enable rhel-9-for-x86_64-appstream-rpms
+sudo dnf install -y httpd nginx php
+sudo systemctl restart roxagent

@@ -43,10 +43,11 @@ main() {
     print_info "========================================================================"
     echo ""
     print_info "This setup installs advanced monitoring and dashboards:"
-    print_info "  1. Cluster Observability Operator (includes Perses)"
-    print_info "  2. RHACS metrics configuration (requires ROX_API_TOKEN)"
-    print_info "  3. Prometheus authentication + MonitoringStack"
-    print_info "  4. Perses dashboards in OpenShift console"
+    print_info "  1. Disable default OpenShift monitoring (required for custom Prometheus)"
+    print_info "  2. Cluster Observability Operator (includes Perses)"
+    print_info "  3. RHACS metrics configuration (requires ROX_API_TOKEN)"
+    print_info "  4. Prometheus authentication + MonitoringStack"
+    print_info "  5. Perses dashboards in OpenShift console"
     echo ""
     
     # Check prerequisites
@@ -119,6 +120,7 @@ main() {
     print_info "========================================================================"
     echo ""
     print_info "Resources created:"
+    print_info "  ✓ Default OpenShift monitoring disabled"
     print_info "  ✓ Cluster Observability Operator"
     print_info "  ✓ RHACS metrics configured (1-minute gathering)"
     print_info "  ✓ MonitoringStack (Prometheus with RHACS scraping)"

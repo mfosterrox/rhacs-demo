@@ -437,9 +437,6 @@ main() {
         print_info "RHACS Version: ${RHACS_VERSION}"
     fi
     
-    print_info ""
-    print_info "Username: admin"
-    print_info ""
 }
 
 # Run main function

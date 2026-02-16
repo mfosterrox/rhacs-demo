@@ -2,9 +2,18 @@
 
 This folder contains the advanced monitoring setup that installs **Cluster Observability Operator** and **Perses dashboards** for RHACS metrics visualization in the OpenShift console.
 
+## ⚠️ Important: Custom Prometheus Monitoring
+
+This setup configures **custom Prometheus monitoring** (not the default OpenShift monitoring). According to [Red Hat documentation](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.9/html/configuring/monitor-acs#monitoring-using-prometheus_monitoring-acs):
+
+> **Before you can use custom Prometheus monitoring, if you have Red Hat OpenShift, you must disable the default monitoring.**
+
+The setup automatically disables default OpenShift monitoring in **step 1** to prevent duplicate scraping and follows Red Hat's recommended approach for custom Prometheus metrics.
+
 ## Overview
 
 The advanced setup provides enterprise-grade monitoring with:
+- **Custom Prometheus Monitoring** - Dedicated Prometheus instance for RHACS
 - **Cluster Observability Operator** - Red Hat's comprehensive observability platform
 - **Perses Dashboards** - Modern, interactive dashboards in OpenShift console
 - **MonitoringStack** - Dedicated Prometheus instance for RHACS metrics
@@ -44,16 +53,17 @@ export ROX_API_TOKEN="your-generated-token"
 
 ## Project Structure
 
-The advanced setup consists of 4 focused scripts:
+The advanced setup consists of 5 focused scripts:
 
 ```
-advanced-setup/
-├── install.sh                                  # Main orchestrator
-├── 01-install-cluster-observability-operator.sh # Install COO
-├── 02-configure-rhacs-metrics.sh                # Configure metrics (requires ROX_API_TOKEN)
-├── 03-deploy-monitoring-stack.sh                # Deploy Prometheus + auth
-├── 04-deploy-perses-dashboard.sh                # Deploy dashboard + verify
-└── monitoring/                                  # Manifests
+monitoring-setup/
+├── install.sh                                    # Main orchestrator
+├── 01-disable-openshift-monitoring.sh            # Disable default monitoring (REQUIRED)
+├── 02-install-cluster-observability-operator.sh  # Install COO
+├── 03-configure-rhacs-metrics.sh                 # Configure metrics (requires ROX_API_TOKEN)
+├── 04-deploy-monitoring-stack.sh                 # Deploy Prometheus + auth
+├── 05-deploy-perses-dashboard.sh                 # Deploy dashboard + verify
+└── monitoring/                                   # Manifests
 ```
 
 ## Installation
@@ -75,23 +85,43 @@ export ROX_API_TOKEN="your-api-token"
 You can also run scripts individually for troubleshooting:
 
 ```bash
-# Step 1: Install operator
-bash 01-install-cluster-observability-operator.sh
+# Step 1: Disable default OpenShift monitoring (REQUIRED FIRST)
+bash 01-disable-openshift-monitoring.sh
 
-# Step 2: Configure metrics (requires ROX_API_TOKEN)
+# Step 2: Install operator
+bash 02-install-cluster-observability-operator.sh
+
+# Step 3: Configure metrics (requires ROX_API_TOKEN)
 export ROX_API_TOKEN="your-token"
-bash 02-configure-rhacs-metrics.sh
+bash 03-configure-rhacs-metrics.sh
 
-# Step 3: Deploy monitoring stack
-bash 03-deploy-monitoring-stack.sh
+# Step 4: Deploy monitoring stack
+bash 04-deploy-monitoring-stack.sh
 
-# Step 4: Deploy dashboard
-bash 04-deploy-perses-dashboard.sh
+# Step 5: Deploy dashboard
+bash 05-deploy-perses-dashboard.sh
 ```
 
 ## Script Details
 
-### 01-install-cluster-observability-operator.sh
+### 01-disable-openshift-monitoring.sh
+**CRITICAL FIRST STEP**: Disables default OpenShift monitoring to prevent duplicate scraping.
+
+**Why this is required**:
+According to [RHACS Documentation Section 15.2](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.9/html/configuring/monitor-acs#disabling-red-hat-openshift-monitoring-for-central-services-by-using-the-rhacs-operator_monitoring-using-prometheus):
+> Before you can use custom Prometheus monitoring, if you have Red Hat OpenShift, you must disable the default monitoring. Multiple ServiceMonitors might result in duplicated scraping.
+
+**Actions**:
+- Auto-detects installation method (Operator, Helm, or Manifest)
+- **For Operator**: Patches Central CR with `monitoring.openshift.enabled: false`
+- **For Helm**: Provides instructions for updating Helm values
+- **For Manifest**: Removes any existing ServiceMonitor resources
+- Verifies ServiceMonitors are removed
+- Waits for Central to restart (Operator method)
+
+**Requirements**: None (automatic detection)
+
+### 02-install-cluster-observability-operator.sh
 Installs the Cluster Observability Operator which provides the foundation for monitoring.
 
 **Actions**:
@@ -100,7 +130,7 @@ Installs the Cluster Observability Operator which provides the foundation for mo
 - Waits for CSV to reach "Succeeded" state
 - No external dependencies
 
-### 02-configure-rhacs-metrics.sh
+### 03-configure-rhacs-metrics.sh
 Configures RHACS to expose metrics for Prometheus scraping.
 
 **Actions**:
@@ -113,7 +143,7 @@ Configures RHACS to expose metrics for Prometheus scraping.
 
 **Requirements**: `ROX_API_TOKEN` environment variable
 
-### 03-deploy-monitoring-stack.sh
+### 04-deploy-monitoring-stack.sh
 Deploys Prometheus authentication and the MonitoringStack.
 
 **Actions**:
@@ -123,7 +153,7 @@ Deploys Prometheus authentication and the MonitoringStack.
 - Deploys MonitoringStack CR
 - Deploys ScrapeConfig CR for RHACS metrics
 
-### 04-deploy-perses-dashboard.sh
+### 05-deploy-perses-dashboard.sh
 Deploys Perses dashboard and verifies the complete installation.
 
 **Actions**:
@@ -135,23 +165,28 @@ Deploys Perses dashboard and verifies the complete installation.
 
 ## What Gets Installed
 
-#### 1. Cluster Observability Operator
+#### 1. Disabled Default OpenShift Monitoring
+- **Central CR** patched with `monitoring.openshift.enabled: false` (Operator install)
+- **ServiceMonitor** resources removed (prevents duplicate scraping)
+- Complies with Red Hat documentation requirements
+
+#### 2. Cluster Observability Operator
 - Namespace: `openshift-cluster-observability-operator`
 - Provides: MonitoringStack, ScrapeConfig CRDs
 - Includes: Perses operator for dashboards
 
-#### 2. RHACS Authentication
+#### 3. RHACS Authentication
 - **ServiceAccount**: `sample-stackrox-prometheus`
 - **Secret**: `sample-stackrox-prometheus-token` (long-lived token)
 - **ConfigMap**: Declarative RBAC configuration for metrics access
 
-#### 3. MonitoringStack
+#### 4. MonitoringStack
 - Dedicated Prometheus instance in `stackrox` namespace
 - Configured to scrape RHACS Central metrics endpoint
 - 1-day retention, resource limits configured
 - Automatic alerting capabilities
 
-#### 4. Perses Dashboards
+#### 5. Perses Dashboards
 - **Dashboard**: "Advanced Cluster Security / Overview"
 - **Datasource**: Connected to Prometheus
 - **UI Plugin**: Enabled for OpenShift console integration
@@ -255,6 +290,22 @@ The dashboard visualizes metrics collected from RHACS:
 All metrics are gathered every **1 minute** for real-time visibility.
 
 ## Troubleshooting
+
+### Default Monitoring Not Disabled
+
+If you see duplicate metrics or the setup warns about ServiceMonitors:
+
+```bash
+# Check if monitoring is disabled (Operator installation)
+oc get central -n stackrox -o jsonpath='{.items[0].spec.monitoring.openshift.enabled}'
+# Should output: false
+
+# Check for ServiceMonitor resources
+oc get servicemonitor -n stackrox -l app.kubernetes.io/name=stackrox
+
+# Manually disable if needed
+bash 01-disable-openshift-monitoring.sh
+```
 
 ### Operator Installation Fails
 
