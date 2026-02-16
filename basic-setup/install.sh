@@ -407,7 +407,16 @@ main() {
             # Make sure it doesn't contain any unwanted text
             if echo "${token}" | grep -q "^\[INFO\]\|^\[ERROR\]\|^\[WARN\]"; then
                 print_error "Token generation returned invalid output"
-                print_warn "Scripts 04 and 05 will require ROX_API_TOKEN"
+                print_error ""
+                print_error "API token generation is REQUIRED for setup to continue"
+                print_error "Scripts 04, 05, and 06 require ROX_API_TOKEN"
+                print_error ""
+                print_error "Please verify:"
+                print_error "  1. RHACS Central is running and accessible"
+                print_error "  2. ROX_PASSWORD is correct"
+                print_error "  3. ROX_CENTRAL_URL is accessible"
+                print_error ""
+                exit 1
             else
                 export ROX_API_TOKEN="${token}"
                 
@@ -426,9 +435,30 @@ main() {
                 print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
             fi
         else
-            print_warn "Could not generate API token automatically"
-            print_warn "Scripts 04 and 05 will require ROX_API_TOKEN"
+            print_error "Failed to generate API token"
+            print_error ""
+            print_error "API token generation is REQUIRED for setup to continue"
+            print_error "Scripts 04, 05, and 06 require ROX_API_TOKEN for:"
+            print_error "  - Configuring RHACS metrics and settings"
+            print_error "  - Creating compliance scan schedules"
+            print_error "  - Triggering compliance scans"
+            print_error ""
+            print_error "Possible causes:"
+            print_error "  1. RHACS Central is not running or not accessible"
+            print_error "  2. ROX_PASSWORD is incorrect or not set"
+            print_error "  3. ROX_CENTRAL_URL is incorrect or unreachable"
+            print_error "  4. Network connectivity issues"
+            print_error ""
+            print_error "To debug:"
+            print_error "  - Check Central status: oc get pods -n ${RHACS_NAMESPACE:-stackrox}"
+            print_error "  - Verify password: oc get secret central-htpasswd -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.data.password}' | base64 -d"
+            print_error "  - Test URL: curl -k ${ROX_CENTRAL_URL:-<CENTRAL_URL>}/v1/ping"
+            print_error ""
+            exit 1
         fi
+        print_info ""
+    else
+        print_info "✓ ROX_API_TOKEN already set in environment"
         print_info ""
     fi
     
