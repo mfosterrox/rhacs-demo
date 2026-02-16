@@ -26,11 +26,16 @@ cd monitoring-setup
 # Optional: Set your ROX API token for automatic secret creation
 export ROX_API_TOKEN='your-api-token-here'
 
-# Run the setup script
+# Step 1: Run the setup script
 ./setup-rhacs-monitoring.sh
+
+# Step 2: Configure RHACS to accept the certificate
+./configure-rhacs-auth.sh
 ```
 
-This script will:
+**What these scripts do:**
+
+`setup-rhacs-monitoring.sh`:
 1. Check prerequisites
 2. Get the ROX Central URL
 3. Create an API token secret (if `ROX_API_TOKEN` is set)
@@ -39,6 +44,14 @@ This script will:
 6. Deploy the monitoring stack
 7. Configure Prometheus scrape settings
 8. Run diagnostics to verify the setup
+
+`configure-rhacs-auth.sh`:
+1. Apply declarative configuration for Prometheus role
+2. Test certificate authentication
+3. Provide manual configuration steps if needed
+4. Display troubleshooting guide
+
+**Note**: After running these scripts, you may need to manually configure the User Certificates auth provider in the RHACS UI. See [CERTIFICATE-AUTH-GUIDE.md](CERTIFICATE-AUTH-GUIDE.md) for detailed instructions.
 
 ### Option 2: Manual Setup
 
@@ -87,11 +100,17 @@ Create an API token in RHACS with the "Prometheus Server" role:
 
 For testing purposes, you can use TLS client certificates:
 
-1. Generate certificates using the provided script
+1. Generate certificates using the provided script:
+   ```bash
+   cd monitoring-examples/cluster-observability-operator
+   ./generate-test-user-certificate.sh
+   ```
+
 2. Configure User Certificates auth provider in RHACS:
    - Go to **Platform Configuration** → **Access Control** → **Auth Providers**
    - Add a new User Certificates provider
    - Upload the certificate (`tls.crt`)
+   - Create a user with the certificate's CN as Subject
    - Assign the "Prometheus Server" role
 
 3. Test access:
@@ -99,6 +118,8 @@ For testing purposes, you can use TLS client certificates:
    export ROX_CENTRAL_URL='https://your-central-url'
    curl --cert tls.crt --key tls.key $ROX_CENTRAL_URL/v1/auth/status
    ```
+
+**Detailed Instructions**: See [CERTIFICATE-AUTH-GUIDE.md](CERTIFICATE-AUTH-GUIDE.md) for step-by-step configuration with screenshots and troubleshooting.
 
 ### 3. Service Account Token
 
@@ -314,7 +335,9 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 ```
 monitoring-setup/
 ├── README.md                           # This file
+├── CERTIFICATE-AUTH-GUIDE.md           # Detailed certificate auth guide
 ├── setup-rhacs-monitoring.sh           # Automated setup script
+├── configure-rhacs-auth.sh             # Auth provider configuration helper
 └── monitoring-examples/                # Configuration examples
     ├── README.md                       # General overview
     ├── rhacs/                          # RHACS-specific configuration
