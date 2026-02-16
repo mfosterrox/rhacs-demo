@@ -68,6 +68,11 @@ EOF
     
     # Create Subscription
     print_info "Creating Subscription..."
+    
+    # Detect available channel
+    local available_channel=$(oc get packagemanifest cluster-observability-operator -n openshift-marketplace -o jsonpath='{.status.defaultChannel}' 2>/dev/null || echo "stable")
+    print_info "Using channel: ${available_channel}"
+    
     cat <<EOF | oc apply -f -
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -75,7 +80,7 @@ metadata:
   name: cluster-observability-operator
   namespace: ${COO_NAMESPACE}
 spec:
-  channel: development
+  channel: ${available_channel}
   name: cluster-observability-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
