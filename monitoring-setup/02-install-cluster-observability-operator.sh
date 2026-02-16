@@ -87,22 +87,31 @@ spec:
   installPlanApproval: Automatic
 EOF
     
-    # Wait for CSV
-    print_info "Waiting for operator installation (this may take 2-3 minutes)..."
-    local max_wait=300
+    # Wait for operator pods to be ready
+    print_info "Waiting for operator pods to be ready (this may take 2-3 minutes)..."
+    local max_wait=180
     local waited=0
+    local required_pods=4  # observability-operator, perses-operator, prometheus-operator, webhook
     
     while [ ${waited} -lt ${max_wait} ]; do
-        local csv_phase=$(oc get csv -n ${COO_NAMESPACE} -o jsonpath='{.items[?(@.metadata.name=~"cluster-observability-operator.*")].status.phase}' 2>/dev/null || echo "")
+        local running_pods=$(oc get pods -n ${COO_NAMESPACE} --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+        local ready_pods=$(oc get pods -n ${COO_NAMESPACE} --field-selector=status.phase=Running --no-headers 2>/dev/null | awk '{split($2,a,"/"); if(a[1]==a[2]) print $0}' | wc -l | tr -d ' ')
         
-        if [ "${csv_phase}" = "Succeeded" ]; then
+        if [ "${ready_pods}" -ge ${required_pods} ]; then
             print_info "✓ Cluster Observability Operator installed successfully"
-            sleep 10  # Give it a moment to stabilize
+            print_info "  ${ready_pods} operator pods running and ready"
+            
+            # List the pods
+            print_info ""
+            print_info "Operator pods:"
+            oc get pods -n ${COO_NAMESPACE} --no-headers 2>/dev/null | awk '{print "  • " $1 " (" $3 ")"}' || true
+            
+            sleep 5  # Give it a moment to stabilize
             return 0
         fi
         
         if [ $((waited % 30)) -eq 0 ]; then
-            print_info "Still waiting... (${waited}s/${max_wait}s) [Phase: ${csv_phase:-pending}]"
+            print_info "Still waiting... (${waited}s/${max_wait}s) [${ready_pods}/${required_pods} pods ready]"
         fi
         
         sleep 10
@@ -110,6 +119,10 @@ EOF
     done
     
     print_error "Operator installation timed out"
+    print_error "Only ${ready_pods}/${required_pods} pods ready"
+    print_info ""
+    print_info "Current pod status:"
+    oc get pods -n ${COO_NAMESPACE} 2>/dev/null || true
     exit 1
 }
 
