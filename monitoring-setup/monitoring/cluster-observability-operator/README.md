@@ -1,6 +1,6 @@
 # Cluster Observability Operator - RHACS Monitoring
 
-This directory contains manifests for monitoring RHACS using the Cluster Observability Operator with **Service Account Token authentication**.
+This directory contains manifests for monitoring RHACS using the Cluster Observability Operator with **Service Account Token authentication with TLS client certificates**.
 
 ## Prerequisites
 
@@ -12,14 +12,14 @@ This directory contains manifests for monitoring RHACS using the Cluster Observa
 
 ### 1. Service Account (`service-account.yaml`)
 
-Creates a Kubernetes ServiceAccount and a long-lived token secret:
+Creates a Kubernetes ServiceAccount and a long-lived token secret with TLS client certificates:
 
 ```yaml
 ServiceAccount: sample-stackrox-prometheus
-Secret: sample-stackrox-prometheus-token (type: kubernetes.io/service-account-token)
+Secret: sample-stackrox-prometheus-tls (type: kubernetes.io/service-account-token)
 ```
 
-The token in this secret is automatically generated and managed by Kubernetes.
+The token and TLS certificates in this secret are automatically generated and managed by Kubernetes.
 
 ### 2. MonitoringStack (`monitoring-stack.yaml`)
 
@@ -36,18 +36,18 @@ Configures Prometheus to scrape RHACS Central metrics endpoint:
 
 - **Endpoint**: `central.stackrox.svc.cluster.local:443`
 - **Scheme**: HTTPS
-- **Authentication**: Bearer token from `sample-stackrox-prometheus-token` secret
-- **TLS**: Uses service CA for verification
+- **Authentication**: Bearer token from `sample-stackrox-prometheus-tls` secret
+- **TLS**: Uses service CA for verification plus client certificate authentication
 
 ## Authentication Flow
 
-1. Kubernetes creates a long-lived token for the ServiceAccount
-2. The token is stored in the `sample-stackrox-prometheus-token` secret
+1. Kubernetes creates a long-lived token and TLS certificates for the ServiceAccount
+2. The token and certificates are stored in the `sample-stackrox-prometheus-tls` secret
 3. RHACS declarative configuration (in `../rhacs/`) creates:
    - Permission Set: "Prometheus Server" with read-only access
    - Role: "Prometheus Server" 
    - Binding: Links the ServiceAccount to the Role
-4. Prometheus uses the Bearer token to authenticate to RHACS `/metrics` endpoint
+4. Prometheus uses the Bearer token with TLS client certificate to authenticate to RHACS `/metrics` endpoint
 
 ## Deployment
 
@@ -71,8 +71,8 @@ Check that all resources are created:
 # Service Account
 oc get serviceaccount sample-stackrox-prometheus -n stackrox
 
-# Token Secret (should have a token value)
-oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d
+# TLS Secret (should have token and certificate data)
+oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d
 
 # MonitoringStack
 oc get monitoringstack sample-stackrox-monitoring-stack -n stackrox
@@ -88,7 +88,7 @@ Test the metrics endpoint:
 
 ```bash
 # Get the token
-TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 
 # Test metrics access
 oc exec -n stackrox deployment/central -- curl -k -H "Authorization: Bearer $TOKEN" https://central.stackrox.svc:443/metrics
@@ -103,9 +103,9 @@ oc exec -n stackrox deployment/central -- curl -k -H "Authorization: Bearer $TOK
    oc logs -n stackrox -l app.kubernetes.io/name=prometheus --tail=100
    ```
 
-2. Verify the token exists:
+2. Verify the TLS secret exists:
    ```bash
-   oc get secret sample-stackrox-prometheus-token -n stackrox
+   oc get secret sample-stackrox-prometheus-tls -n stackrox
    ```
 
 3. Check RHACS declarative configuration was applied:
@@ -122,16 +122,19 @@ oc exec -n stackrox deployment/central -- curl -k -H "Authorization: Bearer $TOK
   oc logs -n stackrox deployment/central | grep -i auth
   ```
 
-## Why Service Account Tokens?
+## Why Service Account Tokens with TLS?
 
 **Advantages for demos:**
 - ✅ Simple, Kubernetes-native authentication
-- ✅ No certificate generation required
-- ✅ Automatic token lifecycle management
+- ✅ Automatic token and certificate generation
+- ✅ Automatic lifecycle management
+- ✅ TLS client certificate authentication for enhanced security
 - ✅ Easy to troubleshoot
 - ✅ Production-grade security
 
-**Compared to TLS certificates:**
-- No CN matching issues
+**TLS Client Certificate Benefits:**
+- Enhanced authentication with mutual TLS
+- Automatic certificate management by Kubernetes
+- No manual certificate generation required
 - No certificate expiration concerns during demos
 - Fewer dependencies (no cert-manager or OpenSSL required)

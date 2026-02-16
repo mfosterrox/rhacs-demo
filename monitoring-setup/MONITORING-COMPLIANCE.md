@@ -126,7 +126,7 @@ oc get servicemonitor -n stackrox -l app.kubernetes.io/name=stackrox
 # Expected: No resources found
 
 # Verify custom Prometheus works
-export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" \
   "https://central-stackrox.apps.example.com/metrics"
 # Expected: Metrics returned

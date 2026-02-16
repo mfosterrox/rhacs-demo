@@ -148,7 +148,7 @@ curl -k -s -u "admin:${ROX_PASSWORD}" "https://${CENTRAL_URL}/v1/roles" | \
   jq '.roles[] | select(.name=="Prometheus Server")'
 
 # 3. Test metrics endpoint with service account token
-SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" "https://${CENTRAL_URL}/metrics" | head -20
 
 # Should return metrics like:
@@ -237,7 +237,7 @@ curl -k -s -u "admin:${ROX_PASSWORD}" "https://${CENTRAL_URL}/v1/roles" | \
   jq '.roles[] | select(.name=="Prometheus Server") | {name, permissionSetId}'
 
 # Test metrics endpoint
-SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" "https://${CENTRAL_URL}/metrics" | grep "rox_central"
 ```
 
@@ -262,7 +262,7 @@ Wait 30 seconds and test again - sometimes RHACS takes a moment to activate the 
 
 ```bash
 sleep 30
-SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='{.spec.host}')
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" "https://${CENTRAL_URL}/metrics" | head -20
 ```

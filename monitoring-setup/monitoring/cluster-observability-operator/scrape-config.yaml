@@ -11,14 +11,15 @@ spec:
   staticConfigs:
     - targets:
         - "central.stackrox.svc.cluster.local:443"
-  authorization:
-    type: Bearer
-    credentials:
-      key: token
-      name: sample-stackrox-prometheus-token
   tlsConfig:
     ca:
       secret:
         key: ca.pem
         name: service-ca
-    insecureSkipVerify: false
+    cert:
+      secret:
+        key: tls.crt
+        name: sample-stackrox-prometheus-tls
+    keySecret:
+      key: tls.key
+      name: sample-stackrox-prometheus-tls

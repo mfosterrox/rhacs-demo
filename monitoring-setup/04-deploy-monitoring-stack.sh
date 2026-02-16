@@ -73,7 +73,7 @@ deploy_prometheus_auth() {
     local waited=0
     
     while [ ${waited} -lt ${max_wait} ]; do
-        local token=$(oc get secret sample-stackrox-prometheus-token -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' 2>/dev/null || echo "")
+        local token=$(oc get secret sample-stackrox-prometheus-tls -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' 2>/dev/null || echo "")
         if [ -n "${token}" ]; then
             print_info "✓ Service account token ready"
             break
@@ -82,7 +82,7 @@ deploy_prometheus_auth() {
         waited=$((waited + 2))
     done
     
-    print_info "✓ ServiceAccount created"
+    print_info "✓ ServiceAccount and TLS secret created"
 }
 
 #================================================================
@@ -242,16 +242,21 @@ main() {
     # Test metrics endpoint
     print_info ""
     print_info "Testing metrics endpoint..."
-    local sa_token=$(oc get secret sample-stackrox-prometheus-token -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' | base64 -d)
+    local sa_token=$(oc get secret sample-stackrox-prometheus-tls -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' | base64 -d 2>/dev/null || echo "")
     local central_route=$(oc get route central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.host}')
     
-    local test_result=$(curl -k -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${sa_token}" "https://${central_route}/metrics" 2>/dev/null || echo "000")
-    
-    if [ "${test_result}" = "200" ]; then
-        print_info "✓ Metrics endpoint accessible (HTTP ${test_result})"
+    if [ -n "${sa_token}" ]; then
+        local test_result=$(curl -k -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${sa_token}" "https://${central_route}/metrics" 2>/dev/null || echo "000")
+        
+        if [ "${test_result}" = "200" ]; then
+            print_info "✓ Metrics endpoint accessible (HTTP ${test_result})"
+        else
+            print_warn "⚠ Metrics endpoint returned HTTP ${test_result}"
+            print_info "  This may take a few minutes to become available"
+        fi
     else
-        print_warn "⚠ Metrics endpoint returned HTTP ${test_result}"
-        print_info "  This may take a few minutes to become available"
+        print_warn "⚠ Could not retrieve token from secret for testing"
+        print_info "  Metrics endpoint will be tested by Prometheus scraper"
     fi
 }
 

@@ -54,7 +54,7 @@ The Prometheus Operator is part of OpenShift's built-in monitoring stack. The se
 
 **Resources Created:**
 - `ServiceAccount`: `sample-stackrox-prometheus`
-- `Secret`: `sample-stackrox-prometheus-token` (long-lived SA token)
+- `Secret`: `sample-stackrox-prometheus-tls` (long-lived SA token with TLS client cert)
 - `Secret`: `sample-stackrox-prometheus-additional-scrape-configs` (scrape config)
 - `Prometheus`: `sample-stackrox-prometheus-server`
 
@@ -124,12 +124,12 @@ The installation process:
 
 ## Authentication
 
-All monitoring solutions use **Kubernetes ServiceAccount Token authentication**:
+All monitoring solutions use **Kubernetes ServiceAccount Token authentication with TLS**:
 
 1. ServiceAccount `sample-stackrox-prometheus` is created in the `stackrox` namespace
-2. Long-lived token secret is created: `sample-stackrox-prometheus-token`
+2. Long-lived token secret with TLS cert is created: `sample-stackrox-prometheus-tls`
 3. RHACS declarative configuration grants the SA access to the `/metrics` endpoint
-4. Prometheus uses the token via Bearer authentication
+4. Prometheus uses the token via Bearer authentication with TLS client certificate
 
 ### RHACS Role Configuration
 
@@ -154,7 +154,7 @@ open http://localhost:9090
 
 ```bash
 # Get SA token
-export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 
 # Get Central URL
 export CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='https://{.spec.host}')
@@ -243,7 +243,7 @@ See [rhacs/README.md](rhacs/README.md) for detailed examples of configuring cust
 
 1. Check ServiceAccount token exists:
    ```bash
-   oc get secret sample-stackrox-prometheus-token -n stackrox
+   oc get secret sample-stackrox-prometheus-tls -n stackrox
    ```
 
 2. Verify RHACS declarative config is applied:

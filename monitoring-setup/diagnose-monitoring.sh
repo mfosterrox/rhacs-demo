@@ -75,18 +75,18 @@ else
     print_fail "ServiceAccount not found"
 fi
 
-if oc get secret sample-stackrox-prometheus-token -n ${RHACS_NAMESPACE} >/dev/null 2>&1; then
-    print_pass "Token secret exists"
+if oc get secret sample-stackrox-prometheus-tls -n ${RHACS_NAMESPACE} >/dev/null 2>&1; then
+    print_pass "TLS secret exists"
     
     # Check if token has data
-    TOKEN=$(oc get secret sample-stackrox-prometheus-token -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' 2>/dev/null || echo "")
+    TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' 2>/dev/null || echo "")
     if [ -n "${TOKEN}" ]; then
-        print_pass "Token secret has data"
+        print_pass "TLS secret has token data"
     else
-        print_fail "Token secret is empty"
+        print_fail "TLS secret token is empty"
     fi
 else
-    print_fail "Token secret not found"
+    print_fail "TLS secret not found"
 fi
 
 echo ""
@@ -309,7 +309,7 @@ echo "   # In browser: http://localhost:9090/graph"
 echo "   # Query: rox_central_cfg_total_policies"
 echo ""
 echo "3. Check RHACS metrics endpoint:"
-echo "   SA_TOKEN=\$(oc get secret sample-stackrox-prometheus-token -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' | base64 -d)"
+echo "   SA_TOKEN=\$(oc get secret sample-stackrox-prometheus-tls -n ${RHACS_NAMESPACE} -o jsonpath='{.data.token}' | base64 -d)"
 echo "   oc run test --rm -i --restart=Never --image=registry.access.redhat.com/ubi9/ubi-minimal -- \\"
 echo "     curl -k -H \"Authorization: Bearer \${SA_TOKEN}\" https://central.${RHACS_NAMESPACE}.svc:443/metrics | head -20"
 echo ""

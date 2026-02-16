@@ -215,7 +215,7 @@ Deploys Perses dashboard and verifies the complete installation.
 
 #### 3. RHACS Authentication
 - **ServiceAccount**: `sample-stackrox-prometheus`
-- **Secret**: `sample-stackrox-prometheus-token` (long-lived token)
+- **Secret**: `sample-stackrox-prometheus-tls` (long-lived token with TLS client cert)
 - **RBAC via API**: Permission Set, Role, and Auth Provider configured via RHACS API
   - Permission Set: "Prometheus Server" with READ_ACCESS to metrics resources
   - Role: "Prometheus Server" with unrestricted access scope
@@ -394,7 +394,7 @@ curl -k -H "Authorization: Bearer ${ROX_API_TOKEN}" \
   "${ROX_CENTRAL_URL}/v1/config" | jq '.privateConfig.metrics'
 
 # Test metrics endpoint directly
-export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-token -n stackrox -o jsonpath='{.data.token}' | base64 -d)
+export SA_TOKEN=$(oc get secret sample-stackrox-prometheus-tls -n stackrox -o jsonpath='{.data.token}' | base64 -d)
 export CENTRAL_URL=$(oc get route central -n stackrox -o jsonpath='https://{.spec.host}')
 curl -k -H "Authorization: Bearer ${SA_TOKEN}" "${CENTRAL_URL}/metrics"
 ```
@@ -443,7 +443,7 @@ oc delete scrapeconfig sample-stackrox-scrape-config -n stackrox
 
 # Remove authentication
 oc delete serviceaccount sample-stackrox-prometheus -n stackrox
-oc delete secret sample-stackrox-prometheus-token -n stackrox
+oc delete secret sample-stackrox-prometheus-tls -n stackrox
 oc delete configmap sample-stackrox-prometheus-declarative-configuration -n stackrox
 
 # Optionally remove operator
