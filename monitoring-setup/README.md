@@ -71,14 +71,22 @@ monitoring-setup/
 ### Quick Start
 
 ```bash
-cd advanced-setup
+cd monitoring-setup
 
-# Set RHACS API token (required for script 02)
+# Option 1: Provide password as argument (recommended)
+./install.sh <admin-password>
+
+# Option 2: Set environment variables
+export ROX_PASSWORD="your-admin-password"
 export ROX_API_TOKEN="your-api-token"
+./install.sh
 
-# Run the complete installation
+# Option 3: Let script retrieve password from cluster
+export ROX_API_TOKEN="your-api-token"
 ./install.sh
 ```
+
+**Note**: The password is required for script 04 (RBAC configuration via API). If not provided, the script will attempt to retrieve it from the `central-htpasswd` secret.
 
 ### Individual Script Usage
 
@@ -149,9 +157,12 @@ Deploys Prometheus authentication and the MonitoringStack.
 **Actions**:
 - Creates ServiceAccount: `sample-stackrox-prometheus`
 - Creates token secret for authentication
-- Applies RHACS RBAC configuration via ConfigMap
+- **Configures RHACS RBAC via API** (Permission Set, Role, Auth Provider)
 - Deploys MonitoringStack CR
 - Deploys ScrapeConfig CR for RHACS metrics
+- Tests metrics endpoint accessibility
+
+**Requirements**: Admin password (passed as argument, environment variable, or auto-retrieved from cluster)
 
 ### 05-deploy-perses-dashboard.sh
 Deploys Perses dashboard and verifies the complete installation.

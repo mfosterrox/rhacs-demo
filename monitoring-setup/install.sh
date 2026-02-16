@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Script: advanced-setup/install.sh
+# Script: monitoring-setup/install.sh
 # Description: Orchestrator for advanced RHACS monitoring setup
-# Usage: ./advanced-setup/install.sh or cd advanced-setup && ./install.sh
+# Usage: ./install.sh [PASSWORD]
+#        ./install.sh  (will attempt to retrieve password from cluster)
 
 set -euo pipefail
 
@@ -16,6 +17,7 @@ readonly NC='\033[0m'
 # Configuration
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SETUP_DIR="${SCRIPT_DIR}"
+readonly ROX_PASSWORD="${1:-${ROX_PASSWORD:-}}"
 
 # Print functions
 print_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -75,10 +77,26 @@ main() {
     print_info "Connected to cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     echo ""
     
-    # Check for ROX_API_TOKEN (needed for script 02)
+    # Check for ROX_PASSWORD (needed for script 04 - RBAC configuration)
+    if [ -z "${ROX_PASSWORD}" ]; then
+        print_warn "ROX_PASSWORD not provided"
+        print_info "Attempting to retrieve from cluster secret..."
+        
+        local retrieved_pass=$(oc get secret central-htpasswd -n stackrox -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
+        if [ -n "${retrieved_pass}" ]; then
+            ROX_PASSWORD="${retrieved_pass}"
+            print_info "✓ Password retrieved from cluster"
+        else
+            print_error "Could not retrieve password"
+            print_error "Please run: ./install.sh <PASSWORD>"
+            exit 1
+        fi
+    fi
+    
+    # Check for ROX_API_TOKEN (needed for script 03)
     if [ -z "${ROX_API_TOKEN:-}" ]; then
         print_warn "ROX_API_TOKEN is not set"
-        print_warn "Script 02 (configure-rhacs-metrics) will fail without it"
+        print_warn "Script 03 (configure-rhacs-metrics) will fail without it"
         print_warn ""
         print_warn "To generate a token, run:"
         print_warn "  curl -k -X POST -u \"admin:\${ROX_PASSWORD}\" \\"
@@ -104,11 +122,22 @@ main() {
     for script in "${SETUP_DIR}"/[0-9][0-9]-*.sh; do
         if [ -f "${script}" ]; then
             print_info "Executing: $(basename "${script}")"
-            if bash "${script}"; then
-                print_info "✓ Successfully completed: $(basename "${script}")"
+            
+            # Pass password to script 04 (deploy-monitoring-stack)
+            if [[ "$(basename "${script}")" == "04-deploy-monitoring-stack.sh" ]]; then
+                if bash "${script}" "${ROX_PASSWORD}"; then
+                    print_info "✓ Successfully completed: $(basename "${script}")"
+                else
+                    print_error "✗ Failed: $(basename "${script}")"
+                    exit 1
+                fi
             else
-                print_error "✗ Failed: $(basename "${script}")"
-                exit 1
+                if bash "${script}"; then
+                    print_info "✓ Successfully completed: $(basename "${script}")"
+                else
+                    print_error "✗ Failed: $(basename "${script}")"
+                    exit 1
+                fi
             fi
             print_info ""
         fi
@@ -123,6 +152,7 @@ main() {
     print_info "  ✓ Default OpenShift monitoring disabled"
     print_info "  ✓ Cluster Observability Operator"
     print_info "  ✓ RHACS metrics configured (1-minute gathering)"
+    print_info "  ✓ RHACS RBAC configured (Permission Set, Role, Auth Provider)"
     print_info "  ✓ MonitoringStack (Prometheus with RHACS scraping)"
     print_info "  ✓ Perses Dashboard"
     print_info "  ✓ Perses Datasource"
