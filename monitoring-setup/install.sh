@@ -102,9 +102,8 @@ else
 spec:
   central:
     declarativeConfiguration:
-      mounts:
-        configMaps:
-        - sample-stackrox-prometheus-declarative-configuration
+      configMaps:
+      - sample-stackrox-prometheus-declarative-configuration
 '
     echo "Waiting for Central to update..."
     sleep 10
