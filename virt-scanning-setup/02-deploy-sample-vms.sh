@@ -210,6 +210,81 @@ EOF
     dnf install -y ${packages}
     echo "Packages installed. Restarting roxagent to scan new packages..."
     systemctl restart roxagent
+EOF
+
+        # Add webserver-specific configuration
+        if [ "${vm_profile}" = "webserver" ]; then
+            cat <<EOF
+    
+    # Start httpd service for webserver profile
+    echo "Starting web server services..."
+    systemctl enable httpd
+    systemctl start httpd
+    
+    # Create a simple index page
+    cat > /var/www/html/index.html <<'HTMLEOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RHACS VM Scanning Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 50px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; }
+        h1 { color: #cc0000; }
+        .status { background: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745; }
+        .info { background: #d1ecf1; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8; }
+        code { background: #f8f9fa; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ RHACS VM Scanning Demo</h1>
+        <div class="status">
+            <strong>✓ Status:</strong> Webserver VM is running!
+        </div>
+        <div class="info">
+            <h2>VM Information</h2>
+            <p><strong>Profile:</strong> Web Server</p>
+            <p><strong>Hostname:</strong> rhel-webserver</p>
+            <p><strong>Packages:</strong> Apache (httpd), Nginx, PHP</p>
+            <p><strong>Purpose:</strong> Vulnerability scanning demonstration</p>
+        </div>
+        <h2>About This Demo</h2>
+        <p>This is a RHEL 9 virtual machine running inside OpenShift Virtualization.</p>
+        <p>Red Hat Advanced Cluster Security (RHACS) is scanning this VM for vulnerabilities using the roxagent binary.</p>
+        
+        <h3>Installed Packages:</h3>
+        <ul>
+            <li>Apache HTTP Server (httpd)</li>
+            <li>Nginx</li>
+            <li>PHP with MySQL extensions</li>
+            <li>mod_ssl, mod_security</li>
+        </ul>
+        
+        <h3>How to Check Results:</h3>
+        <ol>
+            <li>Open RHACS Central UI</li>
+            <li>Navigate to: <code>Platform Configuration → Clusters → Virtual Machines</code></li>
+            <li>View vulnerabilities: <code>Vulnerability Management → Workload CVEs</code></li>
+        </ol>
+        
+        <p style="margin-top: 30px; color: #666; font-size: 0.9em;">
+            <strong>Demo Setup:</strong> This VM was deployed using OpenShift Virtualization and is being monitored by RHACS for security vulnerabilities.
+        </p>
+    </div>
+</body>
+</html>
+HTMLEOF
+    
+    # Allow http traffic through firewall
+    firewall-cmd --permanent --add-service=http || true
+    firewall-cmd --reload || true
+    
+    echo "✓ Web server configured and accessible"
+EOF
+        fi
+
+        cat <<EOF
   
   # Log completion with packages
   - echo "VM profile '${vm_profile}' configured with packages"
@@ -228,6 +303,82 @@ EOF
     # Run this after registering subscription
     echo "Installing packages for ${vm_profile} profile..."
     dnf install -y ${packages}
+EOF
+
+        # Add webserver-specific configuration for manual script too
+        if [ "${vm_profile}" = "webserver" ]; then
+            cat <<EOF
+    
+    # Start httpd service for webserver profile
+    echo "Starting web server services..."
+    systemctl enable httpd
+    systemctl start httpd
+    
+    # Create a simple index page
+    cat > /var/www/html/index.html <<'HTMLEOF2'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RHACS VM Scanning Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 50px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; }
+        h1 { color: #cc0000; }
+        .status { background: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745; }
+        .info { background: #d1ecf1; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8; }
+        code { background: #f8f9fa; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ RHACS VM Scanning Demo</h1>
+        <div class="status">
+            <strong>✓ Status:</strong> Webserver VM is running!
+        </div>
+        <div class="info">
+            <h2>VM Information</h2>
+            <p><strong>Profile:</strong> Web Server</p>
+            <p><strong>Hostname:</strong> rhel-webserver</p>
+            <p><strong>Packages:</strong> Apache (httpd), Nginx, PHP</p>
+            <p><strong>Purpose:</strong> Vulnerability scanning demonstration</p>
+        </div>
+        <h2>About This Demo</h2>
+        <p>This is a RHEL 9 virtual machine running inside OpenShift Virtualization.</p>
+        <p>Red Hat Advanced Cluster Security (RHACS) is scanning this VM for vulnerabilities using the roxagent binary.</p>
+        
+        <h3>Installed Packages:</h3>
+        <ul>
+            <li>Apache HTTP Server (httpd)</li>
+            <li>Nginx</li>
+            <li>PHP with MySQL extensions</li>
+            <li>mod_ssl, mod_security</li>
+        </ul>
+        
+        <h3>How to Check Results:</h3>
+        <ol>
+            <li>Open RHACS Central UI</li>
+            <li>Navigate to: <code>Platform Configuration → Clusters → Virtual Machines</code></li>
+            <li>View vulnerabilities: <code>Vulnerability Management → Workload CVEs</code></li>
+        </ol>
+        
+        <p style="margin-top: 30px; color: #666; font-size: 0.9em;">
+            <strong>Demo Setup:</strong> This VM was deployed using OpenShift Virtualization and is being monitored by RHACS for security vulnerabilities.
+        </p>
+    </div>
+</body>
+</html>
+HTMLEOF2
+    
+    # Allow http traffic through firewall
+    firewall-cmd --permanent --add-service=http || true
+    firewall-cmd --reload || true
+    
+    echo "✓ Web server configured and accessible"
+EOF
+        fi
+
+        cat <<EOF
+    
     echo "Packages installed. Restarting roxagent to scan new packages..."
     systemctl restart roxagent
     PKG_SCRIPT
@@ -329,6 +480,98 @@ spec:
 EOF
     
     print_info "✓ VM '${vm_name}' deployed"
+}
+
+#================================================================
+# Create Service and Route for webserver VM
+#================================================================
+create_webserver_route() {
+    print_step "Configuring webserver route..."
+    
+    local vm_name="rhel-webserver"
+    local service_name="rhel-webserver-http"
+    local route_name="rhel-webserver"
+    
+    # Create Service to expose port 80
+    print_info "Creating Service for webserver..."
+    
+    oc apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${service_name}
+  namespace: ${NAMESPACE}
+  labels:
+    app: rhacs-vm-scanning
+    profile: webserver
+spec:
+  selector:
+    kubevirt.io/vm: ${vm_name}
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_info "✓ Service created: ${service_name}"
+    else
+        print_error "Failed to create Service"
+        return 1
+    fi
+    
+    # Create Route
+    print_info "Creating Route for webserver..."
+    
+    oc apply -f - <<EOF
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ${route_name}
+  namespace: ${NAMESPACE}
+  labels:
+    app: rhacs-vm-scanning
+    profile: webserver
+spec:
+  to:
+    kind: Service
+    name: ${service_name}
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_info "✓ Route created: ${route_name}"
+        
+        # Wait a moment for route to be ready
+        sleep 2
+        
+        # Get the route URL
+        local route_url=$(oc get route "${route_name}" -n "${NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null)
+        
+        if [ -n "${route_url}" ]; then
+            echo ""
+            print_info "=========================================="
+            print_info "✓ Webserver is accessible at:"
+            echo "  https://${route_url}"
+            print_info "=========================================="
+            echo ""
+            print_warn "Note: It may take 5-10 minutes for:"
+            echo "  • VM to boot"
+            echo "  • Packages to install (if subscription configured)"
+            echo "  • Apache/Nginx to start"
+            echo ""
+            print_info "Test with: curl -k https://${route_url}"
+        fi
+    else
+        print_error "Failed to create Route"
+        return 1
+    fi
 }
 
 #================================================================
@@ -560,6 +803,10 @@ main() {
         echo ""
     done
     
+    # Create route for webserver VM
+    echo ""
+    create_webserver_route || print_warn "Failed to create webserver route (non-fatal)"
+    
     echo ""
     print_info "✓ Sample VM deployment complete!"
     print_info "VMs are now starting in the background..."
@@ -583,6 +830,14 @@ main() {
         print_info "Check VM status:"
         echo "  $ oc get vmi -n ${NAMESPACE}"
         echo ""
+        print_info "Access webserver via route:"
+        local route_url=$(oc get route rhel-webserver -n "${NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null)
+        if [ -n "${route_url}" ]; then
+            echo "  https://${route_url}"
+        else
+            echo "  (Route will be available once created)"
+        fi
+        echo ""
         print_info "Access VM console:"
         echo "  $ virtctl console rhel-webserver -n ${NAMESPACE}"
         echo ""
@@ -597,6 +852,15 @@ main() {
         print_warn "⚠ No subscription configured - packages NOT installed"
         echo ""
         print_info "VMs will boot in 3-5 minutes"
+        echo ""
+        print_info "Access webserver via route:"
+        local route_url=$(oc get route rhel-webserver -n "${NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null)
+        if [ -n "${route_url}" ]; then
+            echo "  https://${route_url}"
+        else
+            echo "  (Route created: rhel-webserver)"
+        fi
+        echo ""
         print_info "To add vulnerability data:"
         echo ""
         echo "  1. Access VM console:"
@@ -606,7 +870,7 @@ main() {
         echo "     $ sudo subscription-manager register --username USER --password PASS"
         echo "     $ sudo subscription-manager attach --auto"
         echo ""
-        echo "  3. Install packages:"
+        echo "  3. Install packages (this will also start httpd):"
         echo "     $ sudo /root/install-packages.sh"
         echo ""
         print_info "Or re-deploy with subscription credentials:"

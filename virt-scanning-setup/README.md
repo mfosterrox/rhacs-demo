@@ -86,6 +86,7 @@ cd virt-scanning-setup
 The `02-deploy-sample-vms.sh` script deploys 4 VMs with automatic subscription registration and package installation via cloud-init:
 
 - **webserver**: Apache (httpd), Nginx, PHP - web server vulnerabilities
+  - **Accessible via OpenShift Route** - Browse to the VM webserver!
 - **database**: PostgreSQL, MariaDB - database server packages  
 - **devtools**: Git, GCC, Python, Node.js, Java - development tools
 - **monitoring**: Grafana, Telegraf, Collectd - monitoring stack
@@ -93,9 +94,19 @@ The `02-deploy-sample-vms.sh` script deploys 4 VMs with automatic subscription r
 When subscription credentials are provided, cloud-init automatically:
 1. Registers the VM with Red Hat subscription-manager
 2. Installs profile-specific packages
-3. Restarts roxagent to scan new packages
+3. Starts Apache HTTP server (webserver VM only)
+4. Restarts roxagent to scan new packages
 
 Result: Vulnerability data appears in RHACS within 10 minutes!
+
+**Bonus:** The webserver VM is accessible via an OpenShift Route:
+```bash
+# Get the webserver URL
+oc get route rhel-webserver -n default -o jsonpath='{.spec.host}'
+
+# Or visit directly
+https://$(oc get route rhel-webserver -n default -o jsonpath='{.spec.host}')
+```
 
 ## What Gets Configured
 
@@ -111,6 +122,7 @@ Result: Vulnerability data appears in RHACS within 10 minutes!
 - Cloud-init downloads and configures roxagent
 - Installs systemd service for continuous scanning (5-minute intervals)
 - Creates helper script at `/root/install-packages.sh` for package installation
+- **Creates Service and Route for webserver VM** (accessible from outside cluster)
 
 ### VM Subscription & Packages (cloud-init)
 Subscription registration and package installation happen automatically during VM first boot via cloud-init's `rh_subscription` module:
@@ -197,6 +209,27 @@ journalctl -u roxagent -f
 # Check roxagent logs for scan results
 journalctl -u roxagent --since "5 minutes ago"
 ```
+
+### Access webserver VM via browser 🌐
+
+The webserver VM is exposed via an OpenShift Route and accessible from your browser:
+
+```bash
+# Get the webserver URL
+oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'
+
+# Or open directly
+open "https://$(oc get route rhel-webserver -n default -o jsonpath='{.spec.host}')"
+
+# Test with curl
+curl -k "https://$(oc get route rhel-webserver -n default -o jsonpath='{.spec.host}')"
+```
+
+**What you'll see:**
+- A demo page showing VM information
+- List of installed packages (httpd, nginx, PHP)
+- Instructions for checking RHACS vulnerability data
+- Confirmation that the web server is running and accessible
 
 ### Verify vsock configuration
 ```bash
@@ -332,6 +365,38 @@ oc get kubevirt kubevirt-kubevirt-hyperconverged -n openshift-cnv \
 
 # Re-run platform configuration
 ./install.sh
+```
+
+### Webserver not accessible via route
+
+```bash
+# Check if route exists
+oc get route rhel-webserver -n default
+
+# Get the route URL
+WEBSERVER_URL="https://$(oc get route rhel-webserver -n default -o jsonpath='{.spec.host}')"
+echo $WEBSERVER_URL
+
+# Test connectivity
+curl -k $WEBSERVER_URL
+
+# If connection refused, check if VM is running
+oc get vmi rhel-webserver -n default
+
+# Check if httpd is running inside VM
+virtctl console rhel-webserver -n default
+# Inside VM:
+sudo systemctl status httpd
+sudo firewall-cmd --list-services
+
+# If httpd not installed, check if subscription registration completed
+cloud-init status
+dnf list installed | grep httpd
+
+# Manually start httpd if needed
+sudo systemctl enable --now httpd
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --reload
 ```
 
 ### VMs not appearing in RHACS
