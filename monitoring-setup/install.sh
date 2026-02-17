@@ -123,6 +123,37 @@ spec:
   echo "✓ Declarative configuration enabled"
 fi
 
+echo "Checking for existing 'Monitoring' auth provider..."
+EXISTING_PROVIDERS=$(curl -k -s -X GET "$ROX_CENTRAL_URL/v1/authProviders" \
+  -H "Authorization: Bearer $ROX_API_TOKEN")
+
+# Extract existing Monitoring auth provider ID
+EXISTING_AUTH_ID=""
+if command -v jq &>/dev/null; then
+  EXISTING_AUTH_ID=$(echo "$EXISTING_PROVIDERS" | jq -r '.authProviders[] | select(.name=="Monitoring") | .id' 2>/dev/null)
+else
+  EXISTING_AUTH_ID=$(echo "$EXISTING_PROVIDERS" | grep -B2 '"name":"Monitoring"' | grep '"id"' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+
+# Delete existing auth provider if found
+if [ -n "$EXISTING_AUTH_ID" ]; then
+  echo "⚠ Found existing 'Monitoring' auth provider (ID: $EXISTING_AUTH_ID)"
+  echo "Deleting existing auth provider..."
+  
+  DELETE_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X DELETE "$ROX_CENTRAL_URL/v1/authProviders/$EXISTING_AUTH_ID" \
+    -H "Authorization: Bearer $ROX_API_TOKEN")
+  
+  DELETE_HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -1)
+  
+  if [ "$DELETE_HTTP_CODE" = "200" ] || [ "$DELETE_HTTP_CODE" = "204" ]; then
+    echo "✓ Existing auth provider deleted"
+    sleep 2  # Wait for deletion to propagate
+  else
+    echo "⚠ Warning: Failed to delete existing auth provider (HTTP $DELETE_HTTP_CODE)"
+    echo "Response: $(echo "$DELETE_RESPONSE" | head -n -1)"
+  fi
+fi
+
 echo "Creating a User-Certificate auth-provider..."
 AUTH_PROVIDER_RESPONSE=$(curl -k -s -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
   -H "Authorization: Bearer $ROX_API_TOKEN" \
