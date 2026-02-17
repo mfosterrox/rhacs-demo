@@ -83,6 +83,7 @@ The following scripts are executed in numerical order:
 | `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** |
 | `05-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** |
 | `06-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** |
+| `07-configure-custom-tls.sh` | Configures passthrough route and custom TLS certificate (optional) | No |
 
 ## What Gets Configured
 
@@ -109,6 +110,24 @@ The following scripts are executed in numerical order:
   - ocp4-pci-dss, ocp4-pci-dss-node
   - ocp4-nerc-cip, ocp4-nerc-cip-node
   - ocp4-e8, ocp4-stig-node
+
+### Custom TLS Configuration (Script 07) - Optional
+This optional script configures Central with a custom TLS certificate and passthrough routing:
+- **Certificate Management**: Installs cert-manager and creates Let's Encrypt certificates
+- **Route Configuration**: Changes Central route from reencrypt to passthrough termination
+- **Automatic Renewal**: Certificates are automatically renewed by cert-manager
+- **Production Ready**: Supports both Let's Encrypt production and staging environments
+
+**Usage:**
+```bash
+# Production certificates
+./07-configure-custom-tls.sh --email your@email.com
+
+# Testing with Let's Encrypt staging
+./07-configure-custom-tls.sh --email your@email.com --staging
+```
+
+**Note:** This script is optional and should be run after the main installation if you need custom certificates instead of OpenShift-generated certificates.
 
 ## Requirements
 
