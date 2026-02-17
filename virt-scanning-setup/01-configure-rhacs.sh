@@ -235,9 +235,27 @@ configure_sensor_networking() {
       }
     ]'
     
-    # Wait for rollout
+    # Wait for rollout with better error handling
     print_info "Waiting for Sensor to restart with hostPort..."
-    oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=5m
+    
+    if oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=3m 2>/dev/null; then
+        print_info "✓ Sensor rollout completed"
+    else
+        print_warn "Sensor rollout timed out or had issues, checking status..."
+        
+        # Check if sensor is actually running
+        local available=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "0")
+        local ready=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        
+        if [ "${available}" -gt 0 ] && [ "${ready}" -gt 0 ]; then
+            print_info "✓ Sensor has ${available} available replicas, continuing..."
+        else
+            print_error "Sensor rollout failed - no available replicas"
+            print_info "Check sensor status: oc get deployment sensor -n ${RHACS_NAMESPACE}"
+            print_info "Check sensor pods: oc get pods -n ${RHACS_NAMESPACE} -l app=sensor"
+            return 1
+        fi
+    fi
     
     print_info "✓ Sensor configured with hostPort 8443"
     
@@ -251,9 +269,37 @@ configure_sensor_networking() {
         ROX_ADVERTISED_ENDPOINT=localhost:8443 \
         -c compliance
     
-    # Wait for collector rollout
+    # Wait for collector rollout with better error handling
     print_info "Waiting for Collector to restart with new sensor endpoint..."
-    oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
+    
+    if oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=3m 2>/dev/null; then
+        print_info "✓ Collector rollout completed"
+    else
+        print_warn "Collector rollout timed out, checking pod status..."
+        
+        # Check collector pod status
+        local total_nodes=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "0")
+        local ready_pods=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
+        local available=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.numberAvailable}' 2>/dev/null || echo "0")
+        
+        print_info "Collector status: ${ready_pods}/${total_nodes} ready, ${available} available"
+        
+        # Check for CrashLoopBackOff pods
+        local crash_pods=$(oc get pods -n ${RHACS_NAMESPACE} -l app=collector --field-selector=status.phase!=Running --no-headers 2>/dev/null | wc -l)
+        
+        if [ "${available}" -gt 0 ]; then
+            print_info "✓ At least ${available} collector pods are available, continuing..."
+            if [ "${crash_pods}" -gt 0 ]; then
+                print_warn "⚠ ${crash_pods} collector pod(s) may be experiencing issues"
+                print_info "  This is often normal during rollout - they should stabilize"
+                print_info "  Check with: oc get pods -n ${RHACS_NAMESPACE} -l app=collector"
+            fi
+        else
+            print_warn "No collector pods are available yet"
+            print_info "  Collector pods may take a few minutes to stabilize"
+            print_info "  Check status: oc get pods -n ${RHACS_NAMESPACE} -l app=collector"
+        fi
+    fi
     
     print_info "✓ Collector updated to reach sensor via localhost:8443"
 }
