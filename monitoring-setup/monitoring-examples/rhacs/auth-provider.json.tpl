@@ -4,8 +4,6 @@
   "uiEndpoint": "${ROX_CENTRAL_URL}",
   "enabled": true,
   "config": {
-    "caPems": "${TLS_CERT}" 
-  },
-  "requiredAttributes": [],
-  "claimMappings": []
+    "caPems": "${TLS_CERT}"
+  }
 }
