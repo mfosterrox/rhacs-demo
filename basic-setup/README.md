@@ -120,7 +120,7 @@ This optional script configures Central with a custom TLS certificate and passth
 - **Production Ready**: Supports both Let's Encrypt production and staging environments
 
 **What it does:**
-1. Installs Red Hat cert-manager Operator in `cert-manager-operator` namespace
+1. Verifies Red Hat cert-manager Operator is installed (exits if not found)
 2. Creates a Let's Encrypt ClusterIssuer (production or staging)
 3. Generates a Certificate resource for Central's route hostname
 4. Configures Central deployment to use the custom certificate
@@ -138,6 +138,7 @@ This optional script configures Central with a custom TLS certificate and passth
 
 **Requirements:**
 - Cluster-admin access
+- **Red Hat cert-manager Operator must be pre-installed** (stable-v1.18 or later)
 - Central must be accessible from the internet (for Let's Encrypt HTTP-01 challenge)
 - Valid email address for Let's Encrypt registration
 

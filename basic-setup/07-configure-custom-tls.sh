@@ -3,7 +3,7 @@
 # Configure RHACS Central with Passthrough Route and Custom TLS Certificate
 #
 # This script:
-# 1. Installs Red Hat cert-manager Operator for OpenShift (if not present)
+# 1. Verifies Red Hat cert-manager Operator is installed (prerequisite)
 # 2. Creates a Let's Encrypt ClusterIssuer
 # 3. Generates a custom TLS certificate for Central via cert-manager
 # 4. Configures Central to use the custom certificate
@@ -12,6 +12,7 @@
 # Prerequisites:
 # - OpenShift cluster with cluster-admin access
 # - RHACS Central already installed
+# - Red Hat cert-manager Operator for OpenShift (must be pre-installed)
 # - Environment variables: RHACS_NAMESPACE, RHACS_ROUTE_NAME (optional)
 #
 # Usage:
@@ -220,128 +221,123 @@ preflight_checks() {
 }
 
 #================================================================
-# Install Red Hat cert-manager Operator
+# Verify Red Hat cert-manager Operator is Installed
 #================================================================
 
 install_cert_manager() {
-    print_step "Installing Red Hat cert-manager Operator for OpenShift"
+    print_step "Verifying Red Hat cert-manager Operator for OpenShift"
     
-    # Check if cert-manager operator is already installed
-    if check_resource_exists "namespace" "${CERT_MANAGER_OPERATOR_NAMESPACE}"; then
-        print_info "✓ cert-manager-operator namespace exists"
-        
-        # Check if operator subscription exists
-        if oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
-            print_info "✓ cert-manager operator subscription exists"
-            
-            # Verify operator is installed and ready
-            local csv=$(oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null)
-            if [ -n "${csv}" ]; then
-                local phase=$(oc get csv "${csv}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
-                if [ "${phase}" = "Succeeded" ]; then
-                    print_info "✓ cert-manager operator is ready (${csv})"
-                    return 0
-                else
-                    print_info "cert-manager operator status: ${phase}"
-                fi
-            fi
-        fi
-    fi
-    
-    print_info "Installing Red Hat cert-manager Operator for OpenShift..."
-    
-    # Create namespace
+    # Check if cert-manager operator namespace exists
     if ! check_resource_exists "namespace" "${CERT_MANAGER_OPERATOR_NAMESPACE}"; then
-        print_info "Creating namespace ${CERT_MANAGER_OPERATOR_NAMESPACE}..."
-        oc create namespace "${CERT_MANAGER_OPERATOR_NAMESPACE}"
+        print_error "cert-manager operator namespace '${CERT_MANAGER_OPERATOR_NAMESPACE}' not found"
+        print_error ""
+        print_error "PREREQUISITE NOT MET: Red Hat cert-manager Operator is not installed"
+        print_error ""
+        print_error "Please install the Red Hat cert-manager Operator first:"
+        print_error "1. Open OpenShift Console → OperatorHub"
+        print_error "2. Search for 'cert-manager Operator for Red Hat OpenShift'"
+        print_error "3. Install from Red Hat operators"
+        print_error "4. Use namespace: cert-manager-operator"
+        print_error "5. Select channel: stable-v1.18"
+        print_error ""
+        print_error "Or install via CLI:"
+        print_error "  oc create namespace cert-manager-operator"
+        print_error "  oc apply -f - <<EOF"
+        print_error "apiVersion: operators.coreos.com/v1"
+        print_error "kind: OperatorGroup"
+        print_error "metadata:"
+        print_error "  name: cert-manager-operator"
+        print_error "  namespace: cert-manager-operator"
+        print_error "spec:"
+        print_error "  targetNamespaces:"
+        print_error "  - cert-manager-operator"
+        print_error "---"
+        print_error "apiVersion: operators.coreos.com/v1alpha1"
+        print_error "kind: Subscription"
+        print_error "metadata:"
+        print_error "  name: cert-manager"
+        print_error "  namespace: cert-manager-operator"
+        print_error "spec:"
+        print_error "  channel: stable-v1.18"
+        print_error "  installPlanApproval: Automatic"
+        print_error "  name: cert-manager"
+        print_error "  source: redhat-operators"
+        print_error "  sourceNamespace: openshift-marketplace"
+        print_error "EOF"
+        exit 1
     fi
     
-    # Create OperatorGroup
-    print_info "Creating OperatorGroup..."
-    cat <<EOF | oc apply -f -
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: cert-manager-operator
-  namespace: ${CERT_MANAGER_OPERATOR_NAMESPACE}
-spec:
-  targetNamespaces:
-  - ${CERT_MANAGER_OPERATOR_NAMESPACE}
-EOF
+    print_info "✓ cert-manager-operator namespace exists"
     
-    # Create Subscription
-    print_info "Creating Subscription for cert-manager operator..."
-    cat <<EOF | oc apply -f -
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: cert-manager
-  namespace: ${CERT_MANAGER_OPERATOR_NAMESPACE}
-spec:
-  channel: stable-v1.18
-  installPlanApproval: Automatic
-  name: cert-manager
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-EOF
+    # Check if operator subscription exists
+    if ! oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
+        print_error "cert-manager operator subscription not found in namespace '${CERT_MANAGER_OPERATOR_NAMESPACE}'"
+        print_error ""
+        print_error "PREREQUISITE NOT MET: cert-manager operator subscription does not exist"
+        print_error ""
+        print_error "The namespace exists but the operator subscription is missing."
+        print_error "Please install the Red Hat cert-manager Operator via OperatorHub."
+        exit 1
+    fi
     
-    # Wait for operator to be installed
-    print_info "Waiting for cert-manager operator to be installed..."
-    local max_wait=300
-    local elapsed=0
-    local interval=10
+    print_info "✓ cert-manager operator subscription exists"
     
-    while [ ${elapsed} -lt ${max_wait} ]; do
-        local csv=$(oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null)
-        
-        if [ -n "${csv}" ]; then
-            local phase=$(oc get csv "${csv}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
-            
-            if [ "${phase}" = "Succeeded" ]; then
-                print_info "✓ cert-manager operator installed successfully (${csv})"
-                break
-            fi
-            
-            print_info "Operator status: ${phase}"
-        fi
-        
-        sleep ${interval}
-        elapsed=$((elapsed + interval))
-    done
-    
-    # Verify installation
+    # Verify operator is installed and ready
     local csv=$(oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null)
     if [ -z "${csv}" ]; then
-        print_error "Failed to get cert-manager operator CSV"
-        return 1
+        print_error "cert-manager operator CSV not found"
+        print_error "The operator may still be installing. Please wait and try again."
+        exit 1
     fi
     
     local phase=$(oc get csv "${csv}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
     if [ "${phase}" != "Succeeded" ]; then
-        print_error "cert-manager operator installation failed or not ready: ${phase}"
-        print_info "Check status with: oc get csv ${csv} -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
-        return 1
+        print_error "cert-manager operator is not ready. Current status: ${phase}"
+        print_error "Expected status: Succeeded"
+        print_error ""
+        print_error "Check operator status with:"
+        print_error "  oc get csv ${csv} -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
+        print_error "  oc describe csv ${csv} -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
+        exit 1
     fi
     
-    # Wait for cert-manager deployments to be ready
-    print_info "Waiting for cert-manager components to be ready..."
-    sleep 10
+    print_info "✓ cert-manager operator is installed and ready (${csv})"
+    
+    # Verify cert-manager deployments exist and are ready
+    print_info "Verifying cert-manager components..."
     
     local deployments=("cert-manager-controller-manager" "cert-manager-cainjector" "cert-manager-webhook")
+    local all_ready=true
+    
     for deploy in "${deployments[@]}"; do
-        if oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
-            if ! oc wait deployment/"${deploy}" \
-                -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" \
-                --for=condition=Available \
-                --timeout=120s 2>/dev/null; then
-                print_warn "Deployment ${deploy} may not be fully ready yet"
-            else
-                print_info "✓ ${deploy} is ready"
-            fi
+        if ! oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
+            print_warn "Deployment ${deploy} not found"
+            all_ready=false
+            continue
+        fi
+        
+        local available=$(oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
+        if [ "${available}" = "True" ]; then
+            print_info "✓ ${deploy} is ready"
+        else
+            print_warn "${deploy} is not fully available yet"
+            all_ready=false
         fi
     done
     
-    print_info "✓ Red Hat cert-manager Operator installation complete"
+    if [ "${all_ready}" = false ]; then
+        print_warn "Some cert-manager components are not fully ready"
+        print_warn "This may cause issues. Check with:"
+        print_warn "  oc get pods -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
+        print_warn ""
+        read -p "Do you want to continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+    
+    print_info "✓ Red Hat cert-manager Operator verification complete"
     echo ""
 }
 
@@ -774,7 +770,7 @@ main() {
     # Run pre-flight checks
     preflight_checks
     
-    # Install cert-manager
+    # Verify cert-manager is installed (prerequisite)
     install_cert_manager || exit 1
     
     # Create Let's Encrypt ClusterIssuer
