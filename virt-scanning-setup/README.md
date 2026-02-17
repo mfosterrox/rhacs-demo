@@ -68,28 +68,34 @@ cd virt-scanning-setup
 # 1. Configure RHACS and enable VSOCK
 ./01-configure-rhacs.sh
 
-# 2. Deploy 4 sample VMs
-./02-deploy-sample-vms.sh
+# 2. Deploy 4 sample VMs with automatic subscription registration
+./02-deploy-sample-vms.sh --username USER --password PASS
 
-# 3. Register subscriptions and install packages
-./03-configure-vm-subscriptions.sh --username USER --password PASS
 # OR with activation key
-./03-configure-vm-subscriptions.sh --org ORG --activation-key KEY
+./02-deploy-sample-vms.sh --org ORG --activation-key KEY
 
-# 4. Verify environment (optional)
+# OR without subscription (manual registration required)
+./02-deploy-sample-vms.sh --skip-subscription
+
+# 3. Verify environment (optional)
 ./verify-env.sh
 ```
 
 ### Sample VMs for Demonstration
 
-The `02-deploy-sample-vms.sh` script deploys 4 VMs, and the `03-configure-vm-subscriptions.sh` script registers them and installs packages:
+The `02-deploy-sample-vms.sh` script deploys 4 VMs with automatic subscription registration and package installation via cloud-init:
 
 - **webserver**: Apache (httpd), Nginx, PHP - web server vulnerabilities
 - **database**: PostgreSQL, MariaDB - database server packages  
 - **devtools**: Git, GCC, Python, Node.js, Java - development tools
 - **monitoring**: Grafana, Telegraf, Collectd - monitoring stack
 
-Each VM automatically installs packages via DNF and runs roxagent for vulnerability scanning.
+When subscription credentials are provided, cloud-init automatically:
+1. Registers the VM with Red Hat subscription-manager
+2. Installs profile-specific packages
+3. Restarts roxagent to scan new packages
+
+Result: Vulnerability data appears in RHACS within 10 minutes!
 
 ## What Gets Configured
 
@@ -106,27 +112,32 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 - Installs systemd service for continuous scanning (5-minute intervals)
 - Creates helper script at `/root/install-packages.sh` for package installation
 
-### VM Subscription & Packages (03-configure-vm-subscriptions.sh)
-- Registers VMs with Red Hat subscription-manager
-- Supports both username/password and activation key authentication
-- Installs packages based on VM profile (defined in 02-deploy-sample-vms.sh)
-- Restarts roxagent to scan newly installed packages
-- Verifies package installation
-- Can process all VMs or specific VM only
+### VM Subscription & Packages (cloud-init)
+Subscription registration and package installation happen automatically during VM first boot via cloud-init's `rh_subscription` module:
 
-**Usage examples:**
+**Automatic (recommended):**
 ```bash
-# Register with username/password
-./03-configure-vm-subscriptions.sh --username myuser --password mypass
+# Deploy with username/password
+./02-deploy-sample-vms.sh --username myuser --password mypass
 
-# Register with activation key
-./03-configure-vm-subscriptions.sh --org 12345678 --activation-key my-key
+# Deploy with activation key
+./02-deploy-sample-vms.sh --org 12345678 --activation-key my-key
+```
 
-# Process specific VM only
-./03-configure-vm-subscriptions.sh --username myuser --password mypass --vm-name rhel-webserver
+**What happens on first boot:**
+1. cloud-init registers VM with Red Hat subscription-manager
+2. Packages install automatically based on VM profile
+3. roxagent starts and begins scanning
+4. Vulnerability data appears in RHACS within 10 minutes
 
-# Skip registration (if already registered)
-./03-configure-vm-subscriptions.sh --skip-registration
+**Manual (if deployed without subscription):**
+```bash
+# Deploy without subscription
+./02-deploy-sample-vms.sh --skip-subscription
+
+# Then inside each VM console:
+sudo subscription-manager register --username USER --password PASS --auto-attach
+sudo /root/install-packages.sh
 ```
 
 ## Configuration Options
@@ -218,21 +229,28 @@ VMs deployed by these scripts automatically meet requirements:
 1. ✅ Run RHEL 9
 2. ✅ Have vsock enabled
 3. ✅ Run roxagent in daemon mode
-4. ⚠️ **Must have valid RHEL subscription** (automated with `03-configure-vm-subscriptions.sh`)
+4. ⚠️ **Must have valid RHEL subscription** (automated via cloud-init)
 5. ✅ Have network access (for roxagent download and CPE mappings)
 
-### Activating RHEL Subscription (Automated)
+### Activating RHEL Subscription (Automated via cloud-init)
 
-Use the `03-configure-vm-subscriptions.sh` script to automate subscription registration and package installation:
+**Best approach: Provide credentials during VM deployment**
 
 ```bash
-# Automated approach (recommended)
-./03-configure-vm-subscriptions.sh --username USER --password PASS
+# Subscription registers automatically on first boot
+./02-deploy-sample-vms.sh --username USER --password PASS
 
-# Or manual approach (inside VM console)
-subscription-manager register --username <rh-username> --password <rh-password>
-subscription-manager attach --auto
-subscription-manager status
+# Or with activation key
+./02-deploy-sample-vms.sh --org ORG --activation-key KEY
+```
+
+**Alternative: Manual registration inside VM**
+
+```bash
+# If VMs were deployed without subscription
+virtctl console rhel-webserver -n default
+sudo subscription-manager register --username <rh-username> --password <rh-password> --auto-attach
+sudo /root/install-packages.sh
 ```
 
 ## Files
@@ -241,10 +259,9 @@ subscription-manager status
 
 | Script | Purpose |
 |--------|---------|
-| `install.sh` | **Main script** - orchestrates complete setup |
+| `install.sh` | **Main script** - orchestrates complete setup with subscription prompts |
 | `01-configure-rhacs.sh` | Configure RHACS components and enable VSOCK |
-| `02-deploy-sample-vms.sh` | Deploy 4 demo VMs with roxagent |
-| `03-configure-vm-subscriptions.sh` | Register subscriptions and install packages on VMs |
+| `02-deploy-sample-vms.sh` | Deploy 4 demo VMs with automatic subscription registration via cloud-init |
 | `verify-env.sh` | Verify RHACS VM scanning environment |
 
 ### Reference Files
@@ -263,14 +280,18 @@ subscription-manager status
 
 ### Why DNF packages matter
 
-The `03-configure-vm-subscriptions.sh` script installs packages via DNF after registering subscriptions:
+When subscription credentials are provided, cloud-init automatically installs packages via DNF:
 
-```bash
+```yaml
 # Inside cloud-init
-packages:
-  - httpd
-  - nginx
-  - postgresql
+rh_subscription:
+  username: "user"
+  password: "pass"
+  auto-attach: true
+
+runcmd:
+  - dnf install -y httpd nginx postgresql mariadb
+  - systemctl restart roxagent
 ```
 
 This ensures RHACS can detect and report vulnerabilities. Pre-installed system packages are not tracked by the DNF database and won't appear in vulnerability reports.

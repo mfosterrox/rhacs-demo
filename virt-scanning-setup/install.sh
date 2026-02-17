@@ -43,18 +43,19 @@ display_banner() {
     echo "  1. Install virtctl CLI tool"
     echo "  2. Configure RHACS for VM scanning"
     echo "  3. Enable VSOCK in OpenShift Virtualization"
-    echo "  4. Deploy 4 RHEL VMs with roxagent"
+    echo "  4. Register Red Hat subscription (optional)"
+    echo "  5. Deploy 4 RHEL VMs with roxagent"
     echo ""
     echo "Sample VMs:"
-    echo "  • rhel-webserver"
-    echo "  • rhel-database"
-    echo "  • rhel-devtools"
-    echo "  • rhel-monitoring"
+    echo "  • rhel-webserver   (Apache, Nginx, PHP)"
+    echo "  • rhel-database    (PostgreSQL, MariaDB)"
+    echo "  • rhel-devtools    (Git, GCC, Python, Java)"
+    echo "  • rhel-monitoring  (Grafana, Telegraf)"
     echo ""
-    echo "After deployment, you'll register VMs and install packages"
-    echo "to populate vulnerability data in RHACS."
+    echo "With subscription credentials, packages install automatically!"
+    echo "VMs will have vulnerability data in RHACS immediately."
     echo ""
-    echo "⏱️  Total time: ~5 minutes"
+    echo "⏱️  Total time: ~10 minutes (with automatic package installation)"
     echo ""
 }
 
@@ -159,6 +160,89 @@ step_configure_rhacs() {
 }
 
 #================================================================
+# Prompt for Red Hat subscription credentials
+#================================================================
+prompt_subscription_credentials() {
+    echo ""
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Red Hat Subscription Configuration"
+    print_header "════════════════════════════════════════════════════════════"
+    echo ""
+    
+    print_info "For automatic package installation, provide Red Hat subscription credentials."
+    print_info "VMs will register and install packages via cloud-init on first boot."
+    echo ""
+    print_warn "Without credentials, VMs will boot but have no packages (no vulnerabilities)."
+    echo ""
+    
+    # Check if credentials already in environment
+    if [ -n "${RHEL_USERNAME:-}" ] && [ -n "${RHEL_PASSWORD:-}" ]; then
+        print_info "✓ Using subscription credentials from environment (RHEL_USERNAME/RHEL_PASSWORD)"
+        return 0
+    elif [ -n "${RHEL_ORG:-}" ] && [ -n "${RHEL_ACTIVATION_KEY:-}" ]; then
+        print_info "✓ Using subscription credentials from environment (RHEL_ORG/RHEL_ACTIVATION_KEY)"
+        return 0
+    fi
+    
+    # Prompt user
+    echo "Choose authentication method:"
+    echo "  1) Username + Password"
+    echo "  2) Organization + Activation Key"
+    echo "  3) Skip (no automatic package installation)"
+    echo ""
+    read -p "Select option [1-3]: " -n 1 -r auth_choice
+    echo ""
+    echo ""
+    
+    case "$auth_choice" in
+        1)
+            print_info "Enter Red Hat Customer Portal credentials:"
+            echo ""
+            read -p "Username: " RHEL_USERNAME
+            read -s -p "Password: " RHEL_PASSWORD
+            echo ""
+            echo ""
+            
+            if [ -z "${RHEL_USERNAME}" ] || [ -z "${RHEL_PASSWORD}" ]; then
+                print_error "Username and password are required"
+                return 1
+            fi
+            
+            export RHEL_USERNAME
+            export RHEL_PASSWORD
+            print_info "✓ Credentials configured"
+            ;;
+        2)
+            print_info "Enter Organization and Activation Key:"
+            echo ""
+            read -p "Organization ID: " RHEL_ORG
+            read -p "Activation Key: " RHEL_ACTIVATION_KEY
+            echo ""
+            
+            if [ -z "${RHEL_ORG}" ] || [ -z "${RHEL_ACTIVATION_KEY}" ]; then
+                print_error "Organization ID and activation key are required"
+                return 1
+            fi
+            
+            export RHEL_ORG
+            export RHEL_ACTIVATION_KEY
+            print_info "✓ Credentials configured"
+            ;;
+        3)
+            print_warn "Skipping subscription configuration"
+            print_info "VMs will boot without packages"
+            export SKIP_SUBSCRIPTION=true
+            ;;
+        *)
+            print_error "Invalid choice"
+            return 1
+            ;;
+    esac
+    
+    sleep 2
+}
+
+#================================================================
 # Step 2: Deploy VMs
 #================================================================
 step_deploy_sample_vms() {
@@ -178,7 +262,18 @@ step_deploy_sample_vms() {
     # Export AUTO_CONFIRM to skip prompts
     export AUTO_CONFIRM=true
     
-    if ! bash "${SCRIPT_DIR}/02-deploy-sample-vms.sh"; then
+    # Build command with subscription credentials if provided
+    local deploy_cmd="${SCRIPT_DIR}/02-deploy-sample-vms.sh"
+    
+    if [ "${SKIP_SUBSCRIPTION:-false}" = "true" ]; then
+        deploy_cmd="${deploy_cmd} --skip-subscription"
+    elif [ -n "${RHEL_USERNAME:-}" ] && [ -n "${RHEL_PASSWORD:-}" ]; then
+        deploy_cmd="${deploy_cmd} --username \"${RHEL_USERNAME}\" --password \"${RHEL_PASSWORD}\""
+    elif [ -n "${RHEL_ORG:-}" ] && [ -n "${RHEL_ACTIVATION_KEY:-}" ]; then
+        deploy_cmd="${deploy_cmd} --org \"${RHEL_ORG}\" --activation-key \"${RHEL_ACTIVATION_KEY}\""
+    fi
+    
+    if ! eval bash "${deploy_cmd}"; then
         print_error "Sample VMs deployment failed"
         return 1
     fi
@@ -210,36 +305,70 @@ display_summary() {
     echo "    • rhel-monitoring"
     
     echo ""
-    print_header "⏱️  Deployment Timeline:"
-    echo ""
-    echo "  Now      VMs deploying"
-    echo "  +3 min   VMs booting, cloud-init running"
-    echo "  +5 min   roxagent running, VMs visible in RHACS (no packages yet)"
-    echo ""
-    print_header "Next Steps:"
-    echo ""
-    echo "  1. Wait 5 minutes for VMs to boot, then check:"
-    echo "     $ oc get vmi -n default"
-    echo ""
-    echo "  2. Access VMs with console (password: redhat):"
-    echo "     $ virtctl console rhel-webserver -n default"
-    echo ""
-    echo "  3. Register each VM and install packages:"
-    echo "     Inside VM console:"
-    echo "     $ sudo subscription-manager register --username <user> --password <pass> --auto-attach"
-    echo "     $ sudo subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms --enable rhel-9-for-x86_64-appstream-rpms"
-    echo "     $ sudo dnf install -y <packages>  # httpd nginx php, etc."
-    echo "     $ sudo systemctl restart roxagent"
-    echo ""
-    echo "  4. Wait 2-3 minutes, then view results in RHACS UI:"
-    CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
-    echo "     ${CENTRAL_URL}"
-    echo "     → Platform Configuration → Clusters → Virtual Machines"
-    echo ""
-    print_info "VMs will show in RHACS immediately (without vulnerabilities)"
-    print_info "After installing packages, vulnerability data will appear"
-    echo ""
     
+    # Different timeline based on subscription configuration
+    if [ "${SKIP_SUBSCRIPTION:-false}" != "true" ] && { [ -n "${RHEL_USERNAME:-}" ] || [ -n "${RHEL_ORG:-}" ]; }; then
+        echo "  ✓ Red Hat subscription configured (automatic registration)"
+        echo ""
+        print_header "⏱️  Deployment Timeline (Automatic):"
+        echo ""
+        echo "  Now      VMs deploying, cloud-init starting"
+        echo "  +3 min   Subscription registering"
+        echo "  +5 min   Packages installing (httpd, nginx, postgresql, etc.)"
+        echo "  +8 min   roxagent scanning packages"
+        echo "  +10 min  ✓ Vulnerability data visible in RHACS!"
+        echo ""
+        print_header "Next Steps:"
+        echo ""
+        echo "  1. Wait 10 minutes, then check VMs:"
+        echo "     $ oc get vmi -n default"
+        echo ""
+        echo "  2. View vulnerability data in RHACS UI:"
+        CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
+        echo "     ${CENTRAL_URL}"
+        echo "     → Platform Configuration → Clusters → Virtual Machines"
+        echo "     → Vulnerability Management → Workload CVEs"
+        echo ""
+        echo "  3. (Optional) Access VM console:"
+        echo "     $ virtctl console rhel-webserver -n default"
+        echo "     Login: cloud-user / redhat"
+        echo "     Check packages: dnf list installed"
+        echo "     Check roxagent: sudo systemctl status roxagent"
+        echo ""
+        print_info "✓ Everything is automated! Just wait 10 minutes for data to appear."
+    else
+        echo ""
+        print_warn "⚠ No subscription configured - VMs will boot without packages"
+        echo ""
+        print_header "⏱️  Deployment Timeline:"
+        echo ""
+        echo "  Now      VMs deploying"
+        echo "  +3 min   VMs booting, cloud-init running"
+        echo "  +5 min   roxagent running, VMs visible in RHACS (no packages yet)"
+        echo ""
+        print_header "Next Steps:"
+        echo ""
+        echo "  1. Wait 5 minutes for VMs to boot, then check:"
+        echo "     $ oc get vmi -n default"
+        echo ""
+        echo "  2. Access VMs with console (password: redhat):"
+        echo "     $ virtctl console rhel-webserver -n default"
+        echo ""
+        echo "  3. Register each VM and install packages:"
+        echo "     Inside VM console:"
+        echo "     $ sudo subscription-manager register --username <user> --password <pass> --auto-attach"
+        echo "     $ sudo /root/install-packages.sh"
+        echo ""
+        echo "  4. Wait 2-3 minutes, then view results in RHACS UI:"
+        CENTRAL_URL="https://$(oc get route central -n stackrox -o jsonpath='{.spec.host}' 2>/dev/null || echo 'central-stackrox')"
+        echo "     ${CENTRAL_URL}"
+        echo "     → Platform Configuration → Clusters → Virtual Machines"
+        echo ""
+        print_info "Or re-run the 02-deploy-sample-vms.sh script with subscription:"
+        echo "  $ ${SCRIPT_DIR}/02-deploy-sample-vms.sh --username USER --password PASS"
+    fi
+    
+    echo ""
     print_info "Documentation: ${SCRIPT_DIR}/README.md"
     echo ""
 }
@@ -391,6 +520,10 @@ main() {
     
     # Execute steps in order
     step_configure_rhacs || handle_error "Configure RHACS"
+    
+    # Prompt for subscription credentials
+    prompt_subscription_credentials || handle_error "Configure subscription"
+    
     step_deploy_sample_vms || handle_error "Deploy Sample VMs"
     
     # Show summary

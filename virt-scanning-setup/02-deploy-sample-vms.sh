@@ -3,8 +3,6 @@
 # Script: 04-deploy-sample-vms.sh
 # Description: Deploy 4 sample VMs with different DNF packages for vulnerability scanning demonstration
 
-set -euo pipefail
-
 # Color codes
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -27,6 +25,13 @@ readonly ROXAGENT_VERSION="${ROXAGENT_VERSION:-4.9.2}"
 readonly ROXAGENT_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXAGENT_VERSION}/bin/linux/roxagent"
 readonly AUTO_CONFIRM="${AUTO_CONFIRM:-false}"  # Skip confirmation prompts
 
+# Subscription credentials (can be set via command-line arguments or environment)
+RHEL_USERNAME="${RHEL_USERNAME:-}"
+RHEL_PASSWORD="${RHEL_PASSWORD:-}"
+RHEL_ORG="${RHEL_ORG:-}"
+RHEL_ACTIVATION_KEY="${RHEL_ACTIVATION_KEY:-}"
+SKIP_SUBSCRIPTION="${SKIP_SUBSCRIPTION:-false}"
+
 # VM profiles with different package sets
 declare -A VM_PROFILES=(
     ["webserver"]="httpd nginx php php-mysqlnd mod_ssl mod_security"
@@ -41,6 +46,9 @@ declare -A VM_DESCRIPTIONS=(
     ["devtools"]="Development Tools (Git, GCC, Python, Node.js, Java)"
     ["monitoring"]="Monitoring Stack (Grafana, Telegraf, Collectd)"
 )
+
+# Enable strict mode AFTER array declarations to avoid issues with bash -u flag
+set -euo pipefail
 
 #================================================================
 # Check prerequisites
@@ -110,6 +118,7 @@ generate_cloudinit() {
     local vm_profile=$1
     local packages="${VM_PROFILES[$vm_profile]}"
     
+    # Start cloud-init
     cat <<EOF
 #cloud-config
 hostname: rhel-${vm_profile}
@@ -125,6 +134,30 @@ chpasswd:
     cloud-user:redhat
   expire: false
 
+EOF
+
+    # Add subscription registration if credentials provided
+    if [ "${SKIP_SUBSCRIPTION}" != "true" ]; then
+        if [ -n "${RHEL_USERNAME}" ] && [ -n "${RHEL_PASSWORD}" ]; then
+            cat <<EOF
+rh_subscription:
+  username: "${RHEL_USERNAME}"
+  password: "${RHEL_PASSWORD}"
+  auto-attach: true
+
+EOF
+        elif [ -n "${RHEL_ORG}" ] && [ -n "${RHEL_ACTIVATION_KEY}" ]; then
+            cat <<EOF
+rh_subscription:
+  activation-key: "${RHEL_ACTIVATION_KEY}"
+  org: "${RHEL_ORG}"
+
+EOF
+        fi
+    fi
+
+    # Continue with runcmd
+    cat <<EOF
 runcmd:
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
@@ -165,12 +198,34 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable roxagent
   - systemctl start roxagent
+EOF
+
+    # Add package installation if subscription is configured
+    if [ "${SKIP_SUBSCRIPTION}" != "true" ] && { [ -n "${RHEL_USERNAME}" ] || [ -n "${RHEL_ORG}" ]; }; then
+        cat <<EOF
   
-  # Create package install script for later use
+  # Install packages for this profile (after subscription)
+  - |
+    echo "Installing packages for ${vm_profile} profile..."
+    dnf install -y ${packages}
+    echo "Packages installed. Restarting roxagent to scan new packages..."
+    systemctl restart roxagent
+  
+  # Log completion with packages
+  - echo "VM profile '${vm_profile}' configured with packages"
+  - echo "roxagent service running with vulnerability data"
+
+final_message: "RHEL VM '${vm_profile}' is ready with packages. roxagent scanning."
+EOF
+    else
+        # No subscription - create install script for manual use
+        cat <<EOF
+  
+  # Create package install script for later use (no subscription provided)
   - |
     cat > /root/install-packages.sh <<'PKG_SCRIPT'
     #!/bin/bash
-    # Run this after VM is booted to install packages
+    # Run this after registering subscription
     echo "Installing packages for ${vm_profile} profile..."
     dnf install -y ${packages}
     echo "Packages installed. Restarting roxagent to scan new packages..."
@@ -179,12 +234,14 @@ runcmd:
   
   - chmod +x /root/install-packages.sh
   
-  # Log completion
-  - echo "VM profile '${vm_profile}' configured"
+  # Log completion without packages
+  - echo "VM profile '${vm_profile}' configured (no packages installed)"
   - echo "roxagent service started"
+  - echo "To install packages: Register subscription and run /root/install-packages.sh"
 
-final_message: "RHEL VM '${vm_profile}' is ready. roxagent running."
+final_message: "RHEL VM '${vm_profile}' is ready. Register subscription to install packages."
 EOF
+    fi
 }
 
 #================================================================
@@ -336,9 +393,103 @@ display_vm_info() {
 }
 
 #================================================================
+# Parse command-line arguments
+#================================================================
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --username)
+                RHEL_USERNAME="$2"
+                shift 2
+                ;;
+            --password)
+                RHEL_PASSWORD="$2"
+                shift 2
+                ;;
+            --org)
+                RHEL_ORG="$2"
+                shift 2
+                ;;
+            --activation-key)
+                RHEL_ACTIVATION_KEY="$2"
+                shift 2
+                ;;
+            --skip-subscription)
+                SKIP_SUBSCRIPTION=true
+                shift
+                ;;
+            -h|--help)
+                cat <<EOF
+Usage: $0 [OPTIONS]
+
+Deploy 4 sample RHEL VMs with roxagent for RHACS vulnerability scanning.
+
+Subscription Options (choose one):
+  --username USER         Red Hat customer portal username
+  --password PASS         Red Hat customer portal password
+  
+  OR
+  
+  --org ORG              Organization ID
+  --activation-key KEY   Activation key
+  
+  --skip-subscription    Skip subscription registration (VMs won't have packages)
+
+Other Options:
+  -h, --help            Show this help
+
+Environment Variables:
+  NAMESPACE            VM namespace (default: default)
+  VM_CPUS              VM CPU count (default: 2)
+  VM_MEMORY            VM memory (default: 4Gi)
+  STORAGE_CLASS        Storage class for VM disks (auto-detected)
+  RHEL_USERNAME        Red Hat username (alternative to --username)
+  RHEL_PASSWORD        Red Hat password (alternative to --password)
+  RHEL_ORG             Organization ID (alternative to --org)
+  RHEL_ACTIVATION_KEY  Activation key (alternative to --activation-key)
+  AUTO_CONFIRM         Skip confirmation prompts (default: false)
+
+Examples:
+  # Deploy with username/password (recommended for demo)
+  $0 --username myuser --password mypass
+
+  # Deploy with activation key
+  $0 --org 12345678 --activation-key my-key
+
+  # Deploy without subscription (VMs won't install packages)
+  $0 --skip-subscription
+
+  # Use environment variables
+  export RHEL_USERNAME="myuser" RHEL_PASSWORD="mypass"
+  $0
+
+What Gets Deployed:
+  • rhel-webserver   - Apache, Nginx, PHP
+  • rhel-database    - PostgreSQL, MariaDB
+  • rhel-devtools    - Git, GCC, Python, Node.js, Java
+  • rhel-monitoring  - Grafana, Telegraf, Collectd
+
+With subscription credentials, packages are installed automatically via cloud-init!
+
+EOF
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+#================================================================
 # Main execution
 #================================================================
 main() {
+    # Parse command-line arguments
+    parse_arguments "$@"
+    
     echo ""
     echo "=========================================="
     echo "  RHACS VM Vulnerability Scanning Demo"
@@ -353,6 +504,39 @@ main() {
     for profile in "${!VM_PROFILES[@]}"; do
         echo "  • ${profile}: ${VM_DESCRIPTIONS[$profile]}"
     done
+    
+    echo ""
+    
+    # Display subscription status
+    if [ "${SKIP_SUBSCRIPTION}" = "true" ]; then
+        print_warn "Subscription: Disabled"
+        print_info "  VMs will NOT install packages automatically"
+        print_info "  You'll need to register and install packages manually"
+    elif [ -n "${RHEL_USERNAME}" ] && [ -n "${RHEL_PASSWORD}" ]; then
+        print_info "✓ Subscription: Username/Password provided"
+        print_info "  VMs will automatically register and install packages"
+        print_info "  User: ${RHEL_USERNAME}"
+    elif [ -n "${RHEL_ORG}" ] && [ -n "${RHEL_ACTIVATION_KEY}" ]; then
+        print_info "✓ Subscription: Activation key provided"
+        print_info "  VMs will automatically register and install packages"
+        print_info "  Org: ${RHEL_ORG}"
+    else
+        print_warn "⚠ No subscription credentials provided"
+        print_info "  VMs will boot but won't install packages"
+        print_info "  To enable automatic package installation:"
+        echo "    --username USER --password PASS"
+        echo "    OR"
+        echo "    --org ORG --activation-key KEY"
+        echo ""
+        if [ "${AUTO_CONFIRM}" != "true" ]; then
+            read -p "Continue without subscription? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Deployment cancelled"
+                exit 0
+            fi
+        fi
+    fi
     
     echo ""
     
@@ -381,12 +565,53 @@ main() {
     print_info "VMs are now starting in the background..."
     echo ""
     
-    print_info "Cloud-init will:"
-    echo "  • Create cloud-user with password 'redhat'"
-    echo "  • Download and start roxagent"
-    echo ""
-    print_info "VMs will boot in 3-5 minutes"
-    print_info "To add vulnerability data, register and install packages inside each VM"
+    if [ "${SKIP_SUBSCRIPTION}" != "true" ] && { [ -n "${RHEL_USERNAME}" ] || [ -n "${RHEL_ORG}" ]; }; then
+        print_info "Cloud-init will (this takes 5-10 minutes):"
+        echo "  1. Create cloud-user with password 'redhat'"
+        echo "  2. Register Red Hat subscription"
+        echo "  3. Install profile-specific packages"
+        echo "  4. Download and start roxagent"
+        echo ""
+        print_info "✓ VMs will have vulnerability data automatically!"
+        echo ""
+        print_info "Timeline:"
+        echo "  • 0-3 min:   VMs booting, cloud-init starting"
+        echo "  • 3-7 min:   Subscription registering, packages installing"
+        echo "  • 7-10 min:  roxagent scanning packages"
+        echo "  • 10+ min:   Vulnerability data visible in RHACS UI"
+        echo ""
+        print_info "Check VM status:"
+        echo "  $ oc get vmi -n ${NAMESPACE}"
+        echo ""
+        print_info "Access VM console:"
+        echo "  $ virtctl console rhel-webserver -n ${NAMESPACE}"
+        echo ""
+        print_info "Monitor RHACS:"
+        echo "  Platform Configuration → Clusters → Virtual Machines"
+        echo "  Vulnerability Management → Workload CVEs"
+    else
+        print_info "Cloud-init will:"
+        echo "  • Create cloud-user with password 'redhat'"
+        echo "  • Download and start roxagent"
+        echo ""
+        print_warn "⚠ No subscription configured - packages NOT installed"
+        echo ""
+        print_info "VMs will boot in 3-5 minutes"
+        print_info "To add vulnerability data:"
+        echo ""
+        echo "  1. Access VM console:"
+        echo "     $ virtctl console rhel-webserver -n ${NAMESPACE}"
+        echo ""
+        echo "  2. Register subscription:"
+        echo "     $ sudo subscription-manager register --username USER --password PASS"
+        echo "     $ sudo subscription-manager attach --auto"
+        echo ""
+        echo "  3. Install packages:"
+        echo "     $ sudo /root/install-packages.sh"
+        echo ""
+        print_info "Or re-deploy with subscription credentials:"
+        echo "  $ $0 --username USER --password PASS"
+    fi
 }
 
 main "$@"
