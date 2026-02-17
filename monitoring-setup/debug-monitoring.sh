@@ -247,21 +247,34 @@ echo ""
 step "7. Prometheus Pods in namespace '$NAMESPACE'"
 echo ""
 
-PROM_PODS=$($KUBE_CMD get pods -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus --no-headers 2>/dev/null || echo "")
+# MonitoringStack creates pods with name pattern: <stack-name>-prometheus-<num>
+PROM_PODS=$($KUBE_CMD get pods -n "$NAMESPACE" 2>/dev/null | grep prometheus || echo "")
 if [ -n "$PROM_PODS" ]; then
     log "✓ Prometheus pods found:"
-    $KUBE_CMD get pods -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus 2>/dev/null
+    $KUBE_CMD get pods -n "$NAMESPACE" 2>/dev/null | grep prometheus
     
-    echo ""
-    log "Checking Prometheus pod logs for errors..."
-    POD_NAME=$($KUBE_CMD get pods -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    # Get first prometheus pod name
+    POD_NAME=$($KUBE_CMD get pods -n "$NAMESPACE" -o name 2>/dev/null | grep prometheus | head -1 | sed 's|pod/||')
+    
     if [ -n "$POD_NAME" ]; then
-        log "Latest logs from $POD_NAME:"
+        echo ""
+        log "Prometheus pod: $POD_NAME"
+        POD_STATUS=$($KUBE_CMD get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "unknown")
+        log "  Status: $POD_STATUS"
+        
+        if [ "$POD_STATUS" != "Running" ]; then
+            warning "  Pod is not Running!"
+            $KUBE_CMD describe pod "$POD_NAME" -n "$NAMESPACE" | tail -20
+        fi
+        
+        echo ""
+        log "Checking Prometheus pod logs for errors..."
         $KUBE_CMD logs -n "$NAMESPACE" "$POD_NAME" --tail=50 2>&1 | grep -E "error|Error|ERROR|warn|Warn|WARN|failed|Failed" || log "  No errors found in recent logs"
     fi
 else
     error "✗ No Prometheus pods found in namespace '$NAMESPACE'"
-    warning "  Check if MonitoringStack is deployed"
+    warning "  Checking all pods in namespace:"
+    $KUBE_CMD get pods -n "$NAMESPACE" 2>/dev/null || echo "  No pods found"
 fi
 
 #================================================================
@@ -309,13 +322,14 @@ echo ""
 step "9. Prometheus Service and Endpoints"
 echo ""
 
-PROM_SERVICES=$($KUBE_CMD get svc -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus --no-headers 2>/dev/null || echo "")
+# MonitoringStack creates services with name pattern: <stack-name>-prometheus
+PROM_SERVICES=$($KUBE_CMD get svc -n "$NAMESPACE" 2>/dev/null | grep prometheus || echo "")
 if [ -n "$PROM_SERVICES" ]; then
-    log "✓ Prometheus services:"
-    $KUBE_CMD get svc -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus 2>/dev/null
+    log "✓ Prometheus services found:"
+    $KUBE_CMD get svc -n "$NAMESPACE" 2>/dev/null | grep prometheus
     
     # Get service name for port-forward instructions
-    PROM_SVC=$($KUBE_CMD get svc -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    PROM_SVC=$($KUBE_CMD get svc -n "$NAMESPACE" -o name 2>/dev/null | grep prometheus | head -1 | sed 's|service/||')
     if [ -n "$PROM_SVC" ]; then
         log ""
         log "To access Prometheus UI, run:"
@@ -324,6 +338,8 @@ if [ -n "$PROM_SERVICES" ]; then
     fi
 else
     error "✗ No Prometheus services found"
+    warning "  Checking all services in namespace:"
+    $KUBE_CMD get svc -n "$NAMESPACE" 2>/dev/null || echo "  No services found"
 fi
 
 #================================================================
@@ -333,7 +349,8 @@ echo ""
 step "10. Prometheus Targets (if Prometheus is accessible)"
 echo ""
 
-PROM_POD=$($KUBE_CMD get pods -n "$NAMESPACE" -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+# Find Prometheus pod (MonitoringStack naming)
+PROM_POD=$($KUBE_CMD get pods -n "$NAMESPACE" -o name 2>/dev/null | grep prometheus | head -1 | sed 's|pod/||' || echo "")
 if [ -n "$PROM_POD" ]; then
     log "Querying Prometheus targets via port-forward..."
     
