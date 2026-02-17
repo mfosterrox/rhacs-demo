@@ -40,9 +40,10 @@ display_banner() {
     print_header "╚════════════════════════════════════════════════════════════╝"
     echo ""
     echo "This automated script will:"
-    echo "  1. Configure RHACS for VM scanning"
-    echo "  2. Enable VSOCK in OpenShift Virtualization"
-    echo "  3. Deploy 4 RHEL VMs with roxagent"
+    echo "  1. Install virtctl CLI tool"
+    echo "  2. Configure RHACS for VM scanning"
+    echo "  3. Enable VSOCK in OpenShift Virtualization"
+    echo "  4. Deploy 4 RHEL VMs with roxagent"
     echo ""
     echo "Sample VMs:"
     echo "  • rhel-webserver"
@@ -198,6 +199,7 @@ display_summary() {
     
     print_info "What was configured:"
     echo ""
+    echo "  ✓ virtctl CLI tool installed"
     echo "  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)"
     echo "  ✓ OpenShift Virtualization VSOCK feature gate enabled"
     echo "  ✓ Collector hostNetwork + DNS configured for VSOCK"
@@ -259,10 +261,127 @@ handle_error() {
 }
 
 #================================================================
+# Install virtctl
+#================================================================
+install_virtctl() {
+    echo ""
+    print_header "════════════════════════════════════════════════════════════"
+    print_step "Installing virtctl CLI Tool"
+    print_header "════════════════════════════════════════════════════════════"
+    echo ""
+    
+    # Check if virtctl already exists
+    if command -v virtctl &>/dev/null; then
+        local current_version=$(virtctl version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[^"]+' || echo "unknown")
+        print_info "✓ virtctl is already installed (version: ${current_version})"
+        sleep 1
+        return 0
+    fi
+    
+    print_info "Installing virtctl CLI tool..."
+    
+    # Determine architecture
+    local arch=$(uname -m)
+    local virtctl_binary="virtctl-linux-amd64"
+    
+    case "$arch" in
+        x86_64)
+            virtctl_binary="virtctl-linux-amd64"
+            ;;
+        aarch64|arm64)
+            virtctl_binary="virtctl-linux-arm64"
+            ;;
+        *)
+            print_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+    
+    print_info "Detected architecture: $arch"
+    print_info "Downloading virtctl..."
+    
+    # Get latest version
+    local latest_version=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+    
+    if [ -z "$latest_version" ]; then
+        print_warn "Could not determine latest version, using stable URL"
+        latest_version="latest"
+    else
+        print_info "Latest version: $latest_version"
+    fi
+    
+    # Download virtctl
+    local download_url="https://github.com/kubevirt/kubevirt/releases/${latest_version}/download/${virtctl_binary}"
+    local temp_file="/tmp/virtctl-download"
+    
+    if ! curl -L -o "$temp_file" "$download_url" 2>&1 | grep -v "%" || [ ! -f "$temp_file" ]; then
+        print_error "Failed to download virtctl"
+        return 1
+    fi
+    
+    print_info "✓ Downloaded virtctl"
+    
+    # Make executable
+    chmod +x "$temp_file"
+    
+    # Try to install to /usr/local/bin (preferred), fallback to ~/.local/bin
+    local install_path=""
+    
+    if [ -w /usr/local/bin ]; then
+        install_path="/usr/local/bin/virtctl"
+        print_info "Installing to /usr/local/bin/virtctl..."
+        mv "$temp_file" "$install_path"
+    elif sudo -n true 2>/dev/null; then
+        install_path="/usr/local/bin/virtctl"
+        print_info "Installing to /usr/local/bin/virtctl (with sudo)..."
+        sudo mv "$temp_file" "$install_path"
+        sudo chmod +x "$install_path"
+    else
+        # Fallback to user local bin
+        install_path="${HOME}/.local/bin/virtctl"
+        mkdir -p "${HOME}/.local/bin"
+        print_info "Installing to ~/.local/bin/virtctl..."
+        mv "$temp_file" "$install_path"
+        
+        # Check if ~/.local/bin is in PATH
+        if [[ ":$PATH:" != *":${HOME}/.local/bin:"* ]]; then
+            print_warn "~/.local/bin is not in your PATH"
+            print_info "Add this to your ~/.bashrc or ~/.zshrc:"
+            echo '  export PATH="$HOME/.local/bin:$PATH"'
+            echo ""
+            print_info "For this session, run:"
+            echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            echo ""
+        fi
+    fi
+    
+    # Verify installation
+    if [ -f "$install_path" ] && [ -x "$install_path" ]; then
+        local installed_version=$("$install_path" version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[^"]+' || echo "unknown")
+        print_info "✓ virtctl installed successfully to: $install_path"
+        print_info "  Version: $installed_version"
+        echo ""
+        print_info "virtctl is used for VM management and debugging:"
+        echo "  • virtctl console <vm-name> -n <namespace>  # Connect to VM console"
+        echo "  • virtctl ssh cloud-user@<vm-name>          # SSH into VM"
+        echo "  • virtctl start/stop/restart <vm-name>      # VM lifecycle"
+        echo ""
+        sleep 2
+        return 0
+    else
+        print_error "Installation verification failed"
+        return 1
+    fi
+}
+
+#================================================================
 # Main execution
 #================================================================
 main() {
     display_banner
+    
+    # Install virtctl first
+    install_virtctl || handle_error "Install virtctl"
     
     echo ""
     read -p "Press Enter to continue..."

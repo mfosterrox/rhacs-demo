@@ -14,12 +14,12 @@
 # - Valid Red Hat subscription credentials or activation key
 #
 # Usage:
-#   ç
-#   ./03-configure-vm-subscriptions.sh --org ORG --activation-key KEY [OPTIONS]
+#   
+#   ./03-configure-vm-subscriptions.sh --username USERNAME --password PASS 
 #
 # Options:
-#   --username USER          Red Hat username
-#   --password PASS          Red Hat password
+#   --username USER         Red Hat username
+#   --password PASS         Red Hat password
 #   --org ORG               Organization ID
 #   --activation-key KEY    Activation key
 #   --namespace NS          VM namespace (default: demo-vms)
