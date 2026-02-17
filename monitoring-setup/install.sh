@@ -225,9 +225,8 @@ else
     warning "Certificate validation failed"
 fi
 
-# Export TLS_CERT for later use
-export TLS_CERT=$(cat tls.crt)
-log "✓ TLS_CERT exported for auth provider creation"
+# Certificate file is ready for auth provider creation
+log "✓ Certificate ready for auth provider creation"
 
 # Create TLS secret
 log "Creating TLS secret in namespace '$NAMESPACE'..."
@@ -314,12 +313,16 @@ AUTH_PROVIDER_CREATED=false
 if command -v jq &>/dev/null; then
     log "Attempting to create auth provider via API (using jq)..."
     
-    # Build JSON payload using jq (handles escaping properly)
+    # Read certificate as raw string and build JSON payload
+    # Use jq's -R (raw input) and -s (slurp) to read the file as a single string
+    CERT_CONTENT=$(jq -Rs . < tls.crt)
+    
+    # Build JSON payload using jq with the certificate as a pre-escaped JSON string
     AUTH_PROVIDER_JSON=$(jq -n \
         --arg name "Monitoring" \
         --arg type "userpki" \
         --arg uiEndpoint "$ROX_CENTRAL_URL" \
-        --arg cert "$TLS_CERT" \
+        --argjson cert "$CERT_CONTENT" \
         '{
             name: $name,
             type: $type,
