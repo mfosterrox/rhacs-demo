@@ -53,31 +53,26 @@ echo ""
 step "Step 1: Removing Perses resources"
 echo ""
 
-# Perses Dashboard
-if $KUBE_CMD get persesdashboard rhacs-central-dashboard -n "$NAMESPACE" &>/dev/null; then
-    log "Deleting Perses Dashboard..."
-    $KUBE_CMD delete persesdashboard rhacs-central-dashboard -n "$NAMESPACE" || warning "Failed to delete dashboard"
-    log "✓ Perses Dashboard deleted"
+# Delete using the exact YAML files used during installation
+log "Deleting Perses Dashboard..."
+if [ -f "$EXAMPLES_DIR/perses/dashboard.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/perses/dashboard.yaml" 2>/dev/null && log "✓ Perses Dashboard deleted" || log "✓ Perses Dashboard not found"
 else
-    log "✓ Perses Dashboard not found (already removed or never created)"
+    warning "dashboard.yaml not found at $EXAMPLES_DIR/perses/"
 fi
 
-# Perses Datasource
-if $KUBE_CMD get persesdatasource prometheus -n "$NAMESPACE" &>/dev/null; then
-    log "Deleting Perses Datasource..."
-    $KUBE_CMD delete persesdatasource prometheus -n "$NAMESPACE" || warning "Failed to delete datasource"
-    log "✓ Perses Datasource deleted"
+log "Deleting Perses Datasource..."
+if [ -f "$EXAMPLES_DIR/perses/datasource.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/perses/datasource.yaml" 2>/dev/null && log "✓ Perses Datasource deleted" || log "✓ Perses Datasource not found"
 else
-    log "✓ Perses Datasource not found (already removed or never created)"
+    warning "datasource.yaml not found at $EXAMPLES_DIR/perses/"
 fi
 
-# Perses UI Plugin (cluster-scoped)
-if $KUBE_CMD get console.openshift.io plugin perses-plugin &>/dev/null 2>&1; then
-    log "Deleting Perses UI Plugin (cluster-scoped)..."
-    $KUBE_CMD delete -f "$EXAMPLES_DIR/perses/ui-plugin.yaml" 2>/dev/null || warning "Failed to delete UI plugin"
-    log "✓ Perses UI Plugin deleted"
+log "Deleting Perses UI Plugin..."
+if [ -f "$EXAMPLES_DIR/perses/ui-plugin.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/perses/ui-plugin.yaml" 2>/dev/null && log "✓ Perses UI Plugin deleted" || log "✓ Perses UI Plugin not found"
 else
-    log "✓ Perses UI Plugin not found (already removed or never created)"
+    warning "ui-plugin.yaml not found at $EXAMPLES_DIR/perses/"
 fi
 
 echo ""
@@ -88,20 +83,12 @@ echo ""
 step "Step 2: Removing ScrapeConfig"
 echo ""
 
-if $KUBE_CMD get scrapeconfig -n "$NAMESPACE" &>/dev/null 2>&1; then
-    SCRAPE_CONFIGS=$($KUBE_CMD get scrapeconfig -n "$NAMESPACE" -o name 2>/dev/null || echo "")
-    if [ -n "$SCRAPE_CONFIGS" ]; then
-        log "Deleting ScrapeConfigs..."
-        echo "$SCRAPE_CONFIGS" | while read -r sc; do
-            log "  Deleting $sc"
-            $KUBE_CMD delete "$sc" -n "$NAMESPACE" || warning "Failed to delete $sc"
-        done
-        log "✓ ScrapeConfigs deleted"
-    else
-        log "✓ No ScrapeConfigs found"
-    fi
+log "Deleting ScrapeConfig..."
+if [ -f "$EXAMPLES_DIR/cluster-observability-operator/scrape-config.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/cluster-observability-operator/scrape-config.yaml" 2>/dev/null && \
+        log "✓ ScrapeConfig deleted" || log "✓ ScrapeConfig not found"
 else
-    log "✓ ScrapeConfig CRD not found (Cluster Observability Operator may not be installed)"
+    warning "scrape-config.yaml not found at $EXAMPLES_DIR/cluster-observability-operator/"
 fi
 
 echo ""
@@ -112,22 +99,15 @@ echo ""
 step "Step 3: Removing MonitoringStack"
 echo ""
 
-if $KUBE_CMD get monitoringstack -n "$NAMESPACE" &>/dev/null 2>&1; then
-    STACKS=$($KUBE_CMD get monitoringstack -n "$NAMESPACE" -o name 2>/dev/null || echo "")
-    if [ -n "$STACKS" ]; then
-        log "Deleting MonitoringStack instances..."
-        echo "$STACKS" | while read -r stack; do
-            log "  Deleting $stack"
-            $KUBE_CMD delete "$stack" -n "$NAMESPACE" || warning "Failed to delete $stack"
-        done
+log "Deleting MonitoringStack..."
+if [ -f "$EXAMPLES_DIR/cluster-observability-operator/monitoring-stack.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/cluster-observability-operator/monitoring-stack.yaml" 2>/dev/null && {
+        log "✓ MonitoringStack deleted"
         log "Waiting for Prometheus pods to terminate..."
         sleep 10
-        log "✓ MonitoringStack deleted"
-    else
-        log "✓ No MonitoringStack instances found"
-    fi
+    } || log "✓ MonitoringStack not found"
 else
-    log "✓ MonitoringStack CRD not found (Cluster Observability Operator may not be installed)"
+    warning "monitoring-stack.yaml not found at $EXAMPLES_DIR/cluster-observability-operator/"
 fi
 
 echo ""
@@ -138,24 +118,24 @@ echo ""
 step "Step 4: Removing monitoring secrets"
 echo ""
 
-# TLS secret
+# TLS secret (created by install.sh via kubectl create secret)
 SECRET_NAME="sample-$NAMESPACE-prometheus-tls"
 if $KUBE_CMD get secret "$SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
     log "Deleting TLS secret: $SECRET_NAME"
-    $KUBE_CMD delete secret "$SECRET_NAME" -n "$NAMESPACE" || warning "Failed to delete secret"
-    log "✓ TLS secret deleted"
+    $KUBE_CMD delete secret "$SECRET_NAME" -n "$NAMESPACE" 2>/dev/null && \
+        log "✓ TLS secret deleted" || warning "Failed to delete TLS secret"
 else
-    log "✓ TLS secret not found (already removed or never created)"
+    log "✓ TLS secret not found"
 fi
 
-# API token secret
+# API token secret (if exists - not created by current install.sh)
 TOKEN_SECRET_NAME="$NAMESPACE-prometheus-api-token"
 if $KUBE_CMD get secret "$TOKEN_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
     log "Deleting API token secret: $TOKEN_SECRET_NAME"
-    $KUBE_CMD delete secret "$TOKEN_SECRET_NAME" -n "$NAMESPACE" || warning "Failed to delete secret"
-    log "✓ API token secret deleted"
+    $KUBE_CMD delete secret "$TOKEN_SECRET_NAME" -n "$NAMESPACE" 2>/dev/null && \
+        log "✓ API token secret deleted" || warning "Failed to delete API token secret"
 else
-    log "✓ API token secret not found (already removed or never created)"
+    log "✓ API token secret not found"
 fi
 
 echo ""
@@ -166,20 +146,20 @@ echo ""
 step "Step 5: Removing RHACS declarative configuration"
 echo ""
 
-if $KUBE_CMD get configmap stackrox-declarative-configuration -n "$NAMESPACE" &>/dev/null; then
-    log "Deleting declarative configuration ConfigMap..."
-    $KUBE_CMD delete configmap stackrox-declarative-configuration -n "$NAMESPACE" || warning "Failed to delete ConfigMap"
-    log "✓ Declarative configuration deleted"
+log "Deleting declarative configuration ConfigMap..."
+if [ -f "$EXAMPLES_DIR/rhacs/declarative-configuration-configmap.yaml" ]; then
+    $KUBE_CMD delete -f "$EXAMPLES_DIR/rhacs/declarative-configuration-configmap.yaml" 2>/dev/null && \
+        log "✓ Declarative configuration deleted" || log "✓ Declarative configuration not found"
 else
-    log "✓ Declarative configuration ConfigMap not found (already removed or never created)"
+    warning "declarative-configuration-configmap.yaml not found at $EXAMPLES_DIR/rhacs/"
 fi
 
 echo ""
 
 #================================================================
-# 6. Remove Auth Provider (optional, requires API access)
+# 6. Remove Auth Provider and Groups (requires API access)
 #================================================================
-step "Step 6: Removing User-Certificate auth provider"
+step "Step 6: Removing User-Certificate auth provider and groups"
 echo ""
 
 if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
@@ -190,12 +170,38 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
         "$ROX_CENTRAL_URL/v1/authProviders" 2>/dev/null || echo "")
     
     if echo "$AUTH_PROVIDERS" | grep -q '"name":"Monitoring"'; then
-        PROVIDER_ID=$(echo "$AUTH_PROVIDERS" | jq -r '.authProviders[] | select(.name=="Monitoring") | .id' 2>/dev/null || echo "")
+        PROVIDER_ID=$(echo "$AUTH_PROVIDERS" | jq -r '.authProviders[] | select(.name=="Monitoring") | .id' 2>/dev/null || \
+            echo "$AUTH_PROVIDERS" | grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
         
         if [ -n "$PROVIDER_ID" ]; then
             log "Found auth provider 'Monitoring' (ID: $PROVIDER_ID)"
-            log "Deleting auth provider..."
             
+            # First, delete associated groups
+            log "Searching for groups associated with this auth provider..."
+            GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+                "$ROX_CENTRAL_URL/v1/groups" 2>/dev/null || echo "")
+            
+            if echo "$GROUPS" | grep -q "$PROVIDER_ID"; then
+                log "Found associated groups, deleting..."
+                # Extract group IDs and delete them
+                GROUP_IDS=$(echo "$GROUPS" | jq -r ".groups[] | select(.props.authProviderId==\"$PROVIDER_ID\") | .props.id" 2>/dev/null || echo "")
+                if [ -n "$GROUP_IDS" ]; then
+                    echo "$GROUP_IDS" | while read -r group_id; do
+                        if [ -n "$group_id" ]; then
+                            log "  Deleting group: $group_id"
+                            curl -k -s -X DELETE \
+                                -H "Authorization: Bearer $ROX_API_TOKEN" \
+                                "$ROX_CENTRAL_URL/v1/groups/$group_id" >/dev/null 2>&1
+                        fi
+                    done
+                    log "✓ Associated groups deleted"
+                fi
+            else
+                log "✓ No associated groups found"
+            fi
+            
+            # Now delete the auth provider
+            log "Deleting auth provider..."
             DELETE_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X DELETE \
                 -H "Authorization: Bearer $ROX_API_TOKEN" \
                 "$ROX_CENTRAL_URL/v1/authProviders/$PROVIDER_ID" 2>&1)
@@ -216,9 +222,10 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
     fi
 else
     warning "ROX_CENTRAL_URL or ROX_API_TOKEN not set"
-    warning "Skipping auth provider deletion"
-    warning "You may need to delete it manually in RHACS UI:"
+    warning "Skipping auth provider and groups deletion"
+    warning "You may need to delete them manually in RHACS UI:"
     warning "  Platform Configuration → Access Control → Auth Providers → Delete 'Monitoring'"
+    warning "  Platform Configuration → Access Control → Groups → Delete groups for 'Monitoring'"
 fi
 
 echo ""
@@ -231,20 +238,31 @@ echo ""
 
 cd "$SCRIPT_DIR"
 
-if [ -f "tls.crt" ]; then
-    log "Removing tls.crt..."
-    rm -f tls.crt
-    log "✓ tls.crt removed"
-else
-    log "✓ tls.crt not found"
-fi
+# List of certificate files to remove
+CERT_FILES=(
+    "ca.crt"
+    "ca.key"
+    "ca.srl"
+    "client.crt"
+    "client.key"
+    "client.csr"
+    "tls.crt"      # Legacy files from older install script
+    "tls.key"      # Legacy files from older install script
+)
 
-if [ -f "tls.key" ]; then
-    log "Removing tls.key..."
-    rm -f tls.key
-    log "✓ tls.key removed"
+FILES_REMOVED=0
+for cert_file in "${CERT_FILES[@]}"; do
+    if [ -f "$cert_file" ]; then
+        log "Removing $cert_file..."
+        rm -f "$cert_file"
+        FILES_REMOVED=$((FILES_REMOVED + 1))
+    fi
+done
+
+if [ $FILES_REMOVED -gt 0 ]; then
+    log "✓ $FILES_REMOVED certificate file(s) removed"
 else
-    log "✓ tls.key not found"
+    log "✓ No certificate files found"
 fi
 
 echo ""
@@ -273,12 +291,13 @@ echo ""
 step "Cleanup Complete!"
 echo "=========================================="
 echo ""
-echo "✓ Perses resources removed"
+echo "✓ Perses resources removed (dashboard, datasource, UI plugin)"
 echo "✓ ScrapeConfig removed"
 echo "✓ MonitoringStack removed"
-echo "✓ Secrets removed"
+echo "✓ Secrets removed (TLS, API tokens)"
 echo "✓ Declarative configuration removed"
-echo "✓ Local certificate files removed"
+echo "✓ Auth provider and groups removed (if ROX_API_TOKEN was set)"
+echo "✓ Local certificate files removed (CA and client certs)"
 echo ""
 echo "⚠️  Cluster Observability Operator still installed (see above to remove)"
 echo ""

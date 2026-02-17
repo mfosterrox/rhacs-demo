@@ -136,33 +136,109 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
   echo "✓ Auth provider created with ID: $AUTH_PROVIDER_ID"
   
   echo "Assigning Admin role to Monitoring auth provider..."
-  curl -k -X POST "$ROX_CENTRAL_URL/v1/groups" \
+  GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/groups" \
     -H "Authorization: Bearer $ROX_API_TOKEN" \
     -H "Content-Type: application/json" \
-    --data-raw "$(envsubst < monitoring-examples/rhacs/admin-group.json.tpl)"
+    --data-raw "$(envsubst < monitoring-examples/rhacs/admin-group.json.tpl)")
   
-  echo "✓ Admin role assigned to Monitoring auth provider"
+  HTTP_CODE=$(echo "$GROUP_RESPONSE" | tail -1)
+  RESPONSE_BODY=$(echo "$GROUP_RESPONSE" | head -n -1)
+  
+  # Check if group was created successfully
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE_BODY" | grep -q '"props"'; then
+    echo "✓ Admin role assigned to Monitoring auth provider (HTTP $HTTP_CODE)"
+    echo ""
+    echo "Note: Auth changes may take 10-30 seconds to propagate"
+  elif [ "$HTTP_CODE" = "409" ]; then
+    echo "✓ Group already exists for Monitoring auth provider"
+  else
+    echo "⚠ Warning: Group creation failed (HTTP $HTTP_CODE)"
+    echo "Response: $RESPONSE_BODY"
+    echo ""
+    echo "You can create the group manually:"
+    echo ""
+    echo "Option 1 - Via RHACS UI:"
+    echo "  Platform Configuration → Access Control → Groups → Create Group"
+    echo "  - Auth Provider: Monitoring"
+    echo "  - Key: (leave empty)"
+    echo "  - Value: (leave empty)"
+    echo "  - Role: Admin"
+    echo ""
+    echo "Option 2 - Via API:"
+    echo "  curl -k -X POST \"\$ROX_CENTRAL_URL/v1/groups\" \\"
+    echo "    -H \"Authorization: Bearer \$ROX_API_TOKEN\" \\"
+    echo "    -H \"Content-Type: application/json\" \\"
+    echo "    -d '{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Admin\"}'"
+    echo ""
+    echo "Option 3 - Run troubleshooting script:"
+    echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
+  fi
 else
   echo "⚠ Warning: Could not extract auth provider ID. You may need to manually configure the role via ACS UI or /v1/groups API."
 fi
 
 echo ""
 echo "============================================"
-echo "Installation complete!"
+echo "Verifying Configuration"
+echo "============================================"
+echo ""
+
+# Give auth system time to propagate changes
+echo "Waiting for auth configuration to propagate (10 seconds)..."
+sleep 10
+
+# Verify the group was created
+echo "Checking groups for auth provider..."
+GROUPS_LIST=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups" | grep -A5 "$AUTH_PROVIDER_ID" || echo "")
+
+if [ -n "$GROUPS_LIST" ]; then
+  echo "✓ Group mapping found for Monitoring auth provider"
+  
+  # Test client certificate authentication
+  echo ""
+  echo "Testing client certificate authentication..."
+  AUTH_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_URL/v1/auth/status" 2>&1)
+  
+  if echo "$AUTH_TEST" | grep -q '"userId"'; then
+    echo "✓ Client certificate authentication successful!"
+  elif echo "$AUTH_TEST" | grep -q "credentials not found"; then
+    echo "⚠ Authentication failed: credentials not found"
+    echo ""
+    echo "This may take 10-30 seconds to propagate. Wait a moment and try:"
+    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
+    echo ""
+    echo "If it continues to fail, run the troubleshooting script:"
+    echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
+  else
+    echo "⚠ Unexpected response: $AUTH_TEST"
+  fi
+else
+  echo "⚠ No group mapping found - authentication will fail!"
+  echo ""
+  echo "Run the troubleshooting script to diagnose and fix:"
+  echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
+fi
+
+echo ""
+echo "============================================"
+echo "Installation Complete!"
 echo "============================================"
 echo ""
 echo "Certificates created in: $SCRIPT_DIR/"
 echo "  - ca.crt / ca.key          (CA certificate - configured in auth provider)"
 echo "  - client.crt / client.key  (Client certificate - use for API calls)"
 echo ""
-echo "Test the authentication with:"
+echo "Test authentication:"
 echo "  cd $SCRIPT_DIR"
 echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
 echo ""
-echo "Note: The auth provider was configured with the CA certificate (ca.crt),"
-echo "      and clients authenticate using certificates signed by that CA (client.crt)."
+echo "If authentication fails with 'credentials not found', run:"
+echo "  ./troubleshoot-auth.sh"
 echo ""
-echo "For roxctl commands, strip https:// from ROX_CENTRAL_URL:"
+echo "Verify configuration with roxctl:"
 echo "  ROX_ENDPOINT=\${ROX_CENTRAL_URL#https://}"
-echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central userpki list"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central userpki list --insecure-skip-tls-verify"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central group list --insecure-skip-tls-verify"
+echo ""
+echo "Note: Auth changes may take 10-30 seconds to propagate."
 echo ""

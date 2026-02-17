@@ -297,6 +297,51 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 
 ## Troubleshooting
 
+### Issue: Client certificate authentication fails with "credentials not found"
+
+**Symptoms:** `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/v1/auth/status` returns `{"code":16, "message":"credentials not found"}`
+
+**Root cause:** The group mapping (role assignment) for the auth provider wasn't created or hasn't propagated yet.
+
+**Solution:**
+
+1. **Run the troubleshooting script:**
+   ```bash
+   cd monitoring-setup
+   ./troubleshoot-auth.sh
+   ```
+   
+   This script will:
+   - Verify the auth provider is configured
+   - Check if group mappings exist
+   - Automatically create missing group mappings
+   - Test client certificate authentication
+   - Provide specific guidance based on the issue found
+
+2. **Wait for propagation:** Auth changes can take 10-30 seconds to propagate. Wait a moment and test again.
+
+3. **Manual fix via UI:**
+   - Go to RHACS UI: **Platform Configuration** → **Access Control** → **Groups**
+   - Create a new group:
+     - **Auth Provider**: Monitoring
+     - **Key**: (leave empty)
+     - **Value**: (leave empty)
+     - **Role**: Admin
+
+4. **Manual fix via API:**
+   ```bash
+   # Get the auth provider ID
+   AUTH_PROVIDER_ID=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+     "$ROX_CENTRAL_URL/v1/authProviders" | \
+     grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
+   
+   # Create the group
+   curl -k -X POST "$ROX_CENTRAL_URL/v1/groups" \
+     -H "Authorization: Bearer $ROX_API_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d "{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Admin\"}"
+   ```
+
 ### Issue: Prometheus can't scrape RHACS metrics
 
 **Symptoms:** No metrics appearing in Prometheus
