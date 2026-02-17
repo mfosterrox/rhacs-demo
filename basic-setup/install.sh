@@ -60,10 +60,23 @@ install_roxctl() {
     print_step "Installing roxctl CLI"
     echo "================================================================"
     
+    # Check if roxctl is already installed and working
     if command -v roxctl >/dev/null 2>&1; then
-        local version=$(roxctl version 2>/dev/null | grep "roxctl version" || echo "unknown")
-        print_info "✓ roxctl already installed: ${version}"
-        return 0
+        # Test if it actually works (not a corrupted file)
+        if roxctl version >/dev/null 2>&1; then
+            local version=$(roxctl version 2>/dev/null | grep "roxctl version" || echo "installed")
+            print_info "✓ roxctl already installed and working: ${version}"
+            return 0
+        else
+            print_warn "roxctl exists but appears corrupted, reinstalling..."
+            # Remove corrupted version
+            local roxctl_path=$(which roxctl)
+            if [ -w "${roxctl_path}" ]; then
+                rm -f "${roxctl_path}"
+            elif [ -f ~/.local/bin/roxctl ]; then
+                rm -f ~/.local/bin/roxctl
+            fi
+        fi
     fi
     
     print_info "Downloading roxctl..."
@@ -78,43 +91,89 @@ install_roxctl() {
         *) print_error "Unsupported architecture: ${arch}"; exit 1 ;;
     esac
     
-    # Get Central URL to download roxctl
-    local central_route=$(oc get route central -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    if [ -z "${central_route}" ]; then
-        print_error "Could not get Central route - is RHACS installed?"
+    # Download to temporary location
+    local temp_dir=$(mktemp -d)
+    local download_success=false
+    
+    # Method 1: Try downloading from Red Hat mirror (more reliable)
+    print_info "Attempting download from Red Hat mirror..."
+    local mirror_url="https://mirror.openshift.com/pub/rhacs/assets/latest/bin/Linux/roxctl"
+    if curl -L -f -s -o "${temp_dir}/roxctl" "${mirror_url}" 2>/dev/null; then
+        # Verify it's actually a binary (check file signature)
+        if file "${temp_dir}/roxctl" | grep -q "executable"; then
+            print_info "✓ Successfully downloaded from Red Hat mirror"
+            download_success=true
+        else
+            print_warn "Downloaded file from mirror is not a valid executable"
+            rm -f "${temp_dir}/roxctl"
+        fi
+    else
+        print_warn "Failed to download from Red Hat mirror"
+    fi
+    
+    # Method 2: Try downloading from Central route (if method 1 failed)
+    if [ "$download_success" = false ]; then
+        print_info "Attempting download from RHACS Central..."
+        local central_route=$(oc get route central -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -n "${central_route}" ]; then
+            local roxctl_url="https://${central_route}/api/cli/download/roxctl-${os}"
+            print_info "Downloading from: ${roxctl_url}"
+            
+            if curl -k -f -s -o "${temp_dir}/roxctl" "${roxctl_url}" 2>/dev/null; then
+                # Verify it's actually a binary
+                if file "${temp_dir}/roxctl" | grep -q "executable"; then
+                    print_info "✓ Successfully downloaded from RHACS Central"
+                    download_success=true
+                else
+                    print_warn "Downloaded file from Central is not a valid executable"
+                    rm -f "${temp_dir}/roxctl"
+                fi
+            else
+                print_warn "Failed to download from RHACS Central"
+            fi
+        fi
+    fi
+    
+    # Check if download was successful
+    if [ "$download_success" = false ]; then
+        print_error "Failed to download roxctl from all sources"
+        rm -rf "${temp_dir}"
+        print_error "Please install roxctl manually:"
+        print_error "  curl -L -o /tmp/roxctl https://mirror.openshift.com/pub/rhacs/assets/latest/bin/Linux/roxctl"
+        print_error "  chmod +x /tmp/roxctl"
+        print_error "  sudo mv /tmp/roxctl /usr/local/bin/roxctl"
         exit 1
     fi
     
-    local roxctl_url="https://${central_route}/api/cli/download/roxctl-${os}"
-    print_info "Downloading from: ${roxctl_url}"
+    # Make executable
+    chmod +x "${temp_dir}/roxctl"
     
-    # Download to temporary location
-    local temp_dir=$(mktemp -d)
-    if curl -k -s -o "${temp_dir}/roxctl" "${roxctl_url}"; then
-        chmod +x "${temp_dir}/roxctl"
+    # Test the binary before installing
+    if ! "${temp_dir}/roxctl" version >/dev/null 2>&1; then
+        print_error "Downloaded roxctl binary is not working correctly"
+        rm -rf "${temp_dir}"
+        exit 1
+    fi
+    
+    # Move to /usr/local/bin or ~/.local/bin
+    if [ -w "/usr/local/bin" ]; then
+        mv "${temp_dir}/roxctl" /usr/local/bin/roxctl
+        print_info "✓ roxctl installed to /usr/local/bin/roxctl"
+    else
+        mkdir -p ~/.local/bin
+        mv "${temp_dir}/roxctl" ~/.local/bin/roxctl
+        print_info "✓ roxctl installed to ~/.local/bin/roxctl"
         
-        # Move to /usr/local/bin or ~/.local/bin
-        if [ -w "/usr/local/bin" ]; then
-            mv "${temp_dir}/roxctl" /usr/local/bin/roxctl
-            print_info "✓ roxctl installed to /usr/local/bin/roxctl"
-        else
-            mkdir -p ~/.local/bin
-            mv "${temp_dir}/roxctl" ~/.local/bin/roxctl
-            print_info "✓ roxctl installed to ~/.local/bin/roxctl"
-            
-            # Add to PATH if not already there
-            if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-                print_info "Adding ~/.local/bin to PATH in ~/.bashrc"
+        # Add to PATH if not already there
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+            print_info "Adding ~/.local/bin to PATH in ~/.bashrc"
+            if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null; then
                 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
             fi
         fi
-        
-        rm -rf "${temp_dir}"
-    else
-        print_error "Failed to download roxctl"
-        rm -rf "${temp_dir}"
-        exit 1
     fi
+    
+    rm -rf "${temp_dir}"
     
     # Verify installation
     if command -v roxctl >/dev/null 2>&1; then
