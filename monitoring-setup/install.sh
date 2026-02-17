@@ -309,26 +309,66 @@ create_userpki_auth_provider() {
     fi
     
     # Check if roxctl is available
-    if ! command -v roxctl &>/dev/null; then
-        log "roxctl not found, checking if it needs to be installed..."
-        if command -v curl &>/dev/null; then
-            log "Downloading roxctl..."
-            curl -L -f -o /tmp/roxctl "https://mirror.openshift.com/pub/rhacs/assets/latest/bin/Linux/roxctl" 2>/dev/null || {
-                warning "Failed to download roxctl. Skipping auth provider creation."
-                return 0
-            }
-            if [ -f /tmp/roxctl ]; then
-                chmod +x /tmp/roxctl
-                ROXCTL_CMD="/tmp/roxctl"
-                log "✓ roxctl downloaded to /tmp/roxctl"
-            fi
-        else
-            warning "curl not found. Cannot download roxctl. Skipping auth provider creation."
-            return 0
-        fi
-    else
+    if command -v roxctl &>/dev/null; then
         ROXCTL_CMD="roxctl"
         log "✓ roxctl found in PATH"
+    else
+        # roxctl not in PATH, try to install it permanently
+        log "roxctl not found, attempting to install permanently..."
+        
+        # Detect OS and architecture
+        local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        local arch=$(uname -m)
+        
+        case "${arch}" in
+            x86_64) arch="amd64" ;;
+            aarch64|arm64) arch="arm64" ;;
+        esac
+        
+        # Get Central URL to download roxctl
+        local central_route=$($KUBE_CMD get route central -n ${NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -z "${central_route}" ]; then
+            warning "Could not get Central route. Cannot install roxctl."
+            warning "Skipping UserPKI auth provider creation."
+            return 0
+        fi
+        
+        local roxctl_url="https://${central_route}/api/cli/download/roxctl-${os}"
+        log "Downloading roxctl from: ${roxctl_url}"
+        
+        # Try to install to /usr/local/bin first, then ~/.local/bin
+        if [ -w "/usr/local/bin" ]; then
+            if curl -k -s -o "/usr/local/bin/roxctl" "${roxctl_url}"; then
+                chmod +x /usr/local/bin/roxctl
+                ROXCTL_CMD="roxctl"
+                log "✓ roxctl installed to /usr/local/bin/roxctl"
+            fi
+        else
+            # Install to ~/.local/bin
+            mkdir -p ~/.local/bin
+            if curl -k -s -o ~/.local/bin/roxctl "${roxctl_url}"; then
+                chmod +x ~/.local/bin/roxctl
+                
+                # Add to PATH if not already there
+                if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                    export PATH="$HOME/.local/bin:$PATH"
+                    if [ -f ~/.bashrc ] && ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
+                        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+                        log "Added ~/.local/bin to PATH in ~/.bashrc"
+                    fi
+                fi
+                
+                ROXCTL_CMD="roxctl"
+                log "✓ roxctl installed to ~/.local/bin/roxctl"
+            fi
+        fi
+        
+        # Verify installation
+        if ! command -v roxctl &>/dev/null; then
+            warning "Failed to install roxctl. Skipping auth provider creation."
+            warning "You may need to run: source ~/.bashrc"
+            return 0
+        fi
     fi
     
     if [ -n "${ROXCTL_CMD:-}" ]; then

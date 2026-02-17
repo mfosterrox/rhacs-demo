@@ -26,13 +26,14 @@ The script will automatically handle everything!
 
 ### 3. **API Token Management**
 - Checks if `ROX_API_TOKEN` exists in environment or `~/.bashrc`
-- If not found, **automatically generates** an API token using admin credentials
+- If not **found, **automatically generates** an API token using admin credent**ials
 - **Stores `ROX_API_TOKEN` in `~/.bashrc` for future use**
 - Creates Kubernetes secret for Prometheus to use
 
 ### 4. **TLS Certificate Generation**
 - Generates TLS certificates for Prometheus authentication
 - Creates Kubernetes secret with certificates
+- **Automatically installs `roxctl` permanently** to `/usr/local/bin` or `~/.local/bin`
 - **Automatically creates UserPKI auth provider in RHACS** using `roxctl`
 - Configures the auth provider with Admin role for metrics access
 
@@ -76,12 +77,12 @@ export ROX_CENTRAL_URL='https://central-stackrox.apps.your-cluster.com'
 export ROX_API_TOKEN='eyJh...<your-token>...'
 ```
 
-To use them in a new shell session:
+ßTo use them in a new shell session:
 
 ```bash
 source ~/.bashrc
 ```
-
+ß
 ## Namespace Configuration
 
 The script uses the **`stackrox`** namespace by default. To use a different namespace:
@@ -92,6 +93,9 @@ export NAMESPACE='your-namespace'
 ```
 
 ## What Gets Installed
+
+### System-Level:
+- ✅ `roxctl` CLI permanently installed to `/usr/local/bin` or `~/.local/bin`
 
 ### In `stackrox` Namespace:
 - ✅ TLS secret for Prometheus authentication
