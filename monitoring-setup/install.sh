@@ -19,7 +19,7 @@ cd "$SCRIPT_DIR"
 #
 # Usage:
 #   ROX_ENDPOINT=$(get_rox_endpoint)
-#   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki create ...
+#   roxctl -e "$ROX_ENDPOINT" central userpki create ...
 #
 # Example:
 #   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
@@ -237,8 +237,8 @@ echo "  ./troubleshoot-auth.sh"
 echo ""
 echo "Verify configuration with roxctl:"
 echo "  ROX_ENDPOINT=\${ROX_CENTRAL_URL#https://}"
-echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central userpki list --insecure-skip-tls-verify"
-echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central group list --insecure-skip-tls-verify"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" central userpki list --insecure-skip-tls-verify"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" central group list --insecure-skip-tls-verify"
 echo ""
 echo "Note: Auth changes may take 10-30 seconds to propagate."
 echo ""

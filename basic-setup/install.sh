@@ -62,7 +62,7 @@ print_step() {
 #
 # Usage:
 #   ROX_ENDPOINT=$(get_rox_endpoint)
-#   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki create ...
+#   roxctl -e "$ROX_ENDPOINT" central userpki create ...
 #
 # Example:
 #   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"

@@ -44,7 +44,7 @@ fi
 
 echo "1. Checking auth provider..."
 ROX_ENDPOINT="${ROX_CENTRAL_URL#https://}"
-AUTH_PROVIDERS=$(roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki list --insecure-skip-tls-verify 2>&1 || echo "")
+AUTH_PROVIDERS=$(roxctl -e "$ROX_ENDPOINT" central userpki list --insecure-skip-tls-verify 2>&1 || echo "")
 
 if echo "$AUTH_PROVIDERS" | grep -q "Monitoring"; then
   log "✓ Auth provider 'Monitoring' found"
