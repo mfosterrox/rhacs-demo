@@ -459,6 +459,40 @@ create_userpki_auth_provider() {
             error "Certificate file 'tls.crt' not found. Cannot create UserPKI auth provider."
         fi
         
+        # Verify environment variables are set
+        log "Verifying roxctl configuration..."
+        log "  ROX_ENDPOINT: $ROX_ENDPOINT_NORMALIZED"
+        log "  ROX_API_TOKEN: ${ROX_API_TOKEN:+<set>}"
+        log "  Certificate: tls.crt"
+        log "  roxctl command: $ROXCTL_CMD"
+        
+        # Test roxctl connectivity first
+        log "Testing roxctl connectivity to RHACS..."
+        set +e
+        trap '' ERR
+        WHOAMI_OUTPUT=$(ROX_API_TOKEN="$ROX_API_TOKEN" $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
+            central whoami --insecure-skip-tls-verify 2>&1)
+        WHOAMI_EXIT_CODE=$?
+        trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
+        set -e
+        
+        if [ $WHOAMI_EXIT_CODE -eq 0 ]; then
+            log "✓ roxctl can connect to RHACS Central"
+            log "  Authenticated as: $(echo "$WHOAMI_OUTPUT" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 || echo 'unknown')"
+        else
+            warning "roxctl cannot connect to RHACS Central"
+            log "Error output: $WHOAMI_OUTPUT"
+            warning "Skipping UserPKI auth provider creation."
+            warning ""
+            warning "To create manually, run:"
+            warning "  export ROX_API_TOKEN='$ROX_API_TOKEN'"
+            warning "  roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki create Prometheus \\"
+            warning "    -c tls.crt -r Admin --insecure-skip-tls-verify"
+            return 0
+        fi
+        
+        # Now try to create the auth provider
+        log "Creating UserPKI auth provider..."
         set +e
         trap '' ERR
         AUTH_PROVIDER_OUTPUT=$(ROX_API_TOKEN="$ROX_API_TOKEN" $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
@@ -475,7 +509,27 @@ create_userpki_auth_provider() {
         elif echo "$AUTH_PROVIDER_OUTPUT" | grep -qi "already exists"; then
             log "✓ UserPKI auth provider 'Prometheus' already exists"
         else
-            warning "Failed to create UserPKI auth provider. You may need to create it manually."
+            warning "Failed to create UserPKI auth provider."
+            log "Exit code: $AUTH_PROVIDER_EXIT_CODE"
+            log "Output: $AUTH_PROVIDER_OUTPUT"
+            warning ""
+            warning "This is optional - API token authentication is working."
+            warning "To create the auth provider manually:"
+            warning ""
+            warning "1. Via roxctl command line:"
+            warning "   export ROX_API_TOKEN='$ROX_API_TOKEN'"
+            warning "   roxctl -e $ROX_ENDPOINT_NORMALIZED central userpki create Prometheus \\"
+            warning "     -c tls.crt -r Admin --insecure-skip-tls-verify"
+            warning ""
+            warning "2. Via RHACS UI:"
+            warning "   - Login to: $ROX_CENTRAL_URL"
+            warning "   - Go to: Platform Configuration → Access Control → Auth Providers"
+            warning "   - Click 'Create auth provider'"
+            warning "   - Type: User Certificates"
+            warning "   - Name: Prometheus"
+            warning "   - Upload: tls.crt"
+            warning "   - Save and enable"
+            warning ""
         fi
     fi
 }
