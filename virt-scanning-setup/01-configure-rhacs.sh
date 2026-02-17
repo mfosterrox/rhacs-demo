@@ -1,7 +1,13 @@
 #!/bin/bash
 
-# Script: virt-scanning/install.sh
+# Script: 01-configure-rhacs.sh
 # Description: Configure RHACS for virtual machine vulnerability management
+#
+# This script implements the official RHACS VM scanning requirements:
+# 1. Sets ROX_VIRTUAL_MACHINES=true on Central, Sensor, and Collector
+# 2. Verifies OpenShift Virtualization operator is installed
+# 3. Enables VSOCK support via HyperConverged resource
+# 4. Provides VM configuration instructions
 
 set -euo pipefail
 
@@ -112,26 +118,11 @@ patch_collector_daemonset() {
     # Patch the daemonset - target the compliance container specifically
     oc set env daemonset/collector -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true -c compliance
     
-    # CRITICAL: Enable hostNetwork for VSOCK access AND proper DNS policy
-    print_info "Enabling hostNetwork and ClusterFirstWithHostNet DNS policy for VSOCK..."
-    oc patch daemonset collector -n ${RHACS_NAMESPACE} --type='json' -p='[
-      {
-        "op": "replace",
-        "path": "/spec/template/spec/hostNetwork",
-        "value": true
-      },
-      {
-        "op": "add",
-        "path": "/spec/template/spec/dnsPolicy",
-        "value": "ClusterFirstWithHostNet"
-      }
-    ]'
-    
     # Wait for rollout
-    print_info "Waiting for Collector to restart with new network configuration..."
+    print_info "Waiting for Collector to restart..."
     oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
     
-    print_info "✓ Collector daemonset patched successfully with hostNetwork and DNS policy"
+    print_info "✓ Collector daemonset patched successfully"
 }
 
 #================================================================
@@ -198,153 +189,10 @@ patch_hyperconverged_vsock() {
 }
 
 #================================================================
-# Check and fix sensor networking for hostNetwork pods
-#================================================================
-configure_sensor_networking() {
-    print_step "5. Configuring Sensor networking for hostNetwork access"
-    
-    print_info "When collector uses hostNetwork=true, it may not reach ClusterIP services"
-    print_info "Checking sensor reachability from host network..."
-    
-    # Get sensor service IP
-    local sensor_svc_ip=$(oc get svc sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
-    
-    if [ -z "${sensor_svc_ip}" ]; then
-        print_error "Cannot find sensor service"
-        return 1
-    fi
-    
-    print_info "Sensor service ClusterIP: ${sensor_svc_ip}"
-    
-    # Check if sensor already has a hostPort configured
-    local host_port=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].ports[?(@.name=="api")].hostPort}' 2>/dev/null || echo "")
-    
-    if [ -n "${host_port}" ]; then
-        print_info "✓ Sensor already configured with hostPort: ${host_port}"
-        return 0
-    fi
-    
-    print_info "Configuring sensor with hostPort for host network access..."
-    
-    # Patch sensor deployment to add hostPort
-    oc patch deployment sensor -n ${RHACS_NAMESPACE} --type='json' -p='[
-      {
-        "op": "add",
-        "path": "/spec/template/spec/containers/0/ports/0/hostPort",
-        "value": 8443
-      }
-    ]'
-    
-    # Wait for rollout with better error handling
-    print_info "Waiting for Sensor to restart with hostPort..."
-    
-    if oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=3m 2>/dev/null; then
-        print_info "✓ Sensor rollout completed"
-    else
-        print_warn "Sensor rollout timed out or had issues, checking status..."
-        
-        # Check if sensor is actually running
-        local available=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "0")
-        local ready=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-        
-        if [ "${available}" -gt 0 ] && [ "${ready}" -gt 0 ]; then
-            print_info "✓ Sensor has ${available} available replicas, continuing..."
-        else
-            print_error "Sensor rollout failed - no available replicas"
-            print_info "Check sensor status: oc get deployment sensor -n ${RHACS_NAMESPACE}"
-            print_info "Check sensor pods: oc get pods -n ${RHACS_NAMESPACE} -l app=sensor"
-            return 1
-        fi
-    fi
-    
-    print_info "✓ Sensor configured with hostPort 8443"
-    
-    # Update collector to use localhost:8443
-    print_info "Updating collector to use sensor via hostPort..."
-    
-    # Update GRPC_SERVER and ROX_ADVERTISED_ENDPOINT to use localhost
-    oc set env daemonset/collector -n ${RHACS_NAMESPACE} \
-        GRPC_SERVER=localhost:8443 \
-        SNI_HOSTNAME=sensor.stackrox.svc \
-        ROX_ADVERTISED_ENDPOINT=localhost:8443 \
-        -c compliance
-    
-    # Wait for collector rollout with better error handling
-    print_info "Waiting for Collector to restart with new sensor endpoint..."
-    
-    if oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=3m 2>/dev/null; then
-        print_info "✓ Collector rollout completed"
-    else
-        print_warn "Collector rollout timed out, checking pod status..."
-        
-        # Check collector pod status
-        local total_nodes=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "0")
-        local ready_pods=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
-        local available=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.status.numberAvailable}' 2>/dev/null || echo "0")
-        
-        print_info "Collector status: ${ready_pods}/${total_nodes} ready, ${available} available"
-        
-        # Check for CrashLoopBackOff pods
-        local crash_pods=$(oc get pods -n ${RHACS_NAMESPACE} -l app=collector --field-selector=status.phase!=Running --no-headers 2>/dev/null | wc -l)
-        
-        if [ "${available}" -gt 0 ]; then
-            print_info "✓ At least ${available} collector pods are available, continuing..."
-            if [ "${crash_pods}" -gt 0 ]; then
-                print_warn "⚠ ${crash_pods} collector pod(s) may be experiencing issues"
-                print_info "  This is often normal during rollout - they should stabilize"
-                print_info "  Check with: oc get pods -n ${RHACS_NAMESPACE} -l app=collector"
-            fi
-        else
-            print_warn "No collector pods are available yet"
-            print_info "  Collector pods may take a few minutes to stabilize"
-            print_info "  Check status: oc get pods -n ${RHACS_NAMESPACE} -l app=collector"
-        fi
-    fi
-    
-    print_info "✓ Collector updated to reach sensor via localhost:8443"
-}
-
-#================================================================
-# Verify sensor connectivity from hostNetwork
-#================================================================
-verify_sensor_connectivity() {
-    print_step "6. Verifying collector → sensor connectivity"
-    
-    print_info "Waiting 30 seconds for pods to stabilize..."
-    sleep 30
-    
-    # Find a collector pod
-    local collector_pod=$(oc get pods -n ${RHACS_NAMESPACE} -l app=collector -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
-    if [ -z "${collector_pod}" ]; then
-        print_warn "⚠ No collector pod found to test connectivity"
-        return 0
-    fi
-    
-    print_info "Testing from collector pod: ${collector_pod}"
-    
-    # Check compliance container logs for connection errors
-    print_info "Checking for VSOCK relay connections..."
-    
-    if oc logs ${collector_pod} -n ${RHACS_NAMESPACE} -c compliance --tail=50 2>/dev/null | grep -q "Handling vsock connection"; then
-        print_info "✓ VSOCK connections detected"
-        
-        if oc logs ${collector_pod} -n ${RHACS_NAMESPACE} -c compliance --tail=100 2>/dev/null | grep -q "i/o timeout\|connection refused\|connection error"; then
-            print_warn "⚠ Connection errors detected in collector logs"
-            print_info "  This may resolve after sensor hostPort configuration"
-        else
-            print_info "✓ No connection errors detected"
-        fi
-    else
-        print_info "  No VSOCK connections yet (VMs may not be deployed)"
-    fi
-}
-
-#================================================================
 # Display VM configuration instructions
 #================================================================
 display_vm_instructions() {
-    print_step "7. Virtual Machine Configuration"
+    print_step "5. Virtual Machine Configuration"
     echo ""
     
     print_info "To enable vulnerability scanning on VMs, update each VM spec:"
@@ -434,14 +282,6 @@ main() {
     patch_hyperconverged_vsock
     echo ""
     
-    # Configure sensor networking for hostNetwork access
-    configure_sensor_networking
-    echo ""
-    
-    # Verify connectivity
-    verify_sensor_connectivity
-    echo ""
-    
     # Display VM configuration instructions
     display_vm_instructions
     
@@ -449,19 +289,17 @@ main() {
     print_info "VM Vulnerability Management Setup Complete"
     print_info "=========================================="
     echo ""
-    print_info "Feature flags configured:"
+    print_info "Configuration completed:"
     print_info "  ✓ Central: ROX_VIRTUAL_MACHINES=true"
     print_info "  ✓ Sensor: ROX_VIRTUAL_MACHINES=true"
-    print_info "  ✓ Collector: ROX_VIRTUAL_MACHINES=true"
+    print_info "  ✓ Collector compliance container: ROX_VIRTUAL_MACHINES=true"
     print_info "  ✓ HyperConverged: vsock support enabled"
-    print_info "  ✓ Sensor: hostPort configured for host network access"
-    print_info "  ✓ Collector: configured to reach sensor via localhost"
     echo ""
     print_info "Next steps:"
     print_info "  1. Configure VMs with vsock support (see instructions above)"
     print_info "  2. Ensure VMs are running RHEL with valid subscriptions"
-    print_info "  3. Verify VM network access"
-    print_info "  4. Run: ./01-check-env.sh to verify configuration"
+    print_info "  3. Verify VM network access for CPE mappings"
+    print_info "  4. Deploy or restart VMs to apply vsock configuration"
     echo ""
 }
 

@@ -173,59 +173,6 @@ check_feature_flags() {
 }
 
 #================================================================
-# Check collector networking configuration
-#================================================================
-check_collector_networking() {
-    print_step "Checking collector networking configuration"
-    
-    # Check hostNetwork
-    local host_network=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.hostNetwork}' 2>/dev/null || echo "false")
-    if [ "${host_network}" = "true" ]; then
-        print_pass "Collector hostNetwork: true"
-    else
-        print_fail "Collector hostNetwork: ${host_network} (should be true for VSOCK)"
-        FAILED_CHECKS=$((FAILED_CHECKS + 1))
-    fi
-    
-    # Check DNS policy
-    local dns_policy=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.dnsPolicy}' 2>/dev/null || echo "")
-    if [ "${dns_policy}" = "ClusterFirstWithHostNet" ]; then
-        print_pass "Collector dnsPolicy: ClusterFirstWithHostNet"
-    else
-        print_fail "Collector dnsPolicy: ${dns_policy} (should be ClusterFirstWithHostNet)"
-        FAILED_CHECKS=$((FAILED_CHECKS + 1))
-    fi
-}
-
-#================================================================
-# Check sensor hostPort configuration
-#================================================================
-check_sensor_hostport() {
-    print_step "Checking sensor hostPort configuration"
-    
-    local host_port=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].ports[?(@.name=="api")].hostPort}' 2>/dev/null || echo "")
-    
-    if [ -n "${host_port}" ]; then
-        print_pass "Sensor hostPort configured: ${host_port}"
-    else
-        print_warn "Sensor hostPort not configured (may cause connectivity issues)"
-        print_info "  Run ./01-configure-rhacs.sh to fix this"
-    fi
-    
-    # Check collector sensor endpoint configuration
-    local grpc_server=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="GRPC_SERVER")].value}' 2>/dev/null || echo "")
-    local host_network=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.hostNetwork}' 2>/dev/null || echo "false")
-    
-    if [[ "${grpc_server}" == localhost:* ]]; then
-        print_pass "Collector configured to use sensor via localhost: ${grpc_server}"
-    elif [ "${host_network}" = "true" ] && [[ "${grpc_server}" != localhost:* ]]; then
-        print_warn "Collector uses hostNetwork but GRPC_SERVER is not localhost"
-        print_info "  Current: ${grpc_server}"
-        print_info "  This may cause connectivity issues. Run ./01-configure-rhacs.sh to fix"
-    fi
-}
-
-#================================================================
 # Check collector logs for connectivity issues
 #================================================================
 check_collector_logs() {
@@ -297,12 +244,6 @@ main() {
     echo ""
     
     check_feature_flags
-    echo ""
-    
-    check_collector_networking
-    echo ""
-    
-    check_sensor_hostport
     echo ""
     
     check_collector_logs

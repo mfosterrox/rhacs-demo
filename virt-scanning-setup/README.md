@@ -63,21 +63,26 @@ The script will:
 Run the sub-scripts individually:
 
 ```bash
-cd virt-scanning
+cd virt-scanning-setup
 
 # 1. Configure RHACS and enable VSOCK
 ./01-configure-rhacs.sh
 
-# 2. Deploy base VM with roxagent (optional)
-./02-deploy-base-vm.sh
+# 2. Deploy 4 sample VMs
+./02-deploy-sample-vms.sh
 
-# 3. Deploy 4 sample VMs with different packages (optional)
-./03-deploy-sample-vms.sh
+# 3. Register subscriptions and install packages
+./03-configure-vm-subscriptions.sh --username USER --password PASS
+# OR with activation key
+./03-configure-vm-subscriptions.sh --org ORG --activation-key KEY
+
+# 4. Verify environment (optional)
+./verify-env.sh
 ```
 
 ### Sample VMs for Demonstration
 
-The `04-deploy-sample-vms.sh` script deploys 4 VMs with different DNF packages installed:
+The `02-deploy-sample-vms.sh` script deploys 4 VMs, and the `03-configure-vm-subscriptions.sh` script registers them and installs packages:
 
 - **webserver**: Apache (httpd), Nginx, PHP - web server vulnerabilities
 - **database**: PostgreSQL, MariaDB - database server packages  
@@ -88,26 +93,41 @@ Each VM automatically installs packages via DNF and runs roxagent for vulnerabil
 
 ## What Gets Configured
 
-### Platform (install.sh)
+### RHACS Configuration (01-configure-rhacs.sh)
 - Central: `ROX_VIRTUAL_MACHINES=true`
 - Sensor: `ROX_VIRTUAL_MACHINES=true`
 - Collector compliance container: `ROX_VIRTUAL_MACHINES=true`
 - HyperConverged: VSOCK feature gate enabled
-- Collector: `hostNetwork=true`, `dnsPolicy=ClusterFirstWithHostNet` for VSOCK access
-- Sensor: `hostPort=8443` configured for host network connectivity
-- Collector: Configured to reach sensor via `localhost:8443`
 
-### VM Image (02-build-vm-image.sh)
-- Creates Kubernetes Secret with cloud-init configuration
-- Cloud-init downloads roxagent on first boot
-- Installs systemd service for continuous scanning (5-minute intervals)
-- Configures VSOCK environment variables
-
-### VM Deployment (03-deploy-vm.sh)
-- Deploys RHEL 9 VM with vsock enabled (`autoattachVSOCK: true`)
+### VM Deployment (02-deploy-sample-vms.sh)
+- Deploys 4 RHEL 9 VMs with vsock enabled (`autoattachVSOCK: true`)
 - Uses containerDisk for fast startup
-- Attaches cloud-init for roxagent installation
-- Configurable via environment variables
+- Cloud-init downloads and configures roxagent
+- Installs systemd service for continuous scanning (5-minute intervals)
+- Creates helper script at `/root/install-packages.sh` for package installation
+
+### VM Subscription & Packages (03-configure-vm-subscriptions.sh)
+- Registers VMs with Red Hat subscription-manager
+- Supports both username/password and activation key authentication
+- Installs packages based on VM profile (defined in 02-deploy-sample-vms.sh)
+- Restarts roxagent to scan newly installed packages
+- Verifies package installation
+- Can process all VMs or specific VM only
+
+**Usage examples:**
+```bash
+# Register with username/password
+./03-configure-vm-subscriptions.sh --username myuser --password mypass
+
+# Register with activation key
+./03-configure-vm-subscriptions.sh --org 12345678 --activation-key my-key
+
+# Process specific VM only
+./03-configure-vm-subscriptions.sh --username myuser --password mypass --vm-name rhel-webserver
+
+# Skip registration (if already registered)
+./03-configure-vm-subscriptions.sh --skip-registration
+```
 
 ## Configuration Options
 
@@ -198,19 +218,20 @@ VMs deployed by these scripts automatically meet requirements:
 1. ✅ Run RHEL 9
 2. ✅ Have vsock enabled
 3. ✅ Run roxagent in daemon mode
-4. ⚠️ **Must have valid RHEL subscription** (configure inside VM)
+4. ⚠️ **Must have valid RHEL subscription** (automated with `03-configure-vm-subscriptions.sh`)
 5. ✅ Have network access (for roxagent download and CPE mappings)
 
-### Activating RHEL Subscription (Required)
+### Activating RHEL Subscription (Automated)
 
-After VM boots, activate RHEL:
+Use the `03-configure-vm-subscriptions.sh` script to automate subscription registration and package installation:
 
 ```bash
-# Inside VM console
+# Automated approach (recommended)
+./03-configure-vm-subscriptions.sh --username USER --password PASS
+
+# Or manual approach (inside VM console)
 subscription-manager register --username <rh-username> --password <rh-password>
 subscription-manager attach --auto
-
-# Verify
 subscription-manager status
 ```
 
@@ -221,10 +242,10 @@ subscription-manager status
 | Script | Purpose |
 |--------|---------|
 | `install.sh` | **Main script** - orchestrates complete setup |
-| `01-configure-rhacs.sh` | Configure RHACS components, enable VSOCK, and fix networking |
-| `01-check-env.sh` | Verify RHACS VM scanning environment and connectivity |
-| `02-deploy-base-vm.sh` | Deploy single VM with roxagent |
-| `03-deploy-sample-vms.sh` | Deploy 4 demo VMs with different DNF packages |
+| `01-configure-rhacs.sh` | Configure RHACS components and enable VSOCK |
+| `02-deploy-sample-vms.sh` | Deploy 4 demo VMs with roxagent |
+| `03-configure-vm-subscriptions.sh` | Register subscriptions and install packages on VMs |
+| `verify-env.sh` | Verify RHACS VM scanning environment |
 
 ### Reference Files
 
@@ -242,7 +263,7 @@ subscription-manager status
 
 ### Why DNF packages matter
 
-The `04-deploy-sample-vms.sh` script uses cloud-init to install packages via DNF:
+The `03-configure-vm-subscriptions.sh` script installs packages via DNF after registering subscriptions:
 
 ```bash
 # Inside cloud-init
