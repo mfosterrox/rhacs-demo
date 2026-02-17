@@ -72,51 +72,7 @@ else
 fi
 
 echo ""
-echo "2. Checking groups..."
-GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups")
-
-# Extract auth provider ID
-AUTH_PROVIDER_ID=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/authProviders" | \
-  grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
-
-if [ -z "$AUTH_PROVIDER_ID" ]; then
-  error "Could not find Monitoring auth provider ID"
-  exit 1
-fi
-
-log "Auth Provider ID: $AUTH_PROVIDER_ID"
-
-# Check if group exists for this auth provider
-if echo "$GROUPS" | grep -q "$AUTH_PROVIDER_ID"; then
-  log "✓ Group mapping found for Monitoring auth provider"
-  echo "$GROUPS" | jq ".groups[] | select(.props.authProviderId==\"$AUTH_PROVIDER_ID\")" 2>/dev/null || \
-    echo "$GROUPS" | grep -A10 "$AUTH_PROVIDER_ID"
-else
-  warn "No group mapping found for Monitoring auth provider"
-  echo ""
-  step "Creating group mapping..."
-  
-  GROUP_PAYLOAD="{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Admin\"}"
-  
-  GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/groups" \
-    -H "Authorization: Bearer $ROX_API_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "$GROUP_PAYLOAD")
-  
-  HTTP_CODE=$(echo "$GROUP_RESPONSE" | tail -1)
-  RESPONSE_BODY=$(echo "$GROUP_RESPONSE" | head -n -1)
-  
-  if [ "$HTTP_CODE" = "200" ]; then
-    log "✓ Group created successfully"
-    echo "$RESPONSE_BODY" | jq '.' 2>/dev/null || echo "$RESPONSE_BODY"
-  else
-    error "Group creation failed (HTTP $HTTP_CODE)"
-    echo "$RESPONSE_BODY"
-  fi
-fi
-
-echo ""
-echo "3. Testing client certificate authentication..."
+echo "2. Testing client certificate authentication..."
 CLIENT_CERT_INFO=$(openssl x509 -in client.crt -noout -subject -dates)
 echo "Client certificate:"
 echo "$CLIENT_CERT_INFO"
