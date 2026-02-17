@@ -214,6 +214,7 @@ check_sensor_hostport() {
     
     # Check collector sensor endpoint configuration
     local grpc_server=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="GRPC_SERVER")].value}' 2>/dev/null || echo "")
+    local host_network=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.hostNetwork}' 2>/dev/null || echo "false")
     
     if [[ "${grpc_server}" == localhost:* ]]; then
         print_pass "Collector configured to use sensor via localhost: ${grpc_server}"
