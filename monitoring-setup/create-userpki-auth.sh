@@ -103,14 +103,43 @@ log "✓ ROX_ENDPOINT: $ROX_ENDPOINT"
 echo ""
 step "Testing roxctl connectivity..."
 
-# Test connection
-if roxctl -e "$ROX_ENDPOINT" central whoami --insecure-skip-tls-verify 2>&1 | grep -q "name"; then
-    USER_INFO=$(roxctl -e "$ROX_ENDPOINT" central whoami --insecure-skip-tls-verify 2>&1)
+# Verify GRPC fix is set
+if [ "$GRPC_GO_REQUIRE_HANDSHAKE_ON" != "off" ]; then
+    warning "GRPC_GO_REQUIRE_HANDSHAKE_ON is not set to 'off'"
+    log "Setting it now..."
+    export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+fi
+log "GRPC_GO_REQUIRE_HANDSHAKE_ON = $GRPC_GO_REQUIRE_HANDSHAKE_ON"
+
+# Test connection with detailed output
+log "Testing: roxctl -e $ROX_ENDPOINT central whoami --insecure-skip-tls-verify"
+log "This should complete in 1-2 seconds..."
+
+WHOAMI_OUTPUT=$(roxctl -e "$ROX_ENDPOINT" central whoami --insecure-skip-tls-verify 2>&1)
+WHOAMI_EXIT_CODE=$?
+
+log "Exit code: $WHOAMI_EXIT_CODE"
+log "Output preview: ${WHOAMI_OUTPUT:0:200}"
+
+if [ $WHOAMI_EXIT_CODE -eq 0 ] && echo "$WHOAMI_OUTPUT" | grep -q "name"; then
     log "✓ Successfully connected to RHACS Central"
-    echo "$USER_INFO" | grep "name" | head -1
+    echo "$WHOAMI_OUTPUT" | grep "name" | head -1
 else
     error "Failed to connect to RHACS Central"
-    error "Check ROX_API_TOKEN and ROX_CENTRAL_URL"
+    error "Exit code: $WHOAMI_EXIT_CODE"
+    error "Full output:"
+    echo "$WHOAMI_OUTPUT"
+    error ""
+    error "Troubleshooting:"
+    error "1. Verify ROX_API_TOKEN is set and valid:"
+    error "   echo \"\${ROX_API_TOKEN:0:30}...\""
+    error ""
+    error "2. Test API token with curl:"
+    error "   curl -H \"Authorization: Bearer \$ROX_API_TOKEN\" -k \$ROX_CENTRAL_URL/v1/auth/status"
+    error ""
+    error "3. Verify GRPC fix is applied:"
+    error "   echo \$GRPC_GO_REQUIRE_HANDSHAKE_ON"
+    error ""
     exit 1
 fi
 
