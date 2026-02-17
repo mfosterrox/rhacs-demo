@@ -8,8 +8,8 @@
 
 set -euo pipefail
 
-# Fix for gRPC ALPN handshake issues
-export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+# Fix for gRPC ALPN enforcement issues (https://github.com/grpc/grpc-go/issues/7769)
+export GRPC_ENFORCE_ALPN_ENABLED=false
 
 # Colors
 GREEN='\033[0;32m'
@@ -104,12 +104,12 @@ echo ""
 step "Testing roxctl connectivity..."
 
 # Verify GRPC fix is set
-if [ "$GRPC_GO_REQUIRE_HANDSHAKE_ON" != "off" ]; then
-    warning "GRPC_GO_REQUIRE_HANDSHAKE_ON is not set to 'off'"
+if [ "${GRPC_ENFORCE_ALPN_ENABLED:-}" != "false" ]; then
+    warning "GRPC_ENFORCE_ALPN_ENABLED is not set to 'false'"
     log "Setting it now..."
-    export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+    export GRPC_ENFORCE_ALPN_ENABLED=false
 fi
-log "GRPC_GO_REQUIRE_HANDSHAKE_ON = $GRPC_GO_REQUIRE_HANDSHAKE_ON"
+log "GRPC_ENFORCE_ALPN_ENABLED = $GRPC_ENFORCE_ALPN_ENABLED"
 
 # Test connection with detailed output
 log "Testing: roxctl -e $ROX_ENDPOINT central whoami --insecure-skip-tls-verify"

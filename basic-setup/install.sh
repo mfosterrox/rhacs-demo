@@ -431,16 +431,16 @@ main() {
     
     # Add gRPC ALPN fix to ~/.bashrc (required for roxctl)
     print_info "Configuring gRPC ALPN fix for roxctl..."
-    if [ -f ~/.bashrc ] && ! grep -q "GRPC_GO_REQUIRE_HANDSHAKE_ON" ~/.bashrc; then
+    if [ -f ~/.bashrc ] && ! grep -q "GRPC_ENFORCE_ALPN_ENABLED" ~/.bashrc; then
         echo "" >> ~/.bashrc
-        echo "# Fix for gRPC ALPN handshake issues with roxctl" >> ~/.bashrc
-        echo "export GRPC_GO_REQUIRE_HANDSHAKE_ON=off" >> ~/.bashrc
-        print_info "✓ Added GRPC_GO_REQUIRE_HANDSHAKE_ON=off to ~/.bashrc"
+        echo "# Fix for gRPC ALPN enforcement issues with roxctl (https://github.com/grpc/grpc-go/issues/7769)" >> ~/.bashrc
+        echo "export GRPC_ENFORCE_ALPN_ENABLED=false" >> ~/.bashrc
+        print_info "✓ Added GRPC_ENFORCE_ALPN_ENABLED=false to ~/.bashrc"
     else
-        print_info "✓ GRPC_GO_REQUIRE_HANDSHAKE_ON already in ~/.bashrc"
+        print_info "✓ GRPC_ENFORCE_ALPN_ENABLED already in ~/.bashrc"
     fi
     # Export it for current session
-    export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+    export GRPC_ENFORCE_ALPN_ENABLED=false
     print_info ""
     
     # Ensure setup directory exists
