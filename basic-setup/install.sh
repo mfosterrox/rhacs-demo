@@ -54,6 +54,26 @@ print_step() {
 }
 
 #================================================================
+# Utility Functions
+#================================================================
+
+# Strip https:// from ROX_CENTRAL_URL for roxctl -e flag
+# roxctl expects host:port format and defaults to https
+#
+# Usage:
+#   ROX_ENDPOINT=$(get_rox_endpoint)
+#   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki create ...
+#
+# Example:
+#   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
+#   Then get_rox_endpoint returns "central-stackrox.apps.cluster.com"
+get_rox_endpoint() {
+    local url="${ROX_CENTRAL_URL:-}"
+    # Remove https:// prefix if present
+    echo "${url#https://}"
+}
+
+#================================================================
 # Install roxctl CLI
 #================================================================
 install_roxctl() {

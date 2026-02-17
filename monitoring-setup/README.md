@@ -14,6 +14,35 @@ The monitoring setup enables Prometheus to scrape metrics from RHACS Central API
 - `openssl` tool
 - RHACS installed in the `stackrox` namespace (or set `NAMESPACE` environment variable)
 
+## Environment Variables
+
+The scripts use the following environment variables:
+
+- `ROX_CENTRAL_URL`: Full URL to RHACS Central (e.g., `https://central-stackrox.apps.cluster.com`)
+- `ROX_API_TOKEN`: API token for authentication
+
+**Important for `roxctl` usage:**
+
+The `roxctl` CLI expects `host:port` format for the `-e` flag and defaults to `https://`. If your `ROX_CENTRAL_URL` includes `https://`, strip it before using with `roxctl`:
+
+```bash
+# Correct usage with roxctl
+export ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
+ROX_ENDPOINT="${ROX_CENTRAL_URL#https://}"  # Strips https:// prefix
+roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki list
+
+# Alternative: use the helper function in the scripts
+ROX_ENDPOINT=$(get_rox_endpoint)
+roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki list
+```
+
+For `curl` commands, use the full URL with `https://`:
+
+```bash
+# Correct usage with curl
+curl -k -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/auth/status"
+```
+
 ## Quick Start
 
 ### Automated Setup

@@ -10,6 +10,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+#================================================================
+# Utility Functions
+#================================================================
+
+# Strip https:// from ROX_CENTRAL_URL for roxctl -e flag
+# roxctl expects host:port format and defaults to https
+#
+# Usage:
+#   ROX_ENDPOINT=$(get_rox_endpoint)
+#   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki create ...
+#
+# Example:
+#   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
+#   Then get_rox_endpoint returns "central-stackrox.apps.cluster.com"
+get_rox_endpoint() {
+    local url="${ROX_CENTRAL_URL:-}"
+    # Remove https:// prefix if present
+    echo "${url#https://}"
+}
+
 oc project stackrox
 
 echo "Installing Cluster Observability Operator..."
@@ -141,4 +161,8 @@ echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/sta
 echo ""
 echo "Note: The auth provider was configured with the CA certificate (ca.crt),"
 echo "      and clients authenticate using certificates signed by that CA (client.crt)."
+echo ""
+echo "For roxctl commands, strip https:// from ROX_CENTRAL_URL:"
+echo "  ROX_ENDPOINT=\${ROX_CENTRAL_URL#https://}"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central userpki list"
 echo ""
