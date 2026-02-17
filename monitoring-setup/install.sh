@@ -103,7 +103,7 @@ spec:
   central:
     declarativeConfiguration:
       configMaps:
-      - sample-stackrox-prometheus-declarative-configuration
+      - name: sample-stackrox-prometheus-declarative-configuration
 '
     echo "Waiting for Central to update..."
     sleep 10
@@ -124,12 +124,18 @@ spec:
 fi
 
 echo "Creating a User-Certificate auth-provider..."
-AUTH_PROVIDER_RESPONSE=$(curl -k -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
+AUTH_PROVIDER_RESPONSE=$(curl -k -s -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
   -H "Authorization: Bearer $ROX_API_TOKEN" \
+  -H "Content-Type: application/json" \
   --data-raw "$(envsubst < monitoring-examples/rhacs/auth-provider.json.tpl)")
 
-# Extract the auth provider ID from the response
-export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+# Extract the auth provider ID from the response (try multiple patterns)
+export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"id"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/')
+
+# If grep/sed didn't work, try jq if available
+if [ -z "$AUTH_PROVIDER_ID" ] && command -v jq &>/dev/null; then
+  export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+fi
 
 if [ -n "$AUTH_PROVIDER_ID" ]; then
   echo "✓ Auth provider created with ID: $AUTH_PROVIDER_ID"
