@@ -564,16 +564,20 @@ main() {
     
 
     # Find and run scripts in numerical order (01-*.sh, 02-*.sh, etc.)
-    # Note: Script 07 (configure-custom-tls.sh) is skipped as it's optional and requires user-specific parameters
     for script in "${SETUP_DIR}"/[0-9][0-9]-*.sh; do
         if [ -f "${script}" ]; then
             local script_name=$(basename "${script}")
             
-            # Skip optional script 07 (custom TLS configuration)
+            # Script 07 requires email parameter - use default
             if [[ "${script_name}" =~ ^07- ]]; then
-                print_info "Skipping optional script: ${script_name}"
-                print_info "  (Requires --email parameter. Run manually if needed.)"
-                print_info "  Example: ./07-configure-custom-tls.sh --email your@email.com"
+                print_info "Executing: ${script_name}"
+                print_info "  (Using default email: mfoster@redhat.com)"
+                if bash "${script}" --email mfoster@redhat.com; then
+                    print_info "✓ Successfully completed: ${script_name}"
+                else
+                    print_error "✗ Failed: ${script_name}"
+                    exit 1
+                fi
                 print_info ""
                 continue
             fi
@@ -607,13 +611,7 @@ main() {
     print_info "  ✓ Demo applications deployed"
     print_info "  ✓ RHACS settings configured"
     print_info "  ✓ Compliance scan schedules created"
-    print_info ""
-    print_info "Optional Configuration:"
-    print_info "======================="
-    print_info "  ⊗ Custom TLS with passthrough route (not configured)"
-    print_info "    To configure custom TLS certificates:"
-    print_info "    cd ${SETUP_DIR}"
-    print_info "    ./07-configure-custom-tls.sh --email your@email.com"
+    print_info "  ✓ Custom TLS with passthrough route configured"
     print_info ""
     
     # Display important connection information

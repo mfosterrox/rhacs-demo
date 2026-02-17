@@ -67,9 +67,8 @@ cd basic-setup
 **What happens automatically:**
 1. ✅ Installs `roxctl` CLI (if not already present)
 2. ✅ Generates `ROX_API_TOKEN` and saves to `~/.bashrc`
-3. ✅ Runs setup scripts 01-06 in sequence
-4. ✅ Configures complete RHACS demo environment
-5. ⊗ Skips optional script 07 (custom TLS - requires manual execution)
+3. ✅ Runs all setup scripts 01-07 in sequence
+4. ✅ Configures complete RHACS demo environment with custom TLS
 
 ## Setup Scripts
 
@@ -77,16 +76,16 @@ The following scripts are executed in numerical order:
 
 | Script | Description | Requires Token | Auto-Run |
 |--------|-------------|----------------|----------|
-| `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-06 | N/A | N/A |
+| `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-07 | N/A | N/A |
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, checks version, ensures TLS encryption | No | ✓ |
 | `02-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
 | `03-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
 | `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
 | `05-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** | ✓ |
 | `06-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
-| `07-configure-custom-tls.sh` | Configures passthrough route and custom TLS certificate (requires --email) | No | **✗ Skipped** |
+| `07-configure-custom-tls.sh` | Configures passthrough route and custom TLS certificate with Let's Encrypt | No | ✓ |
 
-**Note:** Script 07 is intentionally skipped by `install.sh` because it requires user-specific parameters (email address). Run it manually if you need custom TLS certificates.
+**Note:** Script 07 automatically uses `mfoster@redhat.com` for Let's Encrypt certificate registration.
 
 ## What Gets Configured
 
