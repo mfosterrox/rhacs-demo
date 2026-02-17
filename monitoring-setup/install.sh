@@ -428,28 +428,95 @@ fi
 log ""
 
 #================================================================
-# Step 7: Configure Minimum Role
+# Step 7: Configure Role for Auth Provider (Access Control)
 #================================================================
-step "Step 7: Configure minimum role for Monitoring auth provider"
+step "Step 7: Configuring access control for Monitoring auth provider"
 log ""
 
-warning "MANUAL STEP REQUIRED:"
-warning "Configure the minimum role for the 'Monitoring' auth provider in RHACS UI or via API"
-warning ""
-warning "Via UI:"
-warning "  1. Go to: $ROX_CENTRAL_URL"
-warning "  2. Navigate to: Platform Configuration → Access Control → Access Control"
-warning "  3. Create access:"
-warning "     - Name: prometheus-monitoring"
-warning "     - Auth Provider: Monitoring"
-warning "     - Role: Prometheus Server"
-warning "     - Subject: $CERT_CN"
-warning ""
-warning "Via API (alternative):"
-warning "  curl -k -X POST \$ROX_CENTRAL_URL/v1/groups \\"
-warning "    -H 'Authorization: Bearer \$ROX_API_TOKEN' \\"
-warning "    -H 'Content-Type: application/json' \\"
-warning "    -d '{\"props\":{\"authProviderId\":\"<provider-id>\"},\"roleName\":\"Prometheus Server\"}'"
+# Get the auth provider ID
+log "Retrieving auth provider ID for 'Monitoring'..."
+AUTH_PROVIDERS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+    "$ROX_CENTRAL_URL/v1/authProviders" 2>/dev/null || echo "")
+
+if [ -z "$AUTH_PROVIDERS" ]; then
+    warning "Failed to retrieve auth providers"
+    warning "You'll need to configure access control manually (see below)"
+else
+    PROVIDER_ID=$(echo "$AUTH_PROVIDERS" | jq -r '.authProviders[] | select(.name=="Monitoring") | .id' 2>/dev/null || echo "")
+    
+    if [ -n "$PROVIDER_ID" ]; then
+        log "✓ Found auth provider 'Monitoring' (ID: $PROVIDER_ID)"
+        
+        # Check if a group for this auth provider already exists
+        EXISTING_GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+            "$ROX_CENTRAL_URL/v1/groups" 2>/dev/null || echo "")
+        
+        GROUP_EXISTS=$(echo "$EXISTING_GROUPS" | jq -r --arg pid "$PROVIDER_ID" \
+            '.groups[] | select(.props.authProviderId==$pid) | .props.id' 2>/dev/null || echo "")
+        
+        if [ -n "$GROUP_EXISTS" ]; then
+            log "✓ Access control group already exists for this auth provider"
+        else
+            log "Creating access control group..."
+            
+            # Build the group JSON payload
+            if command -v jq &>/dev/null; then
+                GROUP_JSON=$(jq -n \
+                    --arg authProviderId "$PROVIDER_ID" \
+                    --arg key "$CERT_CN" \
+                    --arg roleName "Prometheus Server" \
+                    '{
+                        props: {
+                            authProviderId: $authProviderId,
+                            key: $key
+                        },
+                        roleName: $roleName
+                    }')
+                
+                # Create the group
+                GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST \
+                    "$ROX_CENTRAL_URL/v1/groups" \
+                    -H "Authorization: Bearer $ROX_API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    --data-raw "$GROUP_JSON" 2>&1)
+                
+                HTTP_CODE=$(echo "$GROUP_RESPONSE" | tail -1)
+                GROUP_BODY=$(echo "$GROUP_RESPONSE" | head -n -1)
+                
+                if [ "$HTTP_CODE" = "200" ] || echo "$GROUP_BODY" | grep -q '"props"'; then
+                    log "✓ Access control group created successfully"
+                    log "  Certificate CN: $CERT_CN"
+                    log "  Role: Prometheus Server"
+                    log "  Auth Provider: Monitoring"
+                elif echo "$GROUP_BODY" | grep -qi "already exists"; then
+                    log "✓ Access control group already exists"
+                else
+                    warning "Failed to create access control group (HTTP $HTTP_CODE)"
+                    if [ -n "$GROUP_BODY" ]; then
+                        log "Response: ${GROUP_BODY:0:200}"
+                    fi
+                    warning "You'll need to configure it manually (see below)"
+                fi
+            else
+                warning "jq not found - cannot create access control group automatically"
+                warning "You'll need to configure it manually (see below)"
+            fi
+        fi
+    else
+        warning "Auth provider 'Monitoring' not found"
+        warning "You'll need to configure it manually (see below)"
+    fi
+fi
+
+# Show manual instructions if automated setup may have failed
+log ""
+log "To verify or manually configure access control:"
+log "  1. Go to: $ROX_CENTRAL_URL"
+log "  2. Navigate to: Platform Configuration → Access Control → Access Control"
+log "  3. Verify or create access rule:"
+log "     - Auth Provider: Monitoring"
+log "     - Role: Prometheus Server"
+log "     - Subject/Key: $CERT_CN"
 
 log ""
 
