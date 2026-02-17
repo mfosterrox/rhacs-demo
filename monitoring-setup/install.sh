@@ -55,8 +55,10 @@ if ! command -v openssl &>/dev/null; then
 fi
 log "✓ openssl found"
 
-if ! command -v envsubst &>/dev/null; then
-    warning "envsubst not found - will use sed for template substitution"
+if ! command -v jq &>/dev/null; then
+    warning "jq not found - will use roxctl fallback for auth provider creation"
+else
+    log "✓ jq found"
 fi
 
 log ""
@@ -223,8 +225,8 @@ else
     warning "Certificate validation failed"
 fi
 
-# Export TLS_CERT in format needed for JSON (newline escaped)
-export TLS_CERT=$(awk '{printf "%s\\n", $0}' tls.crt)
+# Export TLS_CERT for later use
+export TLS_CERT=$(cat tls.crt)
 log "✓ TLS_CERT exported for auth provider creation"
 
 # Create TLS secret
@@ -305,47 +307,122 @@ log ""
 step "Step 6: Creating User-Certificate auth provider"
 log ""
 
-if [ ! -f "$EXAMPLES_DIR/rhacs/auth-provider.json.tpl" ]; then
-    warning "auth-provider.json.tpl not found. Skipping auth provider creation."
-    warning "You can create it manually in RHACS UI:"
-    warning "  Platform Configuration → Access Control → Auth Providers"
-else
-    log "Creating auth provider via API..."
+# Try to create auth provider - API first, then roxctl fallback
+AUTH_PROVIDER_CREATED=false
+
+# Method 1: Try API with jq (proper JSON formatting)
+if command -v jq &>/dev/null; then
+    log "Attempting to create auth provider via API (using jq)..."
     
-    # Substitute environment variables in template
-    if command -v envsubst &>/dev/null; then
-        AUTH_PROVIDER_JSON=$(envsubst < "$EXAMPLES_DIR/rhacs/auth-provider.json.tpl")
-    else
-        # Fallback to sed if envsubst not available
-        AUTH_PROVIDER_JSON=$(cat "$EXAMPLES_DIR/rhacs/auth-provider.json.tpl" | \
-            sed "s|\${ROX_CENTRAL_URL}|$ROX_CENTRAL_URL|g" | \
-            sed "s|\${TLS_CERT}|$TLS_CERT|g")
-    fi
+    # Build JSON payload using jq (handles escaping properly)
+    AUTH_PROVIDER_JSON=$(jq -n \
+        --arg name "Monitoring" \
+        --arg type "userpki" \
+        --arg uiEndpoint "$ROX_CENTRAL_URL" \
+        --arg cert "$TLS_CERT" \
+        '{
+            name: $name,
+            type: $type,
+            uiEndpoint: $uiEndpoint,
+            enabled: true,
+            config: {
+                keys: [$cert]
+            },
+            requiredAttributes: [],
+            claimMappings: []
+        }')
     
-    # Create auth provider
-    RESPONSE=$(curl -k -s -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
+    # Create auth provider via API
+    RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
         -H "Authorization: Bearer $ROX_API_TOKEN" \
         -H "Content-Type: application/json" \
         --data-raw "$AUTH_PROVIDER_JSON" 2>&1)
     
-    if echo "$RESPONSE" | grep -q '"id"'; then
-        log "✓ User-Certificate auth provider 'Monitoring' created successfully"
-        PROVIDER_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
-        log "  Provider ID: $PROVIDER_ID"
-    elif echo "$RESPONSE" | grep -qi "already exists"; then
-        log "✓ Auth provider already exists"
+    HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+    RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+    
+    if [ "$HTTP_CODE" = "200" ] || echo "$RESPONSE_BODY" | grep -q '"id"'; then
+        log "✓ Auth provider 'Monitoring' created successfully via API"
+        PROVIDER_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // empty' 2>/dev/null || echo "")
+        if [ -n "$PROVIDER_ID" ]; then
+            log "  Provider ID: $PROVIDER_ID"
+        fi
+        AUTH_PROVIDER_CREATED=true
+    elif echo "$RESPONSE_BODY" | grep -qi "already exists"; then
+        log "✓ Auth provider 'Monitoring' already exists"
+        AUTH_PROVIDER_CREATED=true
     else
-        warning "Failed to create auth provider via API"
-        log "Response: ${RESPONSE:0:200}"
-        warning ""
-        warning "You may need to create it manually in RHACS UI:"
-        warning "  1. Go to: $ROX_CENTRAL_URL"
-        warning "  2. Navigate to: Platform Configuration → Access Control → Auth Providers"
-        warning "  3. Create auth provider:"
-        warning "     - Type: User Certificates"
-        warning "     - Name: Monitoring"
-        warning "     - Upload certificate: tls.crt"
+        warning "API method failed (HTTP $HTTP_CODE)"
+        if [ -n "$RESPONSE_BODY" ]; then
+            log "Response: ${RESPONSE_BODY:0:200}"
+        fi
     fi
+else
+    warning "jq not found - skipping API method"
+fi
+
+# Method 2: Fallback to roxctl if API failed
+if [ "$AUTH_PROVIDER_CREATED" = false ]; then
+    log ""
+    log "Attempting to create auth provider via roxctl..."
+    
+    # Check if roxctl is available
+    ROXCTL_CMD=""
+    if command -v roxctl &>/dev/null; then
+        ROXCTL_CMD="roxctl"
+    elif [ -f ~/.local/bin/roxctl ]; then
+        ROXCTL_CMD="$HOME/.local/bin/roxctl"
+    elif [ -f /usr/local/bin/roxctl ]; then
+        ROXCTL_CMD="/usr/local/bin/roxctl"
+    fi
+    
+    if [ -n "$ROXCTL_CMD" ]; then
+        # Ensure GRPC fix is set
+        export GRPC_ENFORCE_ALPN_ENABLED=false
+        
+        # Normalize endpoint (remove https://)
+        ROX_ENDPOINT_NORMALIZED="${ROX_CENTRAL_URL#https://}"
+        ROX_ENDPOINT_NORMALIZED="${ROX_ENDPOINT_NORMALIZED#http://}"
+        
+        log "Using roxctl: $ROXCTL_CMD"
+        log "Endpoint: $ROX_ENDPOINT_NORMALIZED"
+        
+        # Try to create the auth provider
+        AUTH_PROVIDER_OUTPUT=$(GRPC_ENFORCE_ALPN_ENABLED=false ROX_API_TOKEN="$ROX_API_TOKEN" \
+            $ROXCTL_CMD -e "$ROX_ENDPOINT_NORMALIZED" \
+            central userpki create Monitoring \
+            -c tls.crt \
+            -r Admin \
+            --insecure-skip-tls-verify 2>&1)
+        
+        EXIT_CODE=$?
+        
+        if [ $EXIT_CODE -eq 0 ]; then
+            log "✓ Auth provider 'Monitoring' created successfully via roxctl"
+            AUTH_PROVIDER_CREATED=true
+        elif echo "$AUTH_PROVIDER_OUTPUT" | grep -qi "already exists"; then
+            log "✓ Auth provider 'Monitoring' already exists"
+            AUTH_PROVIDER_CREATED=true
+        else
+            warning "roxctl method failed (exit code: $EXIT_CODE)"
+            log "Output: ${AUTH_PROVIDER_OUTPUT:0:300}"
+        fi
+    else
+        warning "roxctl not found - skipping roxctl method"
+    fi
+fi
+
+# Method 3: Manual instructions if both methods failed
+if [ "$AUTH_PROVIDER_CREATED" = false ]; then
+    warning ""
+    warning "Both API and roxctl methods failed."
+    warning "You need to create the auth provider manually in RHACS UI:"
+    warning "  1. Go to: $ROX_CENTRAL_URL"
+    warning "  2. Navigate to: Platform Configuration → Access Control → Auth Providers"
+    warning "  3. Create auth provider:"
+    warning "     - Type: User Certificates"
+    warning "     - Name: Monitoring"
+    warning "     - Upload certificate: $SCRIPT_DIR/tls.crt"
 fi
 
 log ""
