@@ -707,12 +707,18 @@ Examples:
   $0
 
 What Gets Deployed:
-  • rhel-webserver   - Apache, Nginx, PHP
+  • rhel-webserver   - Apache, Nginx, PHP (accessible via Route!)
   • rhel-database    - PostgreSQL, MariaDB
   • rhel-devtools    - Git, GCC, Python, Node.js, Java
   • rhel-monitoring  - Grafana, Telegraf, Collectd
 
 With subscription credentials, packages are installed automatically via cloud-init!
+
+The webserver VM includes:
+  ✓ OpenShift Service and Route (HTTPS with TLS)
+  ✓ Apache HTTP Server enabled and started
+  ✓ Custom demo HTML page
+  ✓ Accessible from browser immediately after packages install
 
 EOF
                 exit 0
