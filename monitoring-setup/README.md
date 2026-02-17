@@ -16,42 +16,33 @@ The monitoring setup enables Prometheus to scrape metrics from RHACS Central API
 
 ## Quick Start
 
-### Option 1: Automated Setup (Recommended)
+### Automated Setup
 
 Run the comprehensive setup script:
 
 ```bash
 cd monitoring-setup
-
-# Optional: Set your ROX API token for automatic secret creation
-export ROX_API_TOKEN='your-api-token-here'
-
-# Step 1: Run the setup script
-./setup-rhacs-monitoring.sh
-
-# Step 2: Configure RHACS to accept the certificate
-./configure-rhacs-auth.sh
+./install.sh
 ```
 
-**What these scripts do:**
+**What this script does:**
 
-`setup-rhacs-monitoring.sh`:
-1. Check prerequisites
-2. Get the ROX Central URL
-3. Create an API token secret (if `ROX_API_TOKEN` is set)
-4. Generate TLS certificates for testing
-5. Apply RHACS declarative configuration
-6. Deploy the monitoring stack
-7. Configure Prometheus scrape settings
-8. Run diagnostics to verify the setup
+1. Validates prerequisites (oc/kubectl, openssl)
+2. Checks cluster admin privileges
+3. Detects ROX Central URL and saves to `~/.bashrc`
+4. Auto-generates or loads `ROX_API_TOKEN` and saves to `~/.bashrc`
+5. Configures gRPC ALPN fix (`GRPC_ENFORCE_ALPN_ENABLED=false`)
+6. Generates TLS certificates for Prometheus
+7. Installs roxctl CLI permanently (if not already installed)
+8. Creates UserPKI auth provider in RHACS
+9. Applies RHACS declarative configuration
+10. Installs Cluster Observability Operator
+11. Deploys monitoring stack (Prometheus + Alertmanager)
+12. Installs Prometheus resources
+13. Deploys Perses dashboards
+14. Runs comprehensive diagnostics
 
-`configure-rhacs-auth.sh`:
-1. Apply declarative configuration for Prometheus role
-2. Test certificate authentication
-3. Provide manual configuration steps if needed
-4. Display troubleshooting guide
-
-**Note**: After running these scripts, you may need to manually configure the User Certificates auth provider in the RHACS UI. See [CERTIFICATE-AUTH-GUIDE.md](CERTIFICATE-AUTH-GUIDE.md) for detailed instructions.
+**Note**: The script is idempotent and safe to run multiple times.
 
 ### Option 2: Manual Setup
 
@@ -335,9 +326,8 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 ```
 monitoring-setup/
 ├── README.md                           # This file
-├── CERTIFICATE-AUTH-GUIDE.md           # Detailed certificate auth guide
-├── setup-rhacs-monitoring.sh           # Automated setup script
-├── configure-rhacs-auth.sh             # Auth provider configuration helper
+├── INSTALL-GUIDE.md                    # Detailed installation guide
+├── install.sh                          # Main installation script
 └── monitoring-examples/                # Configuration examples
     ├── README.md                       # General overview
     ├── rhacs/                          # RHACS-specific configuration
