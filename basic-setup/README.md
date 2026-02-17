@@ -113,21 +113,42 @@ The following scripts are executed in numerical order:
 
 ### Custom TLS Configuration (Script 07) - Optional
 This optional script configures Central with a custom TLS certificate and passthrough routing:
-- **Certificate Management**: Installs cert-manager and creates Let's Encrypt certificates
+- **Operator-Based**: Installs Red Hat cert-manager Operator for OpenShift v1.18.1
+- **Certificate Management**: Creates Let's Encrypt certificates via cert-manager
 - **Route Configuration**: Changes Central route from reencrypt to passthrough termination
-- **Automatic Renewal**: Certificates are automatically renewed by cert-manager
+- **Automatic Renewal**: Certificates are automatically renewed by cert-manager (15 days before expiry)
 - **Production Ready**: Supports both Let's Encrypt production and staging environments
+
+**What it does:**
+1. Installs Red Hat cert-manager Operator in `cert-manager-operator` namespace
+2. Creates a Let's Encrypt ClusterIssuer (production or staging)
+3. Generates a Certificate resource for Central's route hostname
+4. Configures Central deployment to use the custom certificate
+5. Changes route termination from reencrypt/edge to passthrough
+6. Restarts Central to apply the new TLS configuration
 
 **Usage:**
 ```bash
-# Production certificates
+# Production certificates (recommended)
 ./07-configure-custom-tls.sh --email your@email.com
 
-# Testing with Let's Encrypt staging
+# Testing with Let's Encrypt staging (for development/testing)
 ./07-configure-custom-tls.sh --email your@email.com --staging
 ```
 
-**Note:** This script is optional and should be run after the main installation if you need custom certificates instead of OpenShift-generated certificates.
+**Requirements:**
+- Cluster-admin access
+- Central must be accessible from the internet (for Let's Encrypt HTTP-01 challenge)
+- Valid email address for Let's Encrypt registration
+
+**Note:** This script is optional and should be run after the main installation if you need custom certificates instead of OpenShift-generated certificates. The passthrough route allows Central to serve its own TLS certificate directly.
+
+**📖 For detailed information**, see [CUSTOM-TLS-REFERENCE.md](./CUSTOM-TLS-REFERENCE.md) which includes:
+- Architecture diagrams
+- Detailed troubleshooting guide
+- Certificate renewal procedures
+- Rollback instructions
+- Let's Encrypt rate limits and best practices
 
 ## Requirements
 
