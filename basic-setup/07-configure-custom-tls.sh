@@ -269,72 +269,100 @@ install_cert_manager() {
     
     print_info "✓ cert-manager-operator namespace exists"
     
-    # Check if operator subscription exists
-    if ! oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
-        print_error "cert-manager operator subscription not found in namespace '${CERT_MANAGER_OPERATOR_NAMESPACE}'"
+    # Check if cert-manager operator is installed (check for the actual pods/deployments)
+    # This is more reliable than checking subscription which may have different names
+    local operator_pod=$(oc get pods -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -l app.kubernetes.io/name=cert-manager-operator -o name 2>/dev/null | head -1)
+    
+    if [ -z "${operator_pod}" ]; then
+        # Try alternative label
+        operator_pod=$(oc get pods -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o name 2>/dev/null | grep -i "cert-manager-operator-controller" | head -1)
+    fi
+    
+    if [ -z "${operator_pod}" ]; then
+        print_error "cert-manager operator pod not found in namespace '${CERT_MANAGER_OPERATOR_NAMESPACE}'"
         print_error ""
-        print_error "PREREQUISITE NOT MET: cert-manager operator subscription does not exist"
+        print_error "PREREQUISITE NOT MET: cert-manager operator is not running"
         print_error ""
-        print_error "The namespace exists but the operator subscription is missing."
-        print_error "Please install the Red Hat cert-manager Operator via OperatorHub."
+        print_error "Please install the Red Hat cert-manager Operator first:"
+        print_error "1. Open OpenShift Console → OperatorHub"
+        print_error "2. Search for 'cert-manager Operator for Red Hat OpenShift'"
+        print_error "3. Install from Red Hat operators"
+        print_error "4. Use namespace: cert-manager-operator"
+        print_error "5. Select channel: stable-v1.18"
         exit 1
     fi
     
-    print_info "✓ cert-manager operator subscription exists"
+    print_info "✓ cert-manager operator pod found: ${operator_pod#*/}"
     
-    # Verify operator is installed and ready
-    local csv=$(oc get subscription cert-manager -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.currentCSV}' 2>/dev/null)
-    if [ -z "${csv}" ]; then
-        print_error "cert-manager operator CSV not found"
-        print_error "The operator may still be installing. Please wait and try again."
+    # Check if operator pod is running
+    local pod_status=$(oc get "${operator_pod}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
+    if [ "${pod_status}" != "Running" ]; then
+        print_error "cert-manager operator pod is not running. Current status: ${pod_status}"
+        print_error "Please check operator installation"
         exit 1
     fi
     
-    local phase=$(oc get csv "${csv}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
-    if [ "${phase}" != "Succeeded" ]; then
-        print_error "cert-manager operator is not ready. Current status: ${phase}"
-        print_error "Expected status: Succeeded"
-        print_error ""
-        print_error "Check operator status with:"
-        print_error "  oc get csv ${csv} -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
-        print_error "  oc describe csv ${csv} -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
-        exit 1
+    print_info "✓ cert-manager operator is running"
+    
+    # Try to get CSV info for additional details (optional, don't fail if not found)
+    local csv=$(oc get csv -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o name 2>/dev/null | grep -i cert-manager | head -1)
+    if [ -n "${csv}" ]; then
+        local csv_name=$(basename "${csv}")
+        local phase=$(oc get "${csv}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)
+        if [ "${phase}" = "Succeeded" ]; then
+            print_info "✓ cert-manager CSV: ${csv_name} (${phase})"
+        else
+            print_warn "cert-manager CSV status: ${csv_name} (${phase})"
+        fi
     fi
     
-    print_info "✓ cert-manager operator is installed and ready (${csv})"
-    
-    # Verify cert-manager deployments exist and are ready
+    # Verify cert-manager components exist and are ready
     print_info "Verifying cert-manager components..."
     
-    local deployments=("cert-manager-controller-manager" "cert-manager-cainjector" "cert-manager-webhook")
-    local all_ready=true
+    # Check for deployments (names may vary by installation method)
+    local component_count=0
+    local ready_count=0
     
-    for deploy in "${deployments[@]}"; do
-        if ! oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
-            print_warn "Deployment ${deploy} not found"
-            all_ready=false
-            continue
-        fi
-        
-        local available=$(oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
-        if [ "${available}" = "True" ]; then
-            print_info "✓ ${deploy} is ready"
-        else
-            print_warn "${deploy} is not fully available yet"
-            all_ready=false
+    # Try standard names first
+    local possible_deployments=(
+        "cert-manager"
+        "cert-manager-controller-manager"
+        "cert-manager-cainjector"
+        "cert-manager-webhook"
+    )
+    
+    for deploy in "${possible_deployments[@]}"; do
+        if oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" &>/dev/null; then
+            component_count=$((component_count + 1))
+            local available=$(oc get deployment "${deploy}" -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
+            if [ "${available}" = "True" ]; then
+                print_info "✓ ${deploy} is ready"
+                ready_count=$((ready_count + 1))
+            else
+                print_warn "${deploy} is not fully available yet"
+            fi
         fi
     done
     
-    if [ "${all_ready}" = false ]; then
-        print_warn "Some cert-manager components are not fully ready"
-        print_warn "This may cause issues. Check with:"
-        print_warn "  oc get pods -n ${CERT_MANAGER_OPERATOR_NAMESPACE}"
-        print_warn ""
-        read -p "Do you want to continue anyway? (y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    # If no standard deployments found, list what's actually there
+    if [ ${component_count} -eq 0 ]; then
+        print_info "Checking for cert-manager pods in namespace..."
+        local pod_count=$(oc get pods -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        if [ "${pod_count}" -gt 0 ]; then
+            print_info "✓ Found ${pod_count} pod(s) in cert-manager-operator namespace"
+            oc get pods -n "${CERT_MANAGER_OPERATOR_NAMESPACE}" --no-headers 2>/dev/null | while read line; do
+                print_info "  - $(echo $line | awk '{print $1}')"
+            done
+        else
+            print_error "No cert-manager pods found"
             exit 1
         fi
+    elif [ ${ready_count} -lt ${component_count} ]; then
+        print_warn "Some cert-manager components (${ready_count}/${component_count}) are not fully ready"
+        print_info "Current pods in ${CERT_MANAGER_OPERATOR_NAMESPACE}:"
+        oc get pods -n "${CERT_MANAGER_OPERATOR_NAMESPACE}"
+    else
+        print_info "✓ All cert-manager components (${ready_count}/${component_count}) are ready"
     fi
     
     print_info "✓ Red Hat cert-manager Operator verification complete"
