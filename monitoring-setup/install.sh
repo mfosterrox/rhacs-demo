@@ -28,7 +28,7 @@ echo "Declaring a permission set and a role in RHACS..."
 oc apply -f rhacs/declarative-configuration-configmap.yaml
 
 echo "Creating a User-Certificate auth-provider..."
-curl -k -X POST "$ROX_API_ENDPOINT/v1/authProviders" \
+curl -k -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
   -H "Authorization: Bearer $ROX_API_TOKEN" \
   --data-raw "$(envsubst < rhacs/auth-provider.json.tpl)"
 
