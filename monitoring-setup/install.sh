@@ -15,18 +15,43 @@ oc project stackrox
 echo "Installing Cluster Observability Operator..."
 oc apply -f monitoring-examples/cluster-observability-operator/subscription.yaml
 
-echo "Generating user certificates in $SCRIPT_DIR..."
-# Generate certificates in the monitoring-setup directory
-rm -f tls.key tls.crt
-openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-        -subj "/CN=sample-stackrox-monitoring-stack-prometheus.stackrox.svc" \
-        -keyout tls.key -out tls.crt
+echo "Generating CA and client certificates in $SCRIPT_DIR..."
 
-# Create TLS secret
+# Clean up any existing certificates
+rm -f ca.key ca.crt ca.srl client.key client.crt client.csr
+
+# Step 1: Create a proper CA (Certificate Authority)
+echo "Creating CA certificate..."
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 1825 -out ca.crt \
+  -subj "/CN=Monitoring Root CA/O=RHACS Demo" \
+  -addext "basicConstraints=CA:TRUE"
+
+# Step 2: Generate client certificate signed by the CA
+echo "Creating client certificate..."
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -out client.csr \
+  -subj "/CN=monitoring-user/O=Monitoring Team"
+
+# Sign the client cert with the CA and add clientAuth extended key usage
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out client.crt -days 365 -sha256 \
+  -extfile <(printf "extendedKeyUsage=clientAuth")
+
+# Clean up intermediate files
+rm -f client.csr ca.srl
+
+# Create TLS secret for Prometheus using the client certificate
 kubectl delete secret sample-stackrox-prometheus-tls -n stackrox 2>/dev/null || true
-kubectl create secret tls sample-stackrox-prometheus-tls --cert=tls.crt --key=tls.key -n stackrox
+kubectl create secret tls sample-stackrox-prometheus-tls --cert=client.crt --key=client.key -n stackrox
 
-export TLS_CERT=$(awk '{printf "%s\\n", $0}' tls.crt)
+# Export the CA certificate for the auth provider (this is what goes in the userpki config)
+# The auth provider trusts certificates signed by this CA
+export TLS_CERT=$(awk '{printf "%s\\n", $0}' ca.crt)
+
+echo "✓ Certificates generated successfully"
+echo "  CA: $(openssl x509 -in ca.crt -noout -subject -dates | head -1)"
+echo "  Client: $(openssl x509 -in client.crt -noout -subject -dates | head -1)"
 
 echo "Installing and configuring a monitoring stack instance..."
 oc apply -f monitoring-examples/cluster-observability-operator/monitoring-stack.yaml
@@ -102,9 +127,18 @@ else
 fi
 
 echo ""
+echo "============================================"
 echo "Installation complete!"
-echo "Certificates created at: $SCRIPT_DIR/tls.crt and $SCRIPT_DIR/tls.key"
+echo "============================================"
 echo ""
-echo "You can test the authentication with:"
+echo "Certificates created in: $SCRIPT_DIR/"
+echo "  - ca.crt / ca.key          (CA certificate - configured in auth provider)"
+echo "  - client.crt / client.key  (Client certificate - use for API calls)"
+echo ""
+echo "Test the authentication with:"
 echo "  cd $SCRIPT_DIR"
-echo "  curl --cert tls.crt --key tls.key \$ROX_CENTRAL_URL/v1/auth/status"
+echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
+echo ""
+echo "Note: The auth provider was configured with the CA certificate (ca.crt),"
+echo "      and clients authenticate using certificates signed by that CA (client.crt)."
+echo ""
