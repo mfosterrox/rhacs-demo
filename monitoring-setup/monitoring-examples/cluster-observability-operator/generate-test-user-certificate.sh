@@ -13,4 +13,4 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
         -keyout tls.key -out tls.crt
 
 # Create TLS secret in the current namespace:
-kubectl create secret tls sample-stackrox-prometheus-tls --cert=tls.crt --key=tls.key
+kubectl create secret tls sample-stackrox-prometheus-tls --cert=tls.crt --key=tls.key -n stackrox 
