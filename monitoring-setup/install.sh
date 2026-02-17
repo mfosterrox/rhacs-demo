@@ -421,8 +421,19 @@ create_userpki_auth_provider() {
         
         rm -rf "${temp_dir}"
         
+        # Add gRPC ALPN fix to ~/.bashrc if not already there
+        if [ -f ~/.bashrc ] && ! grep -q "GRPC_GO_REQUIRE_HANDSHAKE_ON" ~/.bashrc; then
+            echo "" >> ~/.bashrc
+            echo "# Fix for gRPC ALPN handshake issues with roxctl" >> ~/.bashrc
+            echo "export GRPC_GO_REQUIRE_HANDSHAKE_ON=off" >> ~/.bashrc
+            log "Added GRPC_GO_REQUIRE_HANDSHAKE_ON=off to ~/.bashrc"
+        fi
+        
+        # Export it for current session
+        export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+        
         # Verify installation
-        if command -v roxctl &>/dev/null && roxctl version >/dev/null 2>&1; then
+        if command -v roxctl &>/dev/null && GRPC_GO_REQUIRE_HANDSHAKE_ON=off roxctl version >/dev/null 2>&1; then
             ROXCTL_CMD="roxctl"
             log "✓ roxctl successfully installed and verified"
         else
@@ -432,6 +443,9 @@ create_userpki_auth_provider() {
             return 0
         fi
     fi
+    
+    # Ensure GRPC fix is set for roxctl operations
+    export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
     
     if [ -n "${ROXCTL_CMD:-}" ]; then
         # Normalize ROX_ENDPOINT for roxctl

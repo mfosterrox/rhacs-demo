@@ -184,6 +184,17 @@ install_roxctl() {
         print_info "Please run: source ~/.bashrc"
     fi
     
+    # Add gRPC ALPN fix to ~/.bashrc if not already there
+    if [ -f ~/.bashrc ] && ! grep -q "GRPC_GO_REQUIRE_HANDSHAKE_ON" ~/.bashrc; then
+        echo "" >> ~/.bashrc
+        echo "# Fix for gRPC ALPN handshake issues with roxctl" >> ~/.bashrc
+        echo "export GRPC_GO_REQUIRE_HANDSHAKE_ON=off" >> ~/.bashrc
+        print_info "Added GRPC_GO_REQUIRE_HANDSHAKE_ON=off to ~/.bashrc"
+    fi
+    
+    # Export it for current session
+    export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+    
     echo ""
 }
 

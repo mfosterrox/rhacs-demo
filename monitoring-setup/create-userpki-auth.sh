@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+# Fix for gRPC ALPN handshake issues
+export GRPC_GO_REQUIRE_HANDSHAKE_ON=off
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
