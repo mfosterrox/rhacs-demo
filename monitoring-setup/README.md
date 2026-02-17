@@ -29,11 +29,11 @@ The `roxctl` CLI expects `host:port` format for the `-e` flag and defaults to `h
 # Correct usage with roxctl
 export ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
 ROX_ENDPOINT="${ROX_CENTRAL_URL#https://}"  # Strips https:// prefix
-roxctl -e "$ROX_ENDPOINT" central userpki list
+roxctl -e "$ROX_ENDPOINT:443" central userpki list
 
 # Alternative: use the helper function in the scripts
 ROX_ENDPOINT=$(get_rox_endpoint)
-roxctl -e "$ROX_ENDPOINT" central userpki list
+roxctl -e "$ROX_ENDPOINT:443" central userpki list
 ```
 
 For `curl` commands, use the full URL with `https://`:

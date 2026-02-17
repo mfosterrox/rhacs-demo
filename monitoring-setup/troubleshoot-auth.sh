@@ -44,13 +44,30 @@ fi
 
 echo "1. Checking auth provider..."
 ROX_ENDPOINT="${ROX_CENTRAL_URL#https://}"
-AUTH_PROVIDERS=$(roxctl -e "$ROX_ENDPOINT" central userpki list --insecure-skip-tls-verify 2>&1 || echo "")
 
-if echo "$AUTH_PROVIDERS" | grep -q "Monitoring"; then
+# Try with :443 port if not already present
+if [[ ! "$ROX_ENDPOINT" =~ :[0-9]+$ ]]; then
+  ROX_ENDPOINT_WITH_PORT="${ROX_ENDPOINT}:443"
+else
+  ROX_ENDPOINT_WITH_PORT="$ROX_ENDPOINT"
+fi
+
+AUTH_PROVIDERS=$(roxctl -e "$ROX_ENDPOINT_WITH_PORT" central userpki list --insecure-skip-tls-verify 2>&1)
+ROXCTL_EXIT_CODE=$?
+
+if [ $ROXCTL_EXIT_CODE -ne 0 ]; then
+  error "Failed to list auth providers (roxctl exit code: $ROXCTL_EXIT_CODE)"
+  echo "Output: $AUTH_PROVIDERS"
+  exit 1
+fi
+
+if echo "$AUTH_PROVIDERS" | grep -q "Provider: Monitoring"; then
   log "✓ Auth provider 'Monitoring' found"
   echo "$AUTH_PROVIDERS" | grep -A7 "Provider: Monitoring"
 else
   error "Auth provider 'Monitoring' not found"
+  echo "Available providers:"
+  echo "$AUTH_PROVIDERS"
   exit 1
 fi
 
