@@ -51,27 +51,58 @@ Run the comprehensive setup script:
 
 ```bash
 cd monitoring-setup
+export ROX_CENTRAL_URL="https://your-central-url"
+export ROX_API_TOKEN="your-api-token"
 ./install.sh
 ```
 
 **What this script does:**
 
-1. Validates prerequisites (oc/kubectl, openssl)
-2. Checks cluster admin privileges
-3. Detects ROX Central URL and saves to `~/.bashrc`
-4. Auto-generates or loads `ROX_API_TOKEN` and saves to `~/.bashrc`
-5. Configures gRPC ALPN fix (`GRPC_ENFORCE_ALPN_ENABLED=false`)
-6. Generates TLS certificates for Prometheus
-7. Installs roxctl CLI permanently (if not already installed)
-8. Creates UserPKI auth provider in RHACS
-9. Applies RHACS declarative configuration
-10. Installs Cluster Observability Operator
-11. Deploys monitoring stack (Prometheus + Alertmanager)
-12. Installs Prometheus resources
-13. Deploys Perses dashboards
-14. Runs comprehensive diagnostics
+The installation is broken into three modular scripts:
+
+1. **`01-setup-certificates.sh`** - Certificate Generation
+   - Creates CA certificate for auth provider
+   - Generates client certificate for Prometheus
+   - Creates Kubernetes secret for monitoring stack
+   - Exports TLS_CERT environment variable
+
+2. **`02-install-monitoring.sh`** - Monitoring Stack Installation
+   - Installs Cluster Observability Operator subscription
+   - Deploys MonitoringStack (Prometheus + Alertmanager)
+   - Configures ScrapeConfig for RHACS metrics
+   - Installs Perses UI plugin, datasource, and dashboard
+
+3. **`03-configure-rhacs-auth.sh`** - RHACS Authentication Configuration
+   - Applies declarative configuration (roles & permissions)
+   - Enables declarative config mount on Central
+   - Creates User-Certificate auth provider
+   - Creates Admin group mapping for the auth provider
+
+4. **Verification & Testing**
+   - Validates group mappings exist
+   - Tests client certificate authentication
+   - Provides troubleshooting guidance
 
 **Note**: The script is idempotent and safe to run multiple times.
+
+### Manual Step-by-Step Setup
+
+You can also run each script individually:
+
+```bash
+cd monitoring-setup
+
+# Step 1: Generate certificates
+./01-setup-certificates.sh
+
+# Step 2: Install monitoring components
+./02-install-monitoring.sh
+
+# Step 3: Configure RHACS authentication
+export ROX_CENTRAL_URL="https://your-central-url"
+export ROX_API_TOKEN="your-api-token"
+./03-configure-rhacs-auth.sh
+```
 
 ### Option 2: Manual Setup
 
@@ -400,15 +431,22 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 ```
 monitoring-setup/
 ├── README.md                           # This file
-├── INSTALL-GUIDE.md                    # Detailed installation guide
-├── install.sh                          # Main installation script
+├── install.sh                          # Main orchestrator script
+├── 01-setup-certificates.sh            # Certificate generation
+├── 02-install-monitoring.sh            # Monitoring stack installation
+├── 03-configure-rhacs-auth.sh          # RHACS auth configuration
+├── troubleshoot-auth.sh                # Authentication troubleshooting
+├── reset.sh                            # Cleanup script
 └── monitoring-examples/                # Configuration examples
     ├── README.md                       # General overview
     ├── rhacs/                          # RHACS-specific configuration
     │   ├── README.md
-    │   └── declarative-configuration-configmap.yaml
+    │   ├── declarative-configuration-configmap.yaml
+    │   ├── auth-provider.json.tpl
+    │   └── admin-group.json.tpl
     ├── cluster-observability-operator/ # COO configuration
     │   ├── README.md
+    │   ├── subscription.yaml
     │   ├── monitoring-stack.yaml
     │   ├── scrape-config.yaml
     │   └── generate-test-user-certificate.sh

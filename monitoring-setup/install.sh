@@ -1,10 +1,22 @@
 #!/bin/bash
 #
-# RHACS Monitoring Setup Script
-# Follows the official monitoring-examples installation flow
+# RHACS Monitoring Setup - Main Installation Script
+# Orchestrates the complete monitoring setup by calling individual setup scripts
 #
 
 set -euo pipefail
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
+step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
 # Get the script directory and ensure we're in it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +31,7 @@ cd "$SCRIPT_DIR"
 #
 # Usage:
 #   ROX_ENDPOINT=$(get_rox_endpoint)
-#   roxctl -e "$ROX_ENDPOINT" central userpki create ...
+#   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki list ...
 #
 # Example:
 #   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
@@ -30,138 +42,108 @@ get_rox_endpoint() {
     echo "${url#https://}"
 }
 
-oc project stackrox
+#================================================================
+# Pre-flight Checks
+#================================================================
 
-echo "Installing Cluster Observability Operator..."
-oc apply -f monitoring-examples/cluster-observability-operator/subscription.yaml
+echo ""
+echo "=============================================="
+echo "  RHACS Monitoring Setup"
+echo "=============================================="
+echo ""
 
-echo "Generating CA and client certificates in $SCRIPT_DIR..."
+log "Starting installation..."
+echo ""
 
-# Clean up any existing certificates
-rm -f ca.key ca.crt ca.srl client.key client.crt client.csr
+# Check required environment variables
+MISSING_VARS=0
 
-# Step 1: Create a proper CA (Certificate Authority)
-echo "Creating CA certificate..."
-openssl genrsa -out ca.key 4096
-openssl req -x509 -new -nodes -key ca.key -sha256 -days 1825 -out ca.crt \
-  -subj "/CN=Monitoring Root CA/O=RHACS Demo" \
-  -addext "basicConstraints=CA:TRUE"
+if [ -z "${ROX_CENTRAL_URL:-}" ]; then
+  error "ROX_CENTRAL_URL is not set"
+  MISSING_VARS=$((MISSING_VARS + 1))
+fi
 
-# Step 2: Generate client certificate signed by the CA
-echo "Creating client certificate..."
-openssl genrsa -out client.key 2048
-openssl req -new -key client.key -out client.csr \
-  -subj "/CN=monitoring-user/O=Monitoring Team"
+if [ -z "${ROX_API_TOKEN:-}" ]; then
+  error "ROX_API_TOKEN is not set"
+  MISSING_VARS=$((MISSING_VARS + 1))
+fi
 
-# Sign the client cert with the CA and add clientAuth extended key usage
-openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
-  -out client.crt -days 365 -sha256 \
-  -extfile <(printf "extendedKeyUsage=clientAuth")
+if [ $MISSING_VARS -gt 0 ]; then
+  echo ""
+  error "Missing required environment variables. Please set them and try again."
+  echo ""
+  echo "Example:"
+  echo "  export ROX_CENTRAL_URL='https://central-stackrox.apps.cluster.com'"
+  echo "  export ROX_API_TOKEN='your-api-token'"
+  echo ""
+  exit 1
+fi
 
-# Clean up intermediate files
-rm -f client.csr ca.srl
+log "✓ Required environment variables are set"
+echo ""
 
-# Create TLS secret for Prometheus using the client certificate
-kubectl delete secret sample-stackrox-prometheus-tls -n stackrox 2>/dev/null || true
-kubectl create secret tls sample-stackrox-prometheus-tls --cert=client.crt --key=client.key -n stackrox
+#================================================================
+# Step 1: Setup Certificates
+#================================================================
 
-# Export the CA certificate for the auth provider (this is what goes in the userpki config)
-# The auth provider trusts certificates signed by this CA
-export TLS_CERT=$(awk '{printf "%s\\n", $0}' ca.crt)
+step "Step 1 of 3: Setting up certificates"
+echo ""
 
-echo "✓ Certificates generated successfully"
-echo "  CA: $(openssl x509 -in ca.crt -noout -subject -dates | head -1)"
-echo "  Client: $(openssl x509 -in client.crt -noout -subject -dates | head -1)"
+if [ ! -x "$SCRIPT_DIR/01-setup-certificates.sh" ]; then
+  chmod +x "$SCRIPT_DIR/01-setup-certificates.sh"
+fi
 
-echo "Installing and configuring a monitoring stack instance..."
-oc apply -f monitoring-examples/cluster-observability-operator/monitoring-stack.yaml
-oc apply -f monitoring-examples/cluster-observability-operator/scrape-config.yaml
-
-echo "Installing Perses and configuring the RHACS dashboard..."
-oc apply -f monitoring-examples/perses/ui-plugin.yaml
-oc apply -f monitoring-examples/perses/datasource.yaml
-oc apply -f monitoring-examples/perses/dashboard.yaml
-
-echo "Declaring a permission set and a role in RHACS..."
-
-# First, create the declarative configuration ConfigMap
-oc apply -f monitoring-examples/rhacs/declarative-configuration-configmap.yaml
-
-# Check if declarative configuration is enabled on Central
-echo "Checking if declarative configuration is enabled on Central..."
-if oc get deployment central -n stackrox -o yaml | grep -q "declarative-config"; then
-  echo "✓ Declarative configuration is already enabled"
+if "$SCRIPT_DIR/01-setup-certificates.sh"; then
+  log "✓ Certificate setup complete"
 else
-  echo "⚠ Declarative configuration mount not found on Central deployment"
-  echo "Enabling declarative configuration on Central..."
-  
-  # Check if Central is managed by operator or deployed directly
-  if oc get central stackrox-central-services -n stackrox &>/dev/null; then
-    echo "Using RHACS Operator to enable declarative configuration..."
-    oc patch central stackrox-central-services -n stackrox --type=merge -p='
-spec:
-  central:
-    declarativeConfiguration:
-      configMaps:
-      - name: sample-stackrox-prometheus-declarative-configuration
-'
-    echo "Waiting for Central to update..."
-    sleep 10
-  else
-    echo "Directly patching Central deployment..."
-    # For non-operator deployments, manually add volume and mount
-    oc set volume deployment/central -n stackrox \
-      --add --name=declarative-config \
-      --type=configmap \
-      --configmap-name=sample-stackrox-prometheus-declarative-configuration \
-      --mount-path=/run/secrets/stackrox.io/declarative-config \
-      --read-only=true
-  fi
-  
-  echo "Waiting for Central to restart..."
-  oc rollout status deployment/central -n stackrox --timeout=300s
-  echo "✓ Declarative configuration enabled"
+  error "Certificate setup failed"
+  exit 1
 fi
 
-echo "Checking for existing 'Monitoring' auth provider..."
+# Load certificate environment
+if [ -f "$SCRIPT_DIR/.env.certs" ]; then
+  source "$SCRIPT_DIR/.env.certs"
+fi
 
-# Get all auth providers and extract the ID for "Monitoring"
-if command -v jq &>/dev/null; then
-  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
-    -H "Authorization: Bearer $ROX_API_TOKEN" | \
-    jq -r '.authProviders[]? | select(.name=="Monitoring") | .id' 2>/dev/null)
+#================================================================
+# Step 2: Install Monitoring Stack
+#================================================================
+
+step "Step 2 of 3: Installing monitoring stack"
+echo ""
+
+if [ ! -x "$SCRIPT_DIR/02-install-monitoring.sh" ]; then
+  chmod +x "$SCRIPT_DIR/02-install-monitoring.sh"
+fi
+
+if "$SCRIPT_DIR/02-install-monitoring.sh"; then
+  log "✓ Monitoring stack installation complete"
 else
-  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
-    -H "Authorization: Bearer $ROX_API_TOKEN" | \
-    grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
+  error "Monitoring stack installation failed"
+  exit 1
 fi
 
-# Delete if exists
-if [ -n "$EXISTING_AUTH_ID" ] && [ "$EXISTING_AUTH_ID" != "null" ]; then
-  echo "Deleting existing 'Monitoring' auth provider (ID: $EXISTING_AUTH_ID)..."
-  curl -k -s -X DELETE "$ROX_CENTRAL_URL/v1/authProviders/$EXISTING_AUTH_ID" \
-    -H "Authorization: Bearer $ROX_API_TOKEN" > /dev/null
-  echo "✓ Deleted existing auth provider"
-  sleep 2
+#================================================================
+# Step 3: Configure RHACS Authentication
+#================================================================
+
+step "Step 3 of 3: Configuring RHACS authentication"
+echo ""
+
+if [ ! -x "$SCRIPT_DIR/03-configure-rhacs-auth.sh" ]; then
+  chmod +x "$SCRIPT_DIR/03-configure-rhacs-auth.sh"
 fi
 
-echo "Creating a User-Certificate auth-provider..."
-AUTH_PROVIDER_RESPONSE=$(curl -k -s -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
-  -H "Authorization: Bearer $ROX_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  --data-raw "$(envsubst < monitoring-examples/rhacs/auth-provider.json.tpl)")
-
-# Extract the auth provider ID from the response (try multiple patterns)
-export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"id"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/')
-
-# If grep/sed didn't work, try jq if available
-if [ -z "$AUTH_PROVIDER_ID" ] && command -v jq &>/dev/null; then
-  export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+if "$SCRIPT_DIR/03-configure-rhacs-auth.sh"; then
+  log "✓ RHACS authentication configuration complete"
+else
+  error "RHACS authentication configuration failed"
+  exit 1
 fi
 
-if [ -n "$AUTH_PROVIDER_ID" ]; then
-  echo "✓ Auth provider created with ID: $AUTH_PROVIDER_ID"
-fi
+#================================================================
+# Verification
+#================================================================
 
 echo ""
 echo "============================================"
@@ -170,40 +152,58 @@ echo "============================================"
 echo ""
 
 # Give auth system time to propagate changes
-echo "Waiting for auth configuration to propagate (10 seconds)..."
+log "Waiting for auth configuration to propagate (10 seconds)..."
 sleep 10
 
+# Extract auth provider ID (set by 03-configure-rhacs-auth.sh)
+if [ -z "${AUTH_PROVIDER_ID:-}" ]; then
+  # Try to get it from the API
+  if command -v jq &>/dev/null; then
+    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+      -H "Authorization: Bearer $ROX_API_TOKEN" | \
+      jq -r '.authProviders[]? | select(.name=="Monitoring") | .id' 2>/dev/null)
+  else
+    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+      -H "Authorization: Bearer $ROX_API_TOKEN" | \
+      grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
+  fi
+fi
+
 # Verify the group was created
-echo "Checking groups for auth provider..."
+log "Checking groups for auth provider..."
 GROUPS_LIST=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups" | grep -A5 "$AUTH_PROVIDER_ID" || echo "")
 
 if [ -n "$GROUPS_LIST" ]; then
-  echo "✓ Group mapping found for Monitoring auth provider"
+  log "✓ Group mapping found for Monitoring auth provider"
   
   # Test client certificate authentication
   echo ""
-  echo "Testing client certificate authentication..."
+  log "Testing client certificate authentication..."
   AUTH_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_URL/v1/auth/status" 2>&1)
   
   if echo "$AUTH_TEST" | grep -q '"userId"'; then
-    echo "✓ Client certificate authentication successful!"
+    log "✓ Client certificate authentication successful!"
   elif echo "$AUTH_TEST" | grep -q "credentials not found"; then
-    echo "⚠ Authentication failed: credentials not found"
+    warn "Authentication failed: credentials not found"
     echo ""
-    echo "This may take 10-30 seconds to propagate. Wait a moment and try:"
+    warn "This may take 10-30 seconds to propagate. Wait a moment and try:"
     echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
     echo ""
-    echo "If it continues to fail, run the troubleshooting script:"
+    warn "If it continues to fail, run the troubleshooting script:"
     echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
   else
-    echo "⚠ Unexpected response: $AUTH_TEST"
+    warn "Unexpected response: $AUTH_TEST"
   fi
 else
-  echo "⚠ No group mapping found - authentication will fail!"
+  warn "No group mapping found - authentication may fail!"
   echo ""
-  echo "Run the troubleshooting script to diagnose and fix:"
+  warn "Run the troubleshooting script to diagnose and fix:"
   echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
 fi
+
+#================================================================
+# Installation Complete
+#================================================================
 
 echo ""
 echo "============================================"
@@ -223,7 +223,11 @@ echo "  ./troubleshoot-auth.sh"
 echo ""
 echo "Verify configuration with roxctl:"
 echo "  ROX_ENDPOINT=\${ROX_CENTRAL_URL#https://}"
-echo "  roxctl -e \"\$ROX_ENDPOINT:443\" central userpki list --insecure-skip-tls-verify"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central userpki list --insecure-skip-tls-verify"
+echo "  roxctl -e \"\$ROX_ENDPOINT\" --token \"\$ROX_API_TOKEN\" central group list --insecure-skip-tls-verify"
 echo ""
 echo "Note: Auth changes may take 10-30 seconds to propagate."
 echo ""
+
+# Clean up temporary environment file
+rm -f "$SCRIPT_DIR/.env.certs"
