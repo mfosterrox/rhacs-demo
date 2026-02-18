@@ -4,5 +4,5 @@
     "key": "",
     "value": ""
   },
-  "roleName": "Admin"
+  "roleName": "Prometheus Server"
 }
