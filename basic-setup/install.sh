@@ -426,11 +426,12 @@ main() {
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
     
-    # Set RHACS version (defaults to 4.9.2 if not provided)
-    if [ -z "${RHACS_VERSION:-}" ]; then
-        export RHACS_VERSION="4.9.2"
+    # RHACS version is optional - if not set, no version enforcement will occur
+    if [ -n "${RHACS_VERSION:-}" ]; then
+        print_info "Target RHACS version specified: ${RHACS_VERSION}"
+    else
+        print_info "No target RHACS version specified - will use currently installed version"
     fi
-    print_info "Using RHACS version: ${RHACS_VERSION}"
     
     echo ""  # Ensure output is flushed
     

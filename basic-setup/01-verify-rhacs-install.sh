@@ -258,9 +258,33 @@ check_and_update_version() {
             return 0
         fi
         
-        # Version doesn't match, proceed with update
-        print_info "Current version/tag does not match target. Proceeding with update..."
-        update_rhacs_version "${RHACS_VERSION}"
+        # Check if this would be a downgrade
+        if [ "${installed_version}" != "unknown" ] && [ "${RHACS_VERSION}" != "unknown" ]; then
+            # Simple version comparison (works for versions like 4.9.2 vs 4.9.3)
+            if [ "$(printf '%s\n' "${RHACS_VERSION}" "${installed_version}" | sort -V | head -n1)" = "${RHACS_VERSION}" ] && \
+               [ "${RHACS_VERSION}" != "${installed_version}" ]; then
+                print_warn "⚠️  Warning: Target version ${RHACS_VERSION} is older than installed version ${installed_version}"
+                print_warn "This would be a DOWNGRADE!"
+                
+                # Check if force downgrade is enabled
+                if [ "${RHACS_FORCE_DOWNGRADE:-false}" = "true" ]; then
+                    print_warn "RHACS_FORCE_DOWNGRADE=true - proceeding with downgrade..."
+                    update_rhacs_version "${RHACS_VERSION}"
+                else
+                    print_error "Refusing to downgrade. To force downgrade, set: export RHACS_FORCE_DOWNGRADE=true"
+                    print_info "Keeping current version: ${installed_version}"
+                    return 0
+                fi
+            else
+                # Version doesn't match and is not a downgrade, proceed with update
+                print_info "Current version ${installed_version} -> Target version ${RHACS_VERSION}"
+                update_rhacs_version "${RHACS_VERSION}"
+            fi
+        else
+            # Can't determine versions, proceed with update
+            print_info "Current version/tag does not match target. Proceeding with update..."
+            update_rhacs_version "${RHACS_VERSION}"
+        fi
         
     elif [ "${installed_version}" != "${latest_version}" ] && [ "${latest_version}" != "unknown" ] && [ "${installed_version}" != "unknown" ]; then
         print_info "Update available: ${installed_version} -> ${latest_version}"

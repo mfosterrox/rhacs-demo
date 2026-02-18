@@ -70,6 +70,45 @@ cd basic-setup
 3. ✅ Runs all setup scripts 01-07 in sequence
 4. ✅ Configures complete RHACS demo environment with custom TLS
 
+### Version Management
+
+The script intelligently handles RHACS version management:
+
+**Default Behavior (No version specified):**
+```bash
+./install.sh
+```
+- Uses whatever version is currently installed
+- Will upgrade to latest if operator offers an upgrade
+- **Never downgrades automatically**
+
+**Pin to Specific Version:**
+```bash
+export RHACS_VERSION="4.9.3"
+./install.sh
+```
+- Upgrades if current version is older
+- Refuses to downgrade if current version is newer
+- Shows warning if trying to downgrade
+
+**Force Downgrade (Use with caution):**
+```bash
+export RHACS_VERSION="4.9.2"
+export RHACS_FORCE_DOWNGRADE=true
+./install.sh
+```
+- Forces downgrade even if current version is newer
+- Useful for testing or reverting to a known-good version
+
+**Example Scenarios:**
+
+| Current Version | Target Version | RHACS_FORCE_DOWNGRADE | Result |
+|-----------------|----------------|----------------------|--------|
+| 4.9.3 | (not set) | - | Keeps 4.9.3 |
+| 4.9.2 | 4.9.3 | - | Upgrades to 4.9.3 ✓ |
+| 4.9.3 | 4.9.2 | false | Refuses, keeps 4.9.3 ✓ |
+| 4.9.3 | 4.9.2 | true | Downgrades to 4.9.2 ⚠️ |
+
 ## Setup Scripts
 
 The following scripts are executed in numerical order:
@@ -185,7 +224,11 @@ The install script checks for required variables in this order:
 #### Optional
 - `RHACS_NAMESPACE` - RHACS namespace (default: `stackrox`)
 - `RHACS_ROUTE_NAME` - Route name (default: `central`)
-- `RHACS_VERSION` - Target version (default: `4.9.2`)
+- `RHACS_VERSION` - Target RHACS version (optional)
+  - If not set: Uses currently installed version (no version enforcement)
+  - If set to older version: Refuses to downgrade unless `RHACS_FORCE_DOWNGRADE=true`
+  - If set to newer version: Upgrades to specified version
+- `RHACS_FORCE_DOWNGRADE` - Allow downgrade to older version (default: `false`)
 
 #### Auto-Generated
 - `ROX_API_TOKEN` - API token for RHACS operations
