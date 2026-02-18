@@ -133,24 +133,66 @@ fi
 if [ -n "$AUTH_PROVIDER_ID" ]; then
   log "✓ Auth provider created with ID: $AUTH_PROVIDER_ID"
   
-  # Create group mapping
-  log "Creating Admin group mapping..."
+  # Wait a moment for auth provider to fully initialize
+  sleep 2
+  
+  # Create group mapping with Prometheus Server role
+  log "Creating 'Prometheus Server' role group mapping..."
+  
+  GROUP_PAYLOAD=$(envsubst < monitoring-examples/rhacs/admin-group.json.tpl)
+  log "Group payload: $GROUP_PAYLOAD"
+  
   GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/groups" \
     -H "Authorization: Bearer $ROX_API_TOKEN" \
     -H "Content-Type: application/json" \
-    --data-raw "$(envsubst < monitoring-examples/rhacs/admin-group.json.tpl)")
+    --data-raw "$GROUP_PAYLOAD")
   
   HTTP_CODE=$(echo "$GROUP_RESPONSE" | tail -1)
   RESPONSE_BODY=$(echo "$GROUP_RESPONSE" | head -n -1)
   
-  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE_BODY" | grep -q '"props"'; then
-    log "✓ Admin role assigned (HTTP $HTTP_CODE)"
+  if [ "$HTTP_CODE" = "200" ]; then
+    if echo "$RESPONSE_BODY" | grep -q '"props"'; then
+      log "✓ Group created successfully (HTTP $HTTP_CODE)"
+      log "Role 'Prometheus Server' assigned to Monitoring auth provider"
+    else
+      log "✓ API returned success (HTTP $HTTP_CODE)"
+    fi
     warn "Auth changes may take 10-30 seconds to propagate"
   elif [ "$HTTP_CODE" = "409" ]; then
     log "✓ Group already exists for Monitoring auth provider"
   else
-    warn "Group creation may have failed (HTTP $HTTP_CODE)"
-    warn "Run troubleshoot-auth.sh if authentication doesn't work"
+    error "Group creation failed (HTTP $HTTP_CODE)"
+    error "Response: $RESPONSE_BODY"
+    echo ""
+    warn "Attempting to verify if group exists..."
+    
+    # Check if any groups exist for this auth provider
+    EXISTING_GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups" | \
+      grep -A10 "$AUTH_PROVIDER_ID" || echo "")
+    
+    if [ -n "$EXISTING_GROUPS" ]; then
+      log "✓ Found existing group for this auth provider"
+    else
+      error "No groups found for auth provider ID: $AUTH_PROVIDER_ID"
+      error ""
+      error "Manual fix required:"
+      error "1. Via RHACS UI:"
+      error "   Platform Configuration → Access Control → Groups → Create Group"
+      error "   - Auth Provider: Monitoring"
+      error "   - Key: (leave empty)"
+      error "   - Value: (leave empty)"
+      error "   - Role: Prometheus Server"
+      error ""
+      error "2. Via API:"
+      error "   curl -k -X POST \"\$ROX_CENTRAL_URL/v1/groups\" \\"
+      error "     -H \"Authorization: Bearer \$ROX_API_TOKEN\" \\"
+      error "     -H \"Content-Type: application/json\" \\"
+      error "     -d '{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Prometheus Server\"}'"
+      error ""
+      error "3. Run troubleshoot script:"
+      error "   cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
+      exit 1
+    fi
   fi
 else
   error "Failed to extract auth provider ID"

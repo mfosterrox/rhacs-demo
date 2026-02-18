@@ -370,7 +370,7 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
    curl -k -X POST "$ROX_CENTRAL_URL/v1/groups" \
      -H "Authorization: Bearer $ROX_API_TOKEN" \
      -H "Content-Type: application/json" \
-     -d "{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Admin\"}"
+     -d "{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Prometheus Server\"}"
    ```
 
 ### Issue: Prometheus can't scrape RHACS metrics

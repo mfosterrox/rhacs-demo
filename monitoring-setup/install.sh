@@ -183,11 +183,30 @@ if [ -n "$GROUPS_LIST" ]; then
   
   if echo "$AUTH_TEST" | grep -q '"userId"'; then
     log "✓ Client certificate authentication successful!"
+    
+    # Also test metrics endpoint
+    echo ""
+    log "Testing metrics endpoint access..."
+    METRICS_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_URL/metrics" 2>&1 | head -10)
+    
+    if echo "$METRICS_TEST" | grep -q "access for this user is not authorized"; then
+      error "✗ Metrics endpoint access denied: no valid role"
+      echo ""
+      error "The group mapping exists but the role assignment is incorrect."
+      error "Run the troubleshooting script to fix:"
+      echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
+    elif echo "$METRICS_TEST" | grep -q "^#"; then
+      log "✓ Metrics endpoint access successful!"
+    else
+      warn "Metrics endpoint returned unexpected response (first 10 lines):"
+      echo "$METRICS_TEST"
+    fi
   elif echo "$AUTH_TEST" | grep -q "credentials not found"; then
     warn "Authentication failed: credentials not found"
     echo ""
     warn "This may take 10-30 seconds to propagate. Wait a moment and try:"
     echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
+    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/metrics"
     echo ""
     warn "If it continues to fail, run the troubleshooting script:"
     echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"

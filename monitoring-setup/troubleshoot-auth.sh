@@ -98,9 +98,9 @@ elif echo "$AUTH_RESPONSE" | grep -q "credentials not found"; then
   CLIENT_CN=$(openssl x509 -in client.crt -noout -subject | sed 's/.*CN = //')
   echo "Client CN: $CLIENT_CN"
   
-  GROUP_PAYLOAD_WITH_CN="{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"name\",\"value\":\"$CLIENT_CN\"},\"roleName\":\"Admin\"}"
+  GROUP_PAYLOAD_WITH_CN="{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"name\",\"value\":\"$CLIENT_CN\"},\"roleName\":\"Prometheus Server\"}"
   
-  echo "Creating group with CN mapping..."
+  echo "Creating group with CN mapping and 'Prometheus Server' role..."
   GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/groups" \
     -H "Authorization: Bearer $ROX_API_TOKEN" \
     -H "Content-Type: application/json" \
