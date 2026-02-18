@@ -430,25 +430,45 @@ install_virtctl() {
     print_info "Downloading virtctl..."
     
     # Get latest version
-    local latest_version=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+    local latest_version=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep '"tag_name"' | cut -d'"' -f4 2>/dev/null)
     
     if [ -z "$latest_version" ]; then
-        print_warn "Could not determine latest version, using stable URL"
-        latest_version="latest"
+        print_warn "Could not determine latest version from GitHub API, using v1.3.1"
+        latest_version="v1.3.1"
     else
         print_info "Latest version: $latest_version"
     fi
     
-    # Download virtctl
-    local download_url="https://github.com/kubevirt/kubevirt/releases/${latest_version}/download/${virtctl_binary}"
+    # Download virtctl (format: /download/VERSION/virtctl-binary)
+    local download_url="https://github.com/kubevirt/kubevirt/releases/download/${latest_version}/${virtctl_binary}"
     local temp_file="/tmp/virtctl-download"
     
-    if ! curl -L -o "$temp_file" "$download_url" 2>&1 | grep -v "%" || [ ! -f "$temp_file" ]; then
-        print_error "Failed to download virtctl"
+    # Remove any existing temp file
+    rm -f "$temp_file"
+    
+    print_info "Downloading from: ${download_url}"
+    
+    if ! curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
+        print_error "Failed to download virtctl from $download_url"
+        print_info "The URL may not exist for this version"
         return 1
     fi
     
-    print_info "✓ Downloaded virtctl"
+    if [ ! -f "$temp_file" ]; then
+        print_error "Download file not created"
+        return 1
+    fi
+    
+    # Verify it's actually a binary, not HTML or text
+    if ! file "$temp_file" | grep -q "executable"; then
+        print_error "Downloaded file is not an executable binary"
+        print_info "File type: $(file $temp_file)"
+        print_info "First line: $(head -1 $temp_file)"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    print_info "✓ Downloaded virtctl (verified binary)"
     
     # Make executable
     chmod +x "$temp_file"
