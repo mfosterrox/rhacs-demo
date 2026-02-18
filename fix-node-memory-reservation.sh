@@ -92,7 +92,7 @@ for node in $NODES; do
     
     # Get node memory capacity
     MEMORY_KB=$(oc get node "$NODE_NAME" -o jsonpath='{.status.capacity.memory}' | sed 's/Ki$//')
-    MEMORY_GB=$(echo "scale=2; $MEMORY_KB / 1024 / 1024" | bc)
+    MEMORY_GB=$(awk "BEGIN {printf \"%.2f\", $MEMORY_KB / 1024 / 1024}")
     
     # Get current system reserved (if any)
     CURRENT_RESERVED=$(oc get node "$NODE_NAME" -o jsonpath='{.status.allocatable.memory}' 2>/dev/null || echo "N/A")
@@ -118,7 +118,8 @@ if [ -z "$SYSTEM_RESERVED_MEMORY" ]; then
         oc get node "$NODE_NAME" -o jsonpath='{.status.capacity.memory}' | sed 's/Ki$//'
     done | sort -n | head -1)
     
-    MIN_MEMORY_GB=$(echo "scale=0; $MIN_MEMORY_KB / 1024 / 1024" | bc)
+    # Convert KB to GB using awk
+    MIN_MEMORY_GB=$(awk "BEGIN {printf \"%.0f\", $MIN_MEMORY_KB / 1024 / 1024}")
     
     # OpenShift recommended formula for system-reserved memory:
     # - 1GB for the first 4GB
@@ -130,7 +131,7 @@ if [ -z "$SYSTEM_RESERVED_MEMORY" ]; then
     if [ "$MIN_MEMORY_GB" -le 4 ]; then
         RESERVED_GB=1
     elif [ "$MIN_MEMORY_GB" -le 8 ]; then
-        RESERVED_GB=1.5
+        RESERVED_GB=2
     elif [ "$MIN_MEMORY_GB" -le 16 ]; then
         RESERVED_GB=2
     elif [ "$MIN_MEMORY_GB" -le 32 ]; then
@@ -141,11 +142,11 @@ if [ -z "$SYSTEM_RESERVED_MEMORY" ]; then
         RESERVED_GB=6
     else
         # For nodes > 128GB: 6GB + 2% of memory above 128GB
-        EXTRA=$(echo "scale=0; ($MIN_MEMORY_GB - 128) * 0.02" | bc)
-        RESERVED_GB=$(echo "6 + $EXTRA" | bc)
+        EXTRA=$(awk "BEGIN {printf \"%.0f\", ($MIN_MEMORY_GB - 128) * 0.02}")
+        RESERVED_GB=$(awk "BEGIN {printf \"%.0f\", 6 + $EXTRA}")
     fi
     
-    # Convert to Mi
+    # Convert to Gi
     SYSTEM_RESERVED_MEMORY="${RESERVED_GB}Gi"
     
     log "Node memory: ${MIN_MEMORY_GB}GB"
