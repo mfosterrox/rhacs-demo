@@ -12,6 +12,20 @@ RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent bina
 - RHACS installed (run `basic-setup` first)
 - OpenShift Virtualization operator installed
 - `oc` CLI authenticated
+- `virtctl` CLI (automatically installed by `install.sh`)
+
+### Installing virtctl manually
+
+If you need to install `virtctl` manually:
+
+```bash
+# Official recommended method
+VERSION=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+curl -L https://github.com/kubevirt/kubevirt/releases/download/${VERSION}/virtctl-${VERSION}-linux-amd64 -o virtctl
+chmod +x virtctl
+sudo mv virtctl /usr/local/bin/virtctl
+virtctl version --client
+```
 
 ## Quick Start
 

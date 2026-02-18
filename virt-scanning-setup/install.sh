@@ -429,62 +429,90 @@ install_virtctl() {
     print_info "Detected architecture: $arch"
     print_info "Downloading virtctl..."
     
-    # Try to get version from installed OpenShift Virtualization first
-    local kubevirt_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null)
-    
-    # List of known working versions to try (newest first)
-    local versions_to_try=(
-        "${kubevirt_version}"  # Try cluster version first if available
-        "v1.3.1"               # Known stable version
-        "v1.2.2"               # Fallback 1
-        "v1.1.1"               # Fallback 2
-        "v1.0.0"               # Last resort
-    )
-    
     local temp_file="/tmp/virtctl-download"
     local download_success=false
     
     # Remove any existing temp file
     rm -f "$temp_file"
     
-    # Try each version until one works
-    for version in "${versions_to_try[@]}"; do
-        # Skip empty versions
-        if [ -z "$version" ] || [ "$version" = "null" ]; then
-            continue
+    # Method 1: Official stable release (recommended)
+    print_info "Trying official stable release..."
+    local stable_version=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt 2>/dev/null)
+    
+    if [ -n "$stable_version" ] && [ "$stable_version" != "null" ]; then
+        print_info "Stable version: ${stable_version}"
+        
+        # Official URL format uses: virtctl-VERSION-linux-amd64
+        local official_binary="virtctl-${stable_version}-linux-amd64"
+        if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+            official_binary="virtctl-${stable_version}-linux-arm64"
         fi
         
-        local download_url="https://github.com/kubevirt/kubevirt/releases/download/${version}/${virtctl_binary}"
-        
-        print_info "Trying version: ${version}"
+        local download_url="https://github.com/kubevirt/kubevirt/releases/download/${stable_version}/${official_binary}"
         
         if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
-            # Check if it's actually a binary
             if file "$temp_file" 2>/dev/null | grep -q "executable"; then
-                print_info "✓ Successfully downloaded virtctl ${version}"
+                print_info "✓ Successfully downloaded virtctl ${stable_version} (official stable)"
                 download_success=true
-                break
             else
-                print_warn "Downloaded file is not executable, trying next version..."
+                print_warn "Downloaded file is not executable, trying alternative method..."
                 rm -f "$temp_file"
             fi
         else
-            print_warn "Version ${version} not available, trying next..."
+            print_warn "Official stable download failed, trying alternative versions..."
         fi
-    done
+    else
+        print_warn "Could not determine stable version, trying alternative method..."
+    fi
+    
+    # Method 2: Fallback to known working versions
+    if [ "$download_success" = false ]; then
+        print_info "Trying alternative download method..."
+        
+        # Try to get version from installed OpenShift Virtualization
+        local kubevirt_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null)
+        
+        local versions_to_try=(
+            "${kubevirt_version}"  # Cluster version if available
+            "v1.3.1"
+            "v1.2.2"
+            "v1.2.0"
+        )
+        
+        for version in "${versions_to_try[@]}"; do
+            # Skip empty versions
+            if [ -z "$version" ] || [ "$version" = "null" ]; then
+                continue
+            fi
+            
+            local download_url="https://github.com/kubevirt/kubevirt/releases/download/${version}/${virtctl_binary}"
+            
+            print_info "Trying version: ${version}"
+            
+            if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
+                if file "$temp_file" 2>/dev/null | grep -q "executable"; then
+                    print_info "✓ Successfully downloaded virtctl ${version}"
+                    download_success=true
+                    break
+                else
+                    rm -f "$temp_file"
+                fi
+            fi
+        done
+    fi
     
     if [ "$download_success" = false ]; then
-        print_error "Failed to download virtctl from any known version"
-        print_info "Tried versions: ${versions_to_try[*]}"
+        print_error "Failed to download virtctl"
         print_info ""
-        print_info "Manual installation:"
-        print_info "1. Visit: https://github.com/kubevirt/kubevirt/releases"
-        print_info "2. Download ${virtctl_binary} from a release that has it"
-        print_info "3. Run: sudo mv ${virtctl_binary} /usr/local/bin/virtctl && sudo chmod +x /usr/local/bin/virtctl"
+        print_info "Manual installation (recommended method):"
+        echo '  VERSION=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)'
+        echo '  curl -L https://github.com/kubevirt/kubevirt/releases/download/${VERSION}/virtctl-${VERSION}-linux-amd64 -o virtctl'
+        echo '  chmod +x virtctl'
+        echo '  sudo mv virtctl /usr/local/bin/virtctl'
         return 1
     fi
     
-    # Make executable (already verified as executable in the loop above)
+    # Make executable
     chmod +x "$temp_file"
     
     # Try to install to /usr/local/bin (preferred), fallback to ~/.local/bin
