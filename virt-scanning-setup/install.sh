@@ -429,48 +429,62 @@ install_virtctl() {
     print_info "Detected architecture: $arch"
     print_info "Downloading virtctl..."
     
-    # Get latest version
-    local latest_version=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep '"tag_name"' | cut -d'"' -f4 2>/dev/null)
+    # Try to get version from installed OpenShift Virtualization first
+    local kubevirt_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null)
     
-    if [ -z "$latest_version" ]; then
-        print_warn "Could not determine latest version from GitHub API, using v1.3.1"
-        latest_version="v1.3.1"
-    else
-        print_info "Latest version: $latest_version"
-    fi
+    # List of known working versions to try (newest first)
+    local versions_to_try=(
+        "${kubevirt_version}"  # Try cluster version first if available
+        "v1.3.1"               # Known stable version
+        "v1.2.2"               # Fallback 1
+        "v1.1.1"               # Fallback 2
+        "v1.0.0"               # Last resort
+    )
     
-    # Download virtctl (format: /download/VERSION/virtctl-binary)
-    local download_url="https://github.com/kubevirt/kubevirt/releases/download/${latest_version}/${virtctl_binary}"
     local temp_file="/tmp/virtctl-download"
+    local download_success=false
     
     # Remove any existing temp file
     rm -f "$temp_file"
     
-    print_info "Downloading from: ${download_url}"
+    # Try each version until one works
+    for version in "${versions_to_try[@]}"; do
+        # Skip empty versions
+        if [ -z "$version" ] || [ "$version" = "null" ]; then
+            continue
+        fi
+        
+        local download_url="https://github.com/kubevirt/kubevirt/releases/download/${version}/${virtctl_binary}"
+        
+        print_info "Trying version: ${version}"
+        
+        if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
+            # Check if it's actually a binary
+            if file "$temp_file" 2>/dev/null | grep -q "executable"; then
+                print_info "✓ Successfully downloaded virtctl ${version}"
+                download_success=true
+                break
+            else
+                print_warn "Downloaded file is not executable, trying next version..."
+                rm -f "$temp_file"
+            fi
+        else
+            print_warn "Version ${version} not available, trying next..."
+        fi
+    done
     
-    if ! curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
-        print_error "Failed to download virtctl from $download_url"
-        print_info "The URL may not exist for this version"
+    if [ "$download_success" = false ]; then
+        print_error "Failed to download virtctl from any known version"
+        print_info "Tried versions: ${versions_to_try[*]}"
+        print_info ""
+        print_info "Manual installation:"
+        print_info "1. Visit: https://github.com/kubevirt/kubevirt/releases"
+        print_info "2. Download ${virtctl_binary} from a release that has it"
+        print_info "3. Run: sudo mv ${virtctl_binary} /usr/local/bin/virtctl && sudo chmod +x /usr/local/bin/virtctl"
         return 1
     fi
     
-    if [ ! -f "$temp_file" ]; then
-        print_error "Download file not created"
-        return 1
-    fi
-    
-    # Verify it's actually a binary, not HTML or text
-    if ! file "$temp_file" | grep -q "executable"; then
-        print_error "Downloaded file is not an executable binary"
-        print_info "File type: $(file $temp_file)"
-        print_info "First line: $(head -1 $temp_file)"
-        rm -f "$temp_file"
-        return 1
-    fi
-    
-    print_info "✓ Downloaded virtctl (verified binary)"
-    
-    # Make executable
+    # Make executable (already verified as executable in the loop above)
     chmod +x "$temp_file"
     
     # Try to install to /usr/local/bin (preferred), fallback to ~/.local/bin
