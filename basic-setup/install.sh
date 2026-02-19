@@ -618,6 +618,7 @@ main() {
     # Display important connection information
     print_info "RHACS Central Access Information:"
     print_info "=================================="
+    print_info "Username: admin"
     
     if [ -n "${ROX_CENTRAL_URL:-}" ]; then
         print_info "Central URL: ${ROX_CENTRAL_URL}"
@@ -625,6 +626,8 @@ main() {
     
     if [ -n "${ROX_PASSWORD:-}" ]; then
         print_info "Admin Password: ${ROX_PASSWORD}"
+        print_info ""
+        print_info "=================================="    
     else
         # Try to fetch it if not already loaded from multiple possible locations
         local password

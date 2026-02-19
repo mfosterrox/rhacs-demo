@@ -33,8 +33,11 @@ git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
 [INFO] RHACS Central Access Information:
 [INFO] ==================================
 [INFO] Central URL: {acs_route}
+[INFO] Username: admin
 [INFO] Admin Password: {acs_portal_password}
 [INFO] RHACS Version: 4.9.2
+[INFO] 
+[INFO] 
 ----
 
 === RHACS Monitoring Setup
