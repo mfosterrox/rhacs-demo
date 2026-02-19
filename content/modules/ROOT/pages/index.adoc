@@ -58,18 +58,109 @@ git pull && ./install.sh {acs_portal_password}
 .**OUTPUT**
 [source,sh,subs="attributes"]
 ----
-[INFO] ======================================
-[INFO] RHACS Demo Environment Setup Complete!
-[INFO] ======================================
-[INFO] 
-[INFO] RHACS Central Access Information:
-[INFO] ==================================
-[INFO] Central URL: {acs_route}
-[INFO] Admin Password: {acs_portal_password}
-[INFO] RHACS Version: 4.9.2
+============================================
+Installation Complete!
+============================================
+
+Certificates created in: /home/lab-user/rhacs-demo/monitoring-setup/
+  - ca.crt / ca.key          (CA certificate - configured in auth provider)
+  - client.crt / client.key  (Client certificate - use for API calls)
+
+Test authentication:
+  cd /home/lab-user/rhacs-demo/monitoring-setup && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
+
+Note: Auth changes may take 10-30 seconds to propagate.
+----
++
+. Verify the authentication worked
++
+[source,sh,subs="attributes",role=execute]
+----
+cd /home/lab-user/rhacs-demo/monitoring-setup && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
 ----
 
+.**OUTPUT**
+[source,sh,subs="attributes"]
+----
+latformComponent="true",Namespace="rhacs-operator",Severity="HIGH_SEVERITY"} 2
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="HIGH_SEVERITY"} 50
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="LOW_SEVERITY"} 12
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="MEDIUM_SEVERITY"} 19
+[lab-user@bastion monitoring-setup]$ 
+----
 
+=== RHACS VM Management (Vulnerability Scanning)
+
+Run the following in the *Bastion* tab to set up RHACS virtual machine vulnerability scanning with OpenShift Virtualization. The script configures RHACS for VM scanning, enables VSOCK, and deploys four RHEL VMs (webserver, database, devtools, monitoring) with roxagent. When you provide Red Hat subscription credentials, packages install automatically and vulnerability data appears in RHACS within about 10 minutes.
+
+*Procedure*
+
+[start=1]
+. Switch to the *Bastion* tab, located on the right side of the screen.
+. Run the following
++
+[source,sh,subs="attributes",role=execute]
+----
+cd ~/rhacs-demo/virt-scanning-setup
+git pull && ./install.sh
+----
+
+. When prompted, enter your Red Hat subscription credentials (username/password or organization/activation key). With credentials, VMs register and install packages via cloud-init; vulnerability data will appear in RHACS automatically.
+. Verify the deployment completed successfully
++
+.**OUTPUT**
+[source,sh,subs="attributes"]
+----
+════════════════════════════════════════════════════════════
+                    Setup Complete! ✓
+════════════════════════════════════════════════════════════
+
+What was configured:
+
+  ✓ virtctl CLI tool installed
+  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)
+  ✓ OpenShift Virtualization VSOCK feature gate enabled
+  ✓ Collector hostNetwork + DNS configured for VSOCK
+  ✓ 4 RHEL VMs deployed with roxagent:
+    • rhel-webserver
+    • rhel-database
+    • rhel-devtools
+    • rhel-monitoring
+
+  ✓ Red Hat subscription configured (automatic registration)
+
+⏱️  Deployment Timeline (Automatic):
+
+  Now      VMs deploying, cloud-init starting
+  +3 min   Subscription registering
+  +5 min   Packages installing (httpd, nginx, postgresql, etc.)
+  +8 min   roxagent scanning packages
+  +10 min  ✓ Vulnerability data visible in RHACS!
+----
++
+. (Optional) Verify VMs are running and view vulnerability data
++
+[source,sh,subs="attributes",role=execute]
+----
+oc get vmi -n default
+----
++
+.**OUTPUT**
+[source,sh,subs="attributes"]
+----
+NAME              AGE   PHASE     IP            NODENAME
+rhel-webserver    12m   Running   10.128.2.45   worker-0
+rhel-database     12m   Running   10.128.2.46   worker-0
+rhel-devtools     12m   Running   10.128.2.47   worker-0
+rhel-monitoring   12m   Running   10.128.2.48   worker-0
+----
++
+In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
+
+*Additional information*
+* VM console access: `virtctl console rhel-webserver -n default` (login: cloud-user / redhat). If you see "Login incorrect", wait 5–10 minutes after the VM is Running—cloud-init sets the password on first boot.
+* Webserver VM is exposed via an OpenShift Route; get the URL with: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
+* Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
 
 == Accessing the Consoles
 
