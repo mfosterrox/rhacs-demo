@@ -19,14 +19,14 @@ Red Hat Advanced Cluster Security for Kubernetes (RHACS) supports OpenShift Cont
 == Install the Compliance Operator
 
 *Procedure*
-. Log into the OCP console at `{web_console_url}`:
+. Log into the OCP console at `{openshift_cluster_console_url}`:
 . Click the *rhsso* option
 . Enter the OCP credentials: 
 
 [cols="1,1"]
 |===
-| *User:*| {openshift_admin_user} 
-| *Password:*| {openshift_admin_password} 
+| *User:*| {openshift_cluster_admin_username} 
+| *Password:*| {openshift_cluster_admin_username} 
 |===
 
 image::01-ocp-login-admin.png[link=self, window=blank, width=100%]

@@ -18,8 +18,8 @@ Administrator login is available with:
 
 [cols="1,1"]
 |===
-| *Username:* | {openshift_admin_user}
-| *Password:* | {openshift_admin_password} 
+| *Username:* | {openshift_cluster_admin_username}
+| *Password:* | {openshift_cluster_admin_username} 
 |===
 
 Navigate to the *Cluster* dropdown menu and then select *All Clusters*: 
@@ -189,7 +189,7 @@ First, make sure you can access the Red Hat^(R)^ OCP console web console.
 *Procedure*
 
 [start=1]
-. Log into the OCP console at `{web_console_url}`:
+. Log into the OCP console at `{openshift_cluster_console_url}`:
 . Click the *rhsso* option
 
 image::01-ocp-login-admin.png[OpenShift console]
@@ -199,13 +199,13 @@ image::01-ocp-login-admin.png[OpenShift console]
 
 [cols="1,1"]
 |===
-| *User:*| {openshift_admin_user} 
-| *Password:*| {openshift_admin_password} 
+| *User:*| {openshift_cluster_admin_username} 
+| *Password:*| {openshift_cluster_admin_username} 
 |===
 
 
 [start=4]
-. Enter the OpenShift username *{openshift_admin_user}* and password: *{openshift_admin_password}*:
+. Enter the OpenShift username *{openshift_cluster_admin_username}* and password: *{openshift_cluster_admin_username}*:
 
 image::01-ocp-login-password.png[OpenShift console login]
 

@@ -71,7 +71,7 @@ While you're waiting for the Central Services to spin up, head over to the OpenS
 *Procedure*
 
 [start=1]
-. Log into the OCP console at `{web_console_url}`
+. Log into the OCP console at `{openshift_cluster_console_url}`
 . Click on Operators - Installed Operators
 
 image::11-uninstall-00.png[link=self, window=blank, width=100%]
@@ -181,7 +181,7 @@ NOTE: You are running the delete command to ensure the previous certificates are
 *Procedure*
 
 [start=1]
-. Log into the OCP console at `{web_console_url}`
+. Log into the OCP console at `{openshift_cluster_console_url}`
 . Click on Operators - Operator Hub
 . Search for RHACS and click on the one with the "Red Hat" source
 

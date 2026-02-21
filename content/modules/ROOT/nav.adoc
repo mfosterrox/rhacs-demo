@@ -10,6 +10,3 @@
 * xref:08-acs-api.adoc[API Walkthrough]
 * xref:09-acs-network-security.adoc[Network Security]
 * xref:10-acs-installation.adoc[Installation]
-
-.Software Supply Chain Security Modules
-* xref:tssc-00-intro.adoc[Trusted Software Supply Chain Introduction]

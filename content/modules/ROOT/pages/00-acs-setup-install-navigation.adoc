@@ -13,7 +13,7 @@
 
 Ensure you can access all necessary resources to complete this lab.
 
-TIP: Always open URLs in a new tab. For example, on a Mac, use *<cmd> click*.
+TIP: You can open URLs in a new tab. For example, on a Mac, use *<cmd> click*.
 
 === Access the Red Hat^(R)^ OpenShift Container Platform (OCP) UI
 
@@ -22,20 +22,13 @@ First, make sure you can access the Red Hat^(R)^ OCP console user interface.
 *Procedure*
 
 [start=1]
-. Log into the OCP console at `{web_console_url}[{web_console_url}^]`.
-. Click the *rhsso* option.
-
-IMPORTANT: If variables on the screen are unavailable, inform your workshop administrator.
-
-image::01-ocp-login-admin.png[OpenShift console,link=self, window=blank, width=100%]
-
-[start=3]
+. Log into the OCP console at `{openshift_cluster_console_url}[{openshift_cluster_console_url}^]`.
 . Enter the OCP credentials.
 
 [cols="1,1"]
 |===
-| *User:* | {openshift_admin_user}
-| *Password:* | {openshift_admin_password}
+| *User:* | {openshift_cluster_admin_username}
+| *Password:* | {openshift_cluster_admin_username}
 |===
 
 image::01-ocp-login-password.png[OpenShift console login,link=self, window=blank, width=100%]
@@ -88,7 +81,7 @@ image::00-quay-login.png[Quay Console,link=self, window=blank, width=100%]
 
 === OpenShift Admin Access Verification
 
-Verify that you have admin-level access using the `oc` CLI.
+Verify that you have admin-level access using the `oc` CLI. Run this in the bastion host terminal.
 
 *Procedure*
 
@@ -115,13 +108,10 @@ oc get nodes -A
 [lab-user@bastion ~]$ oc whoami
 oc get nodes -A
 system:admin
-NAME                                        STATUS   ROLES                  AGE    VERSION
-<OCP_IP>0.us-east-2.compute.internal   Ready    worker                 4h1m   v1.27.11+749fe1d
-<OCP_IP>.us-east-2.compute.internal    Ready    control-plane,master   4h7m   v1.27.11+749fe1d
-<OCP_IP>.us-east-2.compute.internal    Ready    control-plane,master   4h7m   v1.27.11+749fe1d
-<OCP_IP>.us-east-2.compute.internal    Ready    worker                 4h2m   v1.27.11+749fe1d
-<OCP_IP>.us-east-2.compute.internal    Ready    control-plane,master   4h7m   v1.27.11+749fe1d
-<OCP_IP>.us-east-2.compute.internal    Ready    worker                 4h2m   v1.27.11+749fe1d
+NAME                            STATUS   ROLES                         AGE    VERSION
+control-plane-cluster-8sgd9-1   Ready    control-plane,master,worker   176m   v1.33.6
+worker-cluster-8sgd9-1          Ready    worker                        120m   v1.33.6
+worker-cluster-8sgd9-2          Ready    worker                        120m   v1.33.6
 ----
 
 You will now see the OCP role using the *oc* command, as we are currently working in the OpenShift cluster.
@@ -148,37 +138,56 @@ roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-UserID:
-	auth-token:718744a9-9548-488b-a8b9-07b2c59ea5e6
-User name:
-	anonymous bearer token "pipelines-ci-token" with roles [Admin] (jti: 718744a9-9548-488b-a8b9-07b2c59ea5e6, expires: 2025-04-03T15:15:06Z)
-Roles:
-	- Admin
-Access:
-	rw Access
-	rw Administration
-	rw Alert
-	rw CVE
-	rw Cluster
-	rw Compliance
-	rw Deployment
-	rw DeploymentExtension
-	rw Detection
-	rw Image
-	rw Integration
-	rw K8sRole
-	rw K8sRoleBinding
-	rw K8sSubject
-	rw Namespace
-	rw NetworkGraph
-	rw NetworkPolicy
-	rw Node
-	rw Secret
-	rw ServiceAccount
-	rw VulnerabilityManagementApprovals
-	rw VulnerabilityManagementRequests
-	rw WatchedImage
-	rw WorkflowAdministration
+[lab-user@bastion ~]$ roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
+-bash: roxctl: command not found
+----
+
+[start=2]
+. Install the roxctl CLI on the bastion and set the Central address. Run the following commands:
+
+[source,sh,subs="attributes",role=execute]
+----
+mkdir -p ~/.local/bin
+curl -L -f -o ~/.local/bin/roxctl "https://mirror.openshift.com/pub/rhacs/assets/latest/bin/Linux/roxctl"
+chmod +x ~/.local/bin/roxctl
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+echo 'export ROX_CENTRAL_ADDRESS="$(oc -n stackrox get route central -o jsonpath='"'"'{.spec.host}'"'"')"' >> ~/.bashrc
+source ~/.bashrc
+roxctl
+----
+
+
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+...
+        TLS ServerName to use for SNI (if empty, derived from endpoint). Alternately, set the server name via the ROX_SERVER_NAME environment variable.
+
+    --token-file:
+        Use the API token in the provided file to authenticate. Alternatively, set the path via the ROX_API_TOKEN_FILE environment variable or set the token via the ROX_API_TOKEN environment
+        variable.
+
+    --use-current-k8s-context=false:
+        Use the current kubeconfig context to connect to the central service via port-forwarding. Alternatively, set ROX_USE_KUBECONTEXT environment variable to true.
+
+Usage:
+  roxctl [command]
+----
+
+
+[start=3]
+. Next, let's grab an API token and save a few variables for later use.
+
+[source,sh,subs="attributes",role=execute]
+----
+curl -k -u "admin:{acs_portal_password}" "https://{acs_route}:443/v1/apitokens/generate" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "my-api-token", "role": "Admin"}'
+
+echo 'export ACS_ROUTE="{acs_route}"' >> ~/.bashrc
+echo 'export ACS_PORTAL_USERNAME="{acs_portal_username}"' >> ~/.bashrc
+echo 'export ACS_PORTAL_PASSWORD="{acs_portal_password}"' >> ~/.bashrc
+source ~/.bashrc
 ----
 
 IMPORTANT: This output shows that you have unrestricted access to the RHACS product. These permissions can be seen in the **RHACS Access Control** tab that we will review later.
@@ -206,7 +215,7 @@ This command downloads a repository containing Dockerfiles, attack scripts, and 
 
 [source,sh,subs="attributes",role=execute]
 ----
-git clone https://github.com/mfosterrox/demo-apps.git demo-apps
+git clone https://github.com/mfosterrox/demo-applications.git demo-applications
 ----
 
 ====
@@ -215,8 +224,8 @@ This command sets the variable TUTORIAL_HOME to equal the working directory, all
 
 [source,sh,subs="attributes",role=execute]
 ----
-echo export TUTORIAL_HOME="$(pwd)/demo-apps" >> ~/.bashrc
-export TUTORIAL_HOME="$(pwd)/demo-apps"
+echo export TUTORIAL_HOME="$(pwd)/demo-applications" >> ~/.bashrc
+export TUTORIAL_HOME="$(pwd)/demo-applications"
 ----
 
 ====
@@ -225,7 +234,7 @@ This command applies the manifests to the OpenShift environment.
 
 [source,sh,subs="attributes",role=execute]
 ----
-oc apply -f $TUTORIAL_HOME/kubernetes-manifests/ --recursive
+oc apply -f $TUTORIAL_HOME/k8s-deployment-manifests/ --recursive
 ----
 
 [.console-output]
