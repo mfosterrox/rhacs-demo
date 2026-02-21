@@ -108,10 +108,10 @@ oc get nodes -A
 [lab-user@bastion ~]$ oc whoami
 oc get nodes -A
 system:admin
-NAME                            STATUS   ROLES                         AGE    VERSION
-control-plane-cluster-8sgd9-1   Ready    control-plane,master,worker   176m   v1.33.6
-worker-cluster-8sgd9-1          Ready    worker                        120m   v1.33.6
-worker-cluster-8sgd9-2          Ready    worker                        120m   v1.33.6
+NAME                            STATUS   ROLES                         AGE     VERSION
+control-plane-cluster-dbv5h-1   Ready    control-plane,master,worker   7h17m   v1.33.6
+worker-cluster-dbv5h-1          Ready    worker                        6h23m   v1.33.6
+worker-cluster-dbv5h-2          Ready    worker                        6h23m   v1.33.6
 ----
 
 You will now see the OCP role using the *oc* command, as we are currently working in the OpenShift cluster.
@@ -180,14 +180,93 @@ Usage:
 
 [source,sh,subs="attributes",role=execute]
 ----
-curl -k -u "admin:{acs_portal_password}" "https://{acs_route}:443/v1/apitokens/generate" \
+export ROX_API_TOKEN=$(curl -sk -u "admin:{acs_portal_password}" "{acs_route}:443/v1/apitokens/generate" \
   -H 'Content-Type: application/json' \
-  -d '{"name": "my-api-token", "role": "Admin"}'
+  -d '{"name": "my-api-token", "role": "Admin"}' \
+  | (jq -r .token 2>/dev/null || sed -n 's/.*"token":"\([^"]*\)".*/\1/p'))
+echo $ROX_API_TOKEN
+----
 
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+[lab-user@bastion ~]$ echo $ROX_API_TOKEN
+YOUR_API_TOKEN_HERE
+----
+
+[start=4]
+. Save the API token and a few other variables to the .bashrc file. These variables will stay in the .bashrc file so they're saved in case you need to refresh the terminal.
+
+Include `GRPC_ENFORCE_ALPN_ENABLED=false` so that roxctl gRPC calls (e.g. image scan) succeed when the TLS handshake does not advertise ALPN (avoids "missing selected ALPN property" errors with OpenShift routes).
+
+[source,sh,subs="attributes",role=execute]
+----
+echo 'export ROX_API_TOKEN='"$ROX_API_TOKEN" >> ~/.bashrc
+echo 'export GRPC_ENFORCE_ALPN_ENABLED=false' >> ~/.bashrc
 echo 'export ACS_ROUTE="{acs_route}"' >> ~/.bashrc
 echo 'export ACS_PORTAL_USERNAME="{acs_portal_username}"' >> ~/.bashrc
 echo 'export ACS_PORTAL_PASSWORD="{acs_portal_password}"' >> ~/.bashrc
 source ~/.bashrc
+----
+
+[start=4]
+Verify the API token, and variables were saved correctly.
+[source,sh,subs="attributes",role=execute]
+----
+cat ~/.bashrc
+----
+
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+ROX_API_TOKEN="YOUR_API_TOKEN_HERE"
+GRPC_ENFORCE_ALPN_ENABLED=false
+ROX_CENTRAL_ADDRESS="{acs_route}"
+ACS_PORTAL_USERNAME="{acs_portal_username}"
+ACS_PORTAL_PASSWORD="{acs_portal_password}"
+----
+
+. Verify your roxctl access to the central service.
+[source,sh,subs="attributes",role=execute]
+----
+roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
+----
+
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+UserID:
+        auth-token:265c6c62-7a74-4ee5-8a16-32bd01339a7a
+User name:
+        anonymous bearer token "my-api-token" with roles [Admin] (jti: 265c6c62-7a74-4ee5-8a16-32bd01339a7a, expires: 2027-02-21T22:57:19Z)
+Roles:
+        - Admin
+Access:
+        rw Access
+        rw Administration
+        rw Alert
+        rw CVE
+        rw Cluster
+        rw Compliance
+        rw Deployment
+        rw DeploymentExtension
+        rw Detection
+        rw Image
+        rw Integration
+        rw K8sRole
+        rw K8sRoleBinding
+        rw K8sSubject
+        rw Namespace
+        rw NetworkGraph
+        rw NetworkPolicy
+        rw Node
+        rw Secret
+        rw ServiceAccount
+        rw VirtualMachine
+        rw VulnerabilityManagementApprovals
+        rw VulnerabilityManagementRequests
+        rw WatchedImage
+        rw WorkflowAdministration
 ----
 
 IMPORTANT: This output shows that you have unrestricted access to the RHACS product. These permissions can be seen in the **RHACS Access Control** tab that we will review later.
@@ -235,6 +314,7 @@ This command applies the manifests to the OpenShift environment.
 [source,sh,subs="attributes",role=execute]
 ----
 oc apply -f $TUTORIAL_HOME/k8s-deployment-manifests/ --recursive
+oc apply -f $TUTORIAL_HOME/skupper-demo/ --recursive
 ----
 
 [.console-output]
@@ -262,20 +342,32 @@ oc get deployments -l demo=roadshow -A
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ oc get deployments -l demo=roadshow -A
-NAMESPACE    NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-backend      api-server            1/1     1            1           18s
-default      dvma                  1/1     1            1           76s
-default      juice-shop            1/1     1            1           73s
-default      log4shell             1/1     1            1           70s
-default      open-api-server       1/1     1            1           39s
-default      reporting             1/1     1            1           42s
-default      vulnerable-node-app   1/1     1            1           36s
-default      webgoat               1/1     1            1           33s
-frontend     asset-cache           1/1     1            1           66s
-medical      reporting             1/1     1            1           58s
-operations   jump-host             1/1     1            1           54s
-payments     visa-processor        1/1     1            1           52s
+NAMESPACE               NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
+apache-struts           apache-struts           1/1     1            1           14m
+backend                 api-server              1/1     1            1           13m
+backend                 backend-atlas           1/1     1            1           13m
+backend                 postgres                1/1     1            1           13m
+backend                 varnish                 1/1     1            1           13m
+dvwa                    dvwa                    1/1     1            1           13m
+frontend                asset-cache             1/1     1            1           13m
+frontend                monitor                 1/1     1            1           13m
+frontend                tls-proxy               1/1     1            1           13m
+frontend                wordpress               0/1     0            0           13m
+frontend                wordpress-db            1/1     1            1           13m
+juice-shop              juice-shop              1/1     1            1           13m
+log4shell               log4shell               1/1     1            1           13m
+medical                 patient-db              1/1     1            1           12m
+medical                 proxy                   1/1     1            1           12m
+medical                 reporting               1/1     1            1           12m
+nodejs-goof-vuln-main   mongodb                 1/1     1            1           12m
+nodejs-goof-vuln-main   nodejs-goof-vuln-main   1/1     1            1           12m
+operations              jump-host               1/1     1            1           12m
+operations              puppet-master           1/1     1            1           12m
+payments                gateway                 1/1     1            1           12m
+payments                mastercard-processor    1/1     1            1           12m
+payments                visa-processor          1/1     1            1           12m
+web-ctf-container       web-ctf-container       1/1     1            1           12m
+webgoat                 webgoat                 1/1     1            1           12m
 ----
 
 IMPORTANT: Please ensure the deployed applications are deployed and available before moving on to the next module.
@@ -289,7 +381,7 @@ The following command triggers a vulnerability scan by RHACS, roxctl filters the
 
 [source,sh,subs="attributes",role=execute]
 ----
-roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=quay.io/mfoster/dvwa --severity CRITICAL,IMPORTANT --force -o table
+roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=quay.io/skupper/patient-portal-frontend:latest --severity CRITICAL,IMPORTANT --force -o table
 ----
 
 TIP: The following output can be configured using flags. You can configure different outputs (table, CSV, JSON, and sarif) and filter for specific severities.
@@ -297,15 +389,13 @@ TIP: The following output can be configured using flags. You can configure diffe
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=quay.io/mfoster/dvwa --severity CRITICAL,IMPORTANT --force -o table
-Scan results for image: quay.io/mfoster/dvwa
+[demo-user@bastion ~]$ roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=quay.io/skupper/patient-portal-frontend:latest --severity CRITICAL,IMPORTANT --force -o table
+Scan results for image: quay.io/skupper/patient-portal-frontend:latest
 
---------------------------+-------------------------+----------+---------------+
-|     perl-base     |    5.36.0-7+deb12u1     | CVE-2023-31484 | IMPORTANT | 8.1  | https://nvd.nist.gov/vuln/detail/CVE-2023-31484 |            -            |    -     |       -       |
-+-------------------+-------------------------+----------------+-----------+------+-------------------------------------------------+-------------------------+----------+---------------+
-| perl-modules-5.36 |    5.36.0-7+deb12u1     | CVE-2023-31484 | IMPORTANT | 8.1  | https://nvd.nist.gov/vuln/detail/CVE-2023-31484 |            -            |    -     |       -       |
-+-------------------+-------------------------+----------------+-----------+------+-------------------------------------------------+-------------------------+----------+---------------+
-WARN:   A total of 180 unique vulnerabilities were found in 15 components
++-------------+----------------------+----------------+-----------+------+---------------------------------------------------+----------------------+----------+---------------+
+|    wheel    |        0.42.0        | CVE-2026-24049 | IMPORTANT | 7.1  | https://osv.dev/vulnerability/GHSA-8rrh-rw8j-w5fx |        0.46.2        |    -     |       -       |
++-------------+----------------------+----------------+-----------+------+---------------------------------------------------+----------------------+----------+---------------+
+WARN:   A total of 15 unique vulnerabilities were found in 11 components
 ----
 
 image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbnY0NDA0ZnJqNXh6cGNqeHNxZGd5Zm5qMnlpOHhrbm1hY2pwcG5ydSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/p18ohAgD3H60LSoI1C/giphy.gif[link=self, window=blank, width=100%, class="center"]
@@ -313,6 +403,8 @@ image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbnY0NDA0ZnJqNXh6cGNqeHNx
 [[build-a-container-image]]
 
 == Build the main workshop application
+
+Next, you are going to 
 
 === Login to Quay from the CLI
 
@@ -337,8 +429,8 @@ QUAY_USER={quay_admin_username}
 
 [source,sh,subs="attributes",role=execute]
 ----
-echo export QUAY_URL=$(oc -n quay-enterprise get route quay-quay -o jsonpath='{.spec.host}') >> ~/.bashrc
-QUAY_URL=$(oc -n quay-enterprise get route quay-quay -o jsonpath='{.spec.host}')
+echo export QUAY_URL=$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}') >> ~/.bashrc
+QUAY_URL=$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}')
 ----
 
 IMPORTANT: Verify that the variables are correct
@@ -359,11 +451,41 @@ quay-bq65l.apps.cluster-bq65l.bq65l.sandbox209.opentlc.com
 ----
 
 [start=3]
-. Using the terminal on the bastion host, login to quay using the Podman CLI as shown below:
+. Install Podman on the bastion host if it is not already installed.
++ 
+To proceed, use the installation instructions that match your operating system (for example, RHEL, Fedora, CentOS, Ubuntu, or Debian).
+
+Install Podman using the appropriate command for your distribution:
++
+* On RHEL, CentOS, Rocky Linux, Alma Linux, or Fedora:*
+[source,sh,subs="attributes",role=execute]
+----
+sudo dnf install -y podman
+----
++
+
+. Verify Podman is installed:
+
+[source,sh,subs="attributes",role=execute]
+----
+podman --version
+----
+
+[start=6]
+. Using the terminal on the bastion host, login to Quay using the Podman CLI as shown below:
 
 [source,sh,subs="attributes",role=execute]
 ----
 podman login $QUAY_URL -u $QUAY_USER -p {quay_admin_password}
+----
+
+console output:
+[source,bash,subs="+macros,+attributes"]
+----
+[demo-user@bastion ~]$ podman login $QUAY_URL -u $QUAY_USER -p {quay_admin_password}
+Username: quayadmin
+Password:
+Login Succeeded!
 ----
 
 NOTE: Use the quay admin credentials to sign in if you run into issues.
@@ -475,17 +597,17 @@ TIP: With the variables saved in the ~/.bashrc file, you will not have to declar
 
 *Procedure*
 
-. List the contents of the `frontend` directory inside the `app-images` folder to see the files available for the project:
+. List the contents of the `frontend` directory inside the `image-builds` folder to see the files available for the project:
 
 [source,sh,subs="attributes",role=execute]
 ----
-ls $TUTORIAL_HOME/app-images/frontend/
+ls $TUTORIAL_HOME/image-builds/frontend/
 ----
 
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ ls $TUTORIAL_HOME/app-images/frontend/
+[demo-user@bastion ~]$ ls $TUTORIAL_HOME/image-builds/frontend/
 Dockerfile  main.py  static
 ----
 
@@ -494,13 +616,13 @@ Dockerfile  main.py  static
 
 [source,sh,subs="attributes",role=execute]
 ----
-cat $TUTORIAL_HOME/app-images/frontend/Dockerfile
+cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
 
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ cat $TUTORIAL_HOME/app-images/frontend/Dockerfile
+[demo-user@bastion ~]$ cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 FROM python:3.12-alpine AS build
 
 # Install Bash and other dependencies
@@ -544,7 +666,7 @@ ENTRYPOINT ["python", "main.py"]
 
 [source,sh,subs="attributes",role=execute]
 ----
-sed -i "s|^FROM python:3\.12-alpine AS \(\w\+\)|FROM $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1 AS \1|" $TUTORIAL_HOME/app-images/frontend/Dockerfile
+sed -i "s|^FROM python:3\.12-alpine AS \(\w\+\)|FROM $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1 AS \1|" $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
 
 [start=4]
@@ -552,13 +674,13 @@ sed -i "s|^FROM python:3\.12-alpine AS \(\w\+\)|FROM $QUAY_URL/$QUAY_USER/python
 
 [source,sh,subs="attributes",role=execute]
 ----
-cat $TUTORIAL_HOME/app-images/frontend/Dockerfile
+cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
 
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ cat $TUTORIAL_HOME/app-images/frontend/Dockerfile
+[demo-user@bastion ~]$ cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 FROM quay-w2t4c.apps.cluster-w2t4c.w2t4c.sandbox1647.opentlc.com/quayadmin/python-alpine-golden:0.1 AS build
 
 RUN pip install --no-cache-dir
@@ -571,7 +693,7 @@ RUN pip install --no-cache-dir
 
 [source,sh,subs="attributes",role=execute]
 ----
-cd $TUTORIAL_HOME/app-images/frontend/
+cd $TUTORIAL_HOME/image-builds/frontend/
 podman build -t $QUAY_URL/$QUAY_USER/frontend:0.1 .
 ----
 
@@ -796,26 +918,13 @@ The last step is to deploy the Skupper application with your specific frontend c
 . Run the following commands in the terminal, one after the other:
 
 ====
-This command sets new variables for the Skupper example and clones the manifests.
+This command sets new variables for the Skupper example.
 ====
 
 [source,sh,subs="attributes",role=execute]
 ----
-git clone https://github.com/mfosterrox/skupper-security-demo.git skupper-app
-echo export APP_HOME="$(pwd)/skupper-app" >> ~/.bashrc
-export APP_HOME="$(pwd)/skupper-app"
-----
-
-[.console-output]
-[source,bash,subs="+macros,+attributes"]
-----
-Cloning into 'skupper-app'...
-remote: Enumerating objects: 41, done.
-remote: Counting objects: 100% (41/41), done.
-remote: Compressing objects: 100% (29/29), done.
-remote: Total 41 (delta 17), reused 31 (delta 11), pack-reused 0 (from 0)
-Receiving objects: 100% (41/41), 10.93 KiB | 10.93 MiB/s, done.
-Resolving deltas: 100% (17/17), done.
+echo export APP_HOME="/home/lab-user/demo-applications/skupper-demo" >> ~/.bashrc
+export APP_HOME="/home/lab-user/demo-applications/skupper-demo"
 ----
 
 ====
@@ -824,13 +933,13 @@ Next, swap the default image repo for the local Quay one containing the frontend
 
 [source,sh,subs="attributes",role=execute]
 ----
-sed -i "s|quay.io/mfoster/frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/skupper-demo/frontend.yml
+sed -i "s|quay.io/mfoster/frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/frontend.yml
 ----
 
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[lab-user@bastion skupper-demo]$ sed -i "s|quay.io/mfoster/frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/skupper-demo/frontend.yml
+[lab-user@bastion skupper-demo]$ sed -i "s|quay.io/mfoster/frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/frontend.yml
 ----
 
 ====
@@ -839,7 +948,7 @@ Verify the swap was successful:
 
 [source,sh,subs="attributes",role=execute]
 ----
-cat $APP_HOME/skupper-demo/frontend.yml
+cat $APP_HOME/frontend.yml
 ----
 
 [.console-output]
@@ -879,7 +988,7 @@ Next, deploy the application with your updated manifests:
 
 [source,sh,subs="attributes",role=execute]
 ----
-oc apply -f $APP_HOME/skupper-demo/
+oc apply -f $APP_HOME/frontend.yml
 ----
 
 [.console-output]

@@ -35,6 +35,8 @@ Here is the order of the modules:
 
 ---
 
+TIP: You can open URLs in a new tab. For example, on a Mac, use *<cmd> click*.
+
 == All lab components
 
 During the roadshow, you will utilize the following applications to complete all of the lab tasks:
@@ -50,7 +52,7 @@ During the roadshow, you will utilize the following applications to complete all
 |===
 |Console URL| {openshift_cluster_console_url}[{openshift_cluster_console_url}^]
 |Username| {openshift_cluster_admin_username}
-|Password| {openshift_cluster_admin_username}
+|Password| {openshift_cluster_admin_password}
 |===
 
 Red Hat^(R)^ Advanced Cluster Management (RHACM) and OpenShift GitOps (ArgoCD) are accessed from the same OpenShift console (e.g. *Applications*, *Pipelines*, and GitOps from the left menu or cluster dropdown).
@@ -77,6 +79,6 @@ Use the bastion to run CLI commands required in the lab (`oc`, `roxctl`, `podman
 
 [cols="1,1"]
 |===
-|Username@host| {bastion_ssh_user_name}@{bastion_public_hostname}
+|Username@host| ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port}
 |Password| {bastion_ssh_password}
 |===
