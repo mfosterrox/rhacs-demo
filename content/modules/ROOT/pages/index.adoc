@@ -1,190 +1,92 @@
-[[labname]]
+= {lab_name}
 
-= Advanced Cluster Security Demo 
+This course offers you hands-on experience working with the essential security use cases of Red Hat^(R)^ OpenShift Container Platform (OCP) with Red Hat Trusted Software Supply Chain (TSSC).
 
-== Setup Instructions (15 minutes)
+== Lab homepage
 
-=== RHACS Basic Setup
+Most of the lab will take place in this *Showroom* lab environment and between various Red Hat product user interfaces (UI).
 
-To ensure your RHACS environment is up to date, and has all of the necessary components, run the following command in the *Bastion* tab.
+Below, you can find all the URLs and passwords needed to complete the lab on the homepage. If you ever get lost simply click the home button at the top of the webpage to find the essentials.
 
-*Procedure*
+IMPORTANT: This is the *HOME* page. The modules can be found by clicking the table of contents on the left side of the screen or by scrolling to the bottom of each module and clicking *Next*.
 
-[start=1]
-. Switch to the *Bastion* tab, located on the right side of the screen.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/
-git clone https://github.com/mfosterrox/rhacs-demo.git && git pull
-./rhacs-demo/basic-setup/install.sh {acs_portal_password}
-----
+TIP: Always open console URLs in a new tab so you can keep this lab guide open. On a Mac, use *<cmd> click*; on Windows/Linux, use *<ctrl> click* or right-click and select "Open in new tab."
 
-. Verify the deployment completed successfully
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-[INFO] ======================================
-[INFO] RHACS Demo Environment Setup Complete!
-[INFO] ======================================
-[INFO] 
-[INFO] RHACS Central Access Information:
-[INFO] ==================================
-[INFO] Central URL: {acs_route}
-[INFO] Username: admin
-[INFO] Admin Password: {acs_portal_password}
-[INFO] RHACS Version: 4.9.2
-[INFO] 
-[INFO] 
-----
+== Before you begin
 
-=== RHACS Monitoring Setup
+* *Bookmark this page* — You will return here for credentials and links.
+* *Use the bastion host* — Many steps use the `oc`, `roxctl`, and `podman` CLIs; these run on the RHEL bastion. SSH access details are in the table below.
+* *Follow modules in order* — Start with xref:00-acs-setup-install-navigation.adoc[Lab Setup and Introduction] (module 00), then proceed through the modules in sequence. Each module builds on the previous one.
 
-Run the following command in the *Bastion* tab.
+== Lab modules (ACS roadshow)
 
-*Procedure*
+Complete the modules in this order:
 
-[start=1]
-. Switch to the *Bastion* tab, located on the right side of the screen.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/monitoring-setup
-git pull && ./install.sh {acs_portal_password}
-----
+* xref:00-acs-setup-install-navigation.adoc[Lab Setup and Introduction] — Access consoles, deploy demo apps, build and push the frontend image
+* xref:01-acs-visibility-and-navigation.adoc[Navigating RHACS] — RHACS UI, search, and main use cases
+* xref:02-acs-vulnerability-management-lab.adoc[Vulnerability Management] — Reports, risk acceptance, and vulnerability reporting
+* xref:03-acs-risk-profiling.adoc[Risk Profiling] — Configuration management, risk ranking, and filters
+* xref:04-acs-policy-management.adoc[Policy Management] — Runtime, deploy-time, and build-time policies
+* xref:05-acs-cicd-and-automation.adoc[CI/CD and Automation] — Policy-as-code with GitOps and OpenShift Pipelines
+* xref:06-acs-compliance.adoc[Compliance] — Compliance Operator, scans, and dashboards
+* xref:07-acs-notifications.adoc[Notifications] — Slack and Microsoft Teams alerting
+* xref:08-acs-api.adoc[API Walkthrough] — RHACS API and token-based requests
+* xref:09-acs-network-security.adoc[Network Security] — Network graph and network policies
+* xref:10-acs-installation.adoc[Installation and RHACS Cloud Service] — ACS Cloud Service trial and Secured Cluster Services
 
-. Verify the deployment completed successfully
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-============================================
-Installation Complete!
-============================================
+---
 
-Certificates created in: /home/lab-user/rhacs-demo/monitoring-setup/
-  - ca.crt / ca.key          (CA certificate - configured in auth provider)
-  - client.crt / client.key  (Client certificate - use for API calls)
+== All lab components
 
-Test authentication:
-  cd /home/lab-user/rhacs-demo/monitoring-setup && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
+During the roadshow, you will utilize the following applications to complete all of the lab tasks:
 
-Note: Auth changes may take 10-30 seconds to propagate.
-----
-+
-. Verify the authentication worked
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd /home/lab-user/rhacs-demo/monitoring-setup && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
-----
+* Red Hat^(R)^ OpenShift Container Platform (RHOCP) console
+* Red Hat^(R)^ Advanced Cluster Management (RHACM) console with OpenShift GitOps (ArgoCD)
+* Red Hat^(R)^ Advanced Cluster Security (RHACS) console
+* Red Hat^(R)^ Quay console
+* Red Hat^(R)^ Trusted Application Signer (RHTAS)
+* Red Hat^(R)^ Enterprise Linux (RHEL) bastion host (The "Showroom" lab environment)
 
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-latformComponent="true",Namespace="rhacs-operator",Severity="HIGH_SEVERITY"} 2
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="HIGH_SEVERITY"} 50
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="LOW_SEVERITY"} 12
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="MEDIUM_SEVERITY"} 19
-[lab-user@bastion monitoring-setup]$ 
-----
+=== Red Hat^(R)^ OpenShift Container Platform (OCP) console information
+[cols="1,1"]
+|===
+|Console URL| {web_console_url}[{web_console_url}^]
+|Username| {openshift_admin_user}
+|Password| {openshift_admin_password}
+|===
 
-=== RHACS VM Management (Vulnerability Scanning)
+Red Hat^(R)^ Advanced Cluster Management (RHACM) and OpenShift GitOps (ArgoCD) are accessed from the same OpenShift console (e.g. *Applications*, *Pipelines*, and GitOps from the left menu or cluster dropdown).
 
-Run the following in the *Bastion* tab to set up RHACS virtual machine vulnerability scanning with OpenShift Virtualization. The script configures RHACS for VM scanning, enables VSOCK, and deploys four RHEL VMs (webserver, database, devtools, monitoring) with roxagent. When you provide Red Hat subscription credentials, packages install automatically and vulnerability data appears in RHACS within about 10 minutes.
+=== Red Hat^(R)^ Advanced Cluster Security (RHACS) console information
+[cols="1,1"]
+|===
+|Console URL| {acs_route}[{acs_route}^]
+|Username| {acs_portal_username}
+|Password| {acs_portal_password}
+|===
 
-*Procedure*
+=== Red Hat^(R)^ Quay
+[cols="1,1"]
+|===
+|Console URL| {quay_console_url}[{quay_console_url}^]
+|Username| {quay_admin_username}
+|Password| {quay_admin_password}
+|===
 
-[start=1]
-. Switch to the *Bastion* tab, located on the right side of the screen.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/virt-scanning-setup
-git pull && ./install.sh
-----
+=== Red Hat^(R)^ Trusted Profile Analyzer (RHTAP) information
+[cols="1,1"]
+|===
+|Console URL| {tpa_console_url}[{tpa_console_url}^]
+|Username| {tpa_username}
+|Password| {tpa_password}
+|===
 
-. When prompted, enter your Red Hat subscription credentials (username/password or organization/activation key). With credentials, VMs register and install packages via cloud-init; vulnerability data will appear in RHACS automatically.
-. Verify the deployment completed successfully
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-════════════════════════════════════════════════════════════
-                    Setup Complete! ✓
-════════════════════════════════════════════════════════════
+=== Red Hat^(R)^ Enterprise Linux (RHEL) bastion host information
 
-What was configured:
-
-  ✓ virtctl CLI tool installed
-  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)
-  ✓ OpenShift Virtualization VSOCK feature gate enabled
-  ✓ Collector hostNetwork + DNS configured for VSOCK
-  ✓ 4 RHEL VMs deployed with roxagent:
-    • rhel-webserver
-    • rhel-database
-    • rhel-devtools
-    • rhel-monitoring
-
-  ✓ Red Hat subscription configured (automatic registration)
-
-⏱️  Deployment Timeline (Automatic):
-
-  Now      VMs deploying, cloud-init starting
-  +3 min   Subscription registering
-  +5 min   Packages installing (httpd, nginx, postgresql, etc.)
-  +8 min   roxagent scanning packages
-  +10 min  ✓ Vulnerability data visible in RHACS!
-----
-+
-. (Optional) Verify VMs are running and view vulnerability data
-+
-[source,sh,subs="attributes",role=execute]
-----
-oc get vmi -n default
-----
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-NAME              AGE   PHASE     IP            NODENAME
-rhel-webserver    12m   Running   10.128.2.45   worker-0
-rhel-database     12m   Running   10.128.2.46   worker-0
-rhel-devtools     12m   Running   10.128.2.47   worker-0
-rhel-monitoring   12m   Running   10.128.2.48   worker-0
-----
-+
-In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
-
-*Additional information*
-* VM console access: `virtctl console rhel-webserver -n default` (login: cloud-user / redhat). If you see "Login incorrect", wait 5–10 minutes after the VM is Running—cloud-init sets the password on first boot.
-* Webserver VM is exposed via an OpenShift Route; get the URL with: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
-* Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
-
-== Accessing the Consoles
-
-=== OpenShift Console
-
-IMPORTANT: You will need to into the OpenShift console in another tab before the showroom instance works.
-
-Access the OpenShift Console from the *OpenShift Console* tab in the right panel, or open it directly: {openshift_cluster_console_url}[window=blank]
+Use the bastion to run CLI commands required in the lab (`oc`, `roxctl`, `podman`, `curl`, etc.). SSH to the host below, then follow the steps in each module.
 
 [cols="1,1"]
 |===
-| *Username:* | {openshift_cluster_admin_username}
-| *Password:* | {openshift_cluster_admin_password}
-|===
-
-=== RHACS Console
-
-Access the RHACS Console from the *RHACS Console* tab in the right panel, or open it directly: {acs_route}[window=blank]
-
-[cols="1,1"]
-|===
-| *Username:* | {acs_portal_username}
-| *Password:* | {acs_portal_password}
+|Username@host| {bastion_ssh_user_name}@{bastion_public_hostname}
+|Password| {bastion_ssh_password}
 |===

@@ -1,5 +1,5 @@
 name: modules
-title: Advanced Cluster Security Demo 
+title: Red Hat OpenShift Security Roadshow 
 version: master
 nav:
 - modules/ROOT/nav.adoc
@@ -7,7 +7,7 @@ nav:
 asciidoc:
   attributes:
     # page-toclevels: -1               # <- This will remove the TOC that appear in the right sidebar at wider resolutions
-    lab_name: Advanced Cluster Security Demo 
+    lab_name: Red Hat OpenShift Security Roadshow 
     release-version: master
     page-pagination: true
     page-links:

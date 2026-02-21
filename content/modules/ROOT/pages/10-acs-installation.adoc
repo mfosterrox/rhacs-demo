@@ -1,0 +1,217 @@
+= Installation and RHACS Cloud Service
+:toc:
+:sectnums:
+:icons: font
+
+== Module goals
+.Goals
+- Deploy RHACS Cloud Service Central Instance
+- Remove the existing RHACS operator
+- Use the ACS Cloud Service to reinstall the Secured Cluster Services
+
+== Setting Up Red Hat Account and Creating Central Instance on ACS
+
+*Procedure*
+
+. Head on over to https://www.redhat.com/en/technologies/cloud-computing/openshift/advanced-cluster-security-kubernetes/cloud-service/trial[Red Hat Advanced Cluster Security Trial]
+. Click on the *Start Your Trial* button.
+. Sign up for a Red Hat account if you don't have one. (Make sure to remember your username and password!)
+. Once you are in "Getting Started" tab select "Create Instance".
+
+image::11-setup-01.png[link=self, window=blank, width=100%]
+
+NOTE: You will be redirected to the *ACS Instances* page where you can view all of the central services that have been deployed.
+
+image::11-setup-02.png[link=self, window=blank, width=100%]
+
+[start=5]
+. Click on *Create ACS instance*.
+
+image::11-setup-03.png[link=self, window=blank, width=100%]
+
+[start=6]
+. Fill in your name, and select your cloud region (US East or Europe).
+. Wait for the creation process to complete. Typically it is 7-10 minutes.
+
+IMPORTANT: You need ACS Central Services to be available to deploy ACS Secured Cluster Services into the EKS Cluster. Time to stretch your legs a bit.
+ 
+## Checking and Accessing the Central Instance
+
+Once the RHACS Central instance is available, we will check on it's status.
+
+*Procedure*
+
+. Ensure the *Ready* status is showing
+
+image::11-setup-04.png[link=self, window=blank, width=100%]
+
+[start=2]
+. Click on the *Name* of your Central Service instance. You will be redirected to a page with all of the Central Services details and a few extra resources.
+
+IMPORTANT: Take note of the API and roxctl URL's. It will be useful for connecting to the service later.
+
+image::11-setup-04.png[link=self, window=blank, width=100%]
+
+[start=3]
+. Click on the *Name* of your Central Service instance. You will be redirected to a page with all of the Central Services details and a few extra resources.
+
+image::11-setup-05.png[link=self, window=blank, width=100%]
+
+[start=4]
+. Click on *Open ACS Console* and login to your account.
+
+image::11-setup-06.png[link=self, window=blank, width=100%]
+
+IMPORTANT: You should be redirected to your ACS instance at a page that looks like the one above. Ask for help if you have not reached this step. 
+
+== Uninstall the "On-Prem" RHACS Operator
+
+While you're waiting for the Central Services to spin up, head over to the OpenShift console to unstall the existing operator. 
+
+*Procedure*
+
+[start=1]
+. Log into the OCP console at `{web_console_url}`
+. Click on Operators - Installed Operators
+
+image::11-uninstall-00.png[link=self, window=blank, width=100%]
+
+[start=3]
+. Locate the Advanced Cluster Security for Kubernetes Operator and select it. 
+. Click on Actions, then click Uninstall Operator
+
+image::11-uninstall-01.png[link=self, window=blank, width=100%]
+
+[start=5]
+. Select "Delete all operand instances for this operator"
+. Click uninstall.
+
+image::11-uninstall-02.png[link=self, window=blank, width=100%]
+
+image::11-uninstall-03.png[link=self, window=blank, width=100%]
+
+IMPORTANT: If successfull, you will have no access to the RHACS console at `{acs_route}`
+
+image::11-uninstall-04.png[link=self, window=blank, width=100%]
+
+Let's check out the RHACS Cloud Service instance.
+
+== Access the Cloud Service and Install the Secured Cluster Services
+
+Red Hat Advanced Cluster Security for Kubernetes (RHACS) provides security services for self-managed RHACS on platforms such as Amazon Elastic Kubernetes Service (Amazon EKS), Google Kubernetes Engine (Google GKE), and Microsoft Azure Kubernetes Service (Microsoft AKS).
+
+If you want to learn more about the installation methods before proceeding you can review the resource below:
+
+- Understand the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.7/html/installing/high-level-rhacs-installation-overview[installation methods for different platforms].
+
+=== Setup the SCS certificates
+
+*Procedure*
+
+[start=1]
+. Head back over to your RHACS instance.
+
+image::11-cs-00.png[link=self, window=blank, width=100%]
+
+[start=2]
+. Click on your instance then select, "Open ACS Console".
+
+image::11-cs-01.png[link=self, window=blank, width=100%]
+
+[start=3]
+. Click on your instance then select, "Open ACS Console".
+. Login using your Red Hat credentials
+
+IMPORTANT: Ask for help from you instructor if you are having issues with the RHACS Cloud Service instance or access. 
+
+image::11-cs-02.png[link=self, window=blank, width=100%]
+
+[start=5]
+. Select "View installation methods".
+
+image::11-cs-03.png[link=self, window=blank, width=100%]
+
+NOTE: Since we have an OpenShift Cluster, you will be using the Operator method to install the Secured Cluster Services in OpenShift.
+
+*To install the Operator two things have to be done*
+
+1. In the Red Hat OpenShift Container Platform web console on the cluster that you are securing, you have installed the RHACS Operator.
+2. In the RHACS web portal, you have created an init bundle and downloaded the YAML file for the init bundle.
+
+*Let's start by grabbing the init secrets*
+
+*Procedure*
+
+[start=1]
+. In your RHACS Cloud Service instance, select "Platform Configuration - Cluster Init Bundle"
+
+image::11-cs-04.png[link=self, window=blank, width=100%]
+
+[start=2]
+. Select "Create bundle".
+. Name the bundle "new-cluster"
+. Ensure OpenShift & Operator are selected
+
+image::11-cs-05.png[link=self, window=blank, width=100%]
+
+[start=5]
+. Click *Download*
+. Next you need to copy the file contents and save it in a new file named *init-bundle.yaml*
+
+[source,bash,role="execute"]
+----
+nano init-bundle.yaml
+----
+
+NOTE: Hit ctrl + x to exit nano.
+
+[start=7]
+. Run the following on your command line:
+
+[source,bash,role="execute"]
+----
+oc delete -f init-bundle.yaml -n rhacs-operator
+oc create -f init-bundle.yaml -n rhacs-operator
+----
+
+NOTE: You are running the delete command to ensure the previous certificates are removed. 
+
+=== Install the operator
+
+*Procedure*
+
+[start=1]
+. Log into the OCP console at `{web_console_url}`
+. Click on Operators - Operator Hub
+. Search for RHACS and click on the one with the "Red Hat" source
+
+image::11-cs-06.png[link=self, window=blank, width=100%]
+
+[start=4]
+. Click *Install*
+. Ensure the existing Red Hat OpenShift Container Platform project *rhacs-operator* is selected.
+. Click *Install*
+
+image::11-cs-07.png[link=self, window=blank, width=100%]
+
+NOTE: With the init-bundle deployed and the operator ready, it's time to install the *Secured Cluster*
+
+[start=7]
+. Click on the *Secured Cluster* tab then select "Create SecuredCluster"
+
+image::11-cs-08.png[link=self, window=blank, width=100%]
+
+[start=8]
+. Use all of the defaults but change the cluster name to *new-cluster*
+. Add the *Central Endpoint* of your ACS Cloud Service. This can be foudn in the console.openshift or the URL at the top of the page.  
+. Click "Install"
+
+image::11-cs-09.png[link=self, window=blank, width=100%]
+
+IMPORTANT: After a few minutes you should see everything light up green in the Cloud Service console.
+
+image::11-cs-10.png[link=self, window=blank, width=100%]
+
+== Summary
+
+image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjJmczc4MmswYmk1cnhvZ254ZXBiZ2M3bGJzbDV5eDQ3OGlqNWdwdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/QSSA5Bd56W25ytLIwz/giphy.gif[link=self, window=blank, width=100%, class="center"]
