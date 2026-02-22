@@ -936,7 +936,7 @@ Next, swap the default image repo for the local Quay one containing the frontend
 
 [source,sh,subs="attributes",role=execute]
 ----
-sed -i "s|quay.io/mfoster/frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/frontend.yml
+sed -i "s|quay.io/skupper/patient-portal-frontend:latest|$QUAY_URL/$QUAY_USER/frontend:0.1|g" $APP_HOME/frontend.yml
 ----
 
 [.console-output]

@@ -55,7 +55,7 @@ oc wait --for=condition=available deployment/ctf-web-to-system -n ctf-web-to-sys
 [source,sh,role=execute]
 ----
 oc expose svc ctf-web-to-system-service -n ctf-web-to-system --port=80 2>/dev/null || true
-oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='https://{.spec.host}{"\n"}'
+oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='http://{.spec.host}{"\n"}'
 ----
 
 . Open the URL shown (or run the next command to print it again):
@@ -66,11 +66,13 @@ oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='{.spec.
 echo
 ----
 
-IMPORTANT: Use the OpenShift Route URL (the hostname from the command above, e.g. `ctf-web-to-system-service-ctf-web-to-system.<apps-domain>`) in your browser to access the vulnerable container. Use `https://` if your cluster uses TLS for routes.
+IMPORTANT: Use the OpenShift Route URL in your browser. Routes created with `oc expose svc` typically have no TLS (check with `oc get route` — TERMINATION will show `None`). Use *http://* (not https) for the hostname, e.g. `http://ctf-web-to-system-service-ctf-web-to-system.<apps-domain>/`. If your cluster uses TLS for routes, use https instead.
 
 == If the app is not accessible
 
-If the Route URL returns an error (503, connection refused, or does not load):
+If the Route URL returns an error, a blank page, or does not load:
+
+. Try *http://* instead of *https://*. Routes created with `oc expose svc` often have TERMINATION `None` and only accept HTTP. Use the URL exactly as printed (e.g. `http://ctf-web-to-system-service-ctf-web-to-system.apps.cluster-xxx.dynamic.redhatworkshops.io/`).
 
 . Check that the pod is running and ready:
 +
@@ -101,4 +103,86 @@ oc get svc ctf-web-to-system-service -n ctf-web-to-system
 +
 The service port should be 80 (forwarding to pod port 9090). If the Route was created earlier without `--port=80`, delete it and recreate: `oc delete route ctf-web-to-system-service -n ctf-web-to-system`, then run the expose command again with `--port=80`.
 
+== Optional: TLS certificate with cert-manager
 
+If cert-manager is installed on the cluster, you can request a signed certificate and attach it to the CTF Route so the app is served over HTTPS. These commands use a self-signed ClusterIssuer for quick setup (no external CA).
+
+. Ensure cert-manager is running:
++
+[source,sh,role=execute]
+----
+oc get pods -n cert-manager
+----
+
+. Create a self-signed ClusterIssuer (one-time, cluster-wide):
++
+[source,sh,role=execute]
+----
+oc apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+EOF
+----
+
+. Create a Certificate for the CTF route hostname. Replace the hostname if your route differs:
++
+[source,sh,role=execute]
+----
+ROUTE_HOST=$(oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='{.spec.host}')
+oc apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ctf-web-to-system-tls
+  namespace: ctf-web-to-system
+spec:
+  secretName: ctf-web-to-system-tls
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - ${ROUTE_HOST}
+EOF
+----
+
+. Wait for the certificate to be ready, export the cert and key to files, then recreate the Route with edge TLS using those files:
++
+[source,sh,role=execute]
+----
+oc wait --for=condition=Ready certificate/ctf-web-to-system-tls -n ctf-web-to-system --timeout=60s
+oc get secret ctf-web-to-system-tls -n ctf-web-to-system -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/ctf-tls.key
+oc get secret ctf-web-to-system-tls -n ctf-web-to-system -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ctf-tls.crt
+ROUTE_HOST=$(oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='{.spec.host}')
+oc delete route ctf-web-to-system-service -n ctf-web-to-system
+oc create route edge ctf-web-to-system-service --service=ctf-web-to-system-service --hostname=$ROUTE_HOST --cert=/tmp/ctf-tls.crt --key=/tmp/ctf-tls.key -n ctf-web-to-system
+----
+
+. Open the app with https. The browser will warn about the self-signed cert; proceed to the hostname to use the CTF.
++
+[source,sh,role=execute]
+----
+oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='https://{.spec.host}{"\n"}'
+----
+
+# 1. Clone Shannon
+git clone https://github.com/KeygraphHQ/shannon.git
+cd shannon
+
+# 2. Configure credentials (choose one method)
+
+# Option A: Export environment variables
+export ANTHROPIC_API_KEY="your-api-key"              # or CLAUDE_CODE_OAUTH_TOKEN
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000           # recommended
+
+# Option B: Create a .env file
+cat > .env << 'EOF'
+ANTHROPIC_API_KEY=your-api-key
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+EOF
+
+# 3. Run a pentest
+./shannon start URL=https://your-app.com REPO=your-repo
