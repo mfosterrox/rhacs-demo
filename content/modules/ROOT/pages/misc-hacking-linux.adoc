@@ -11,6 +11,10 @@ This vulnerable web application is intentionally designed with minimal interacti
 
 Have fun exploring!
 
+== Source and image
+
+The challenge app is from the https://github.com/jeremychoi/CTF-web-to-system-01[CTF-web-to-system-01] repository. The procedure below deploys the pre-built container image `quay.io/jechoisec/ctf-web-to-system-01` (port 9090) to OpenShift and exposes it via a Route so you can access it in your browser.
+
 == Getting access
 
 Start by deploying the vulnerable container to your OpenShift cluster and exposing it with a Route so you can access it from your browser.
@@ -21,15 +25,15 @@ Start by deploying the vulnerable container to your OpenShift cluster and exposi
 
 [source,sh,role=execute]
 ----
-oc new-project ctf-demo
-oc project ctf-demo
+oc new-project ctf-web-to-system
+oc project ctf-web-to-system
 ----
 
-. Apply the CTF manifest (deployment and service):
+. Apply the CTF manifest (deployment and service). Set `$TUTORIAL_HOME` to your `demo-applications` repo path, or use the full path to the manifest file:
 
 [source,sh,role=execute]
 ----
-oc apply -f $TUTORIAL_HOME/kubernetes-manifests/ctf-web-to-system/ctf-w2s.yml -n ctf-demo
+oc apply -f $TUTORIAL_HOME/k8s-deployment-manifests/ctf-web-to-system/ctf-w2s.yml --namespace=ctf-web-to-system
 ----
 
 [.console-output]
@@ -39,23 +43,62 @@ service/ctf-web-to-system-service unchanged
 deployment.apps/ctf-web-to-system configured
 ----
 
-. Expose the service with an OpenShift Route so it is reachable outside the cluster:
+. Wait for the deployment to be ready (pod running and passing the readiness probe):
 
 [source,sh,role=execute]
 ----
-oc expose svc ctf-web-to-system-service -n ctf-demo 2>/dev/null || true
-oc get route ctf-web-to-system-service -n ctf-demo -o jsonpath='https://{.spec.host}{"\n"}'
+oc wait --for=condition=available deployment/ctf-web-to-system -n ctf-web-to-system --timeout=120s
+----
+
+. Expose the service with an OpenShift Route so it is reachable outside the cluster. Use `--port=80` so the Route targets the service port that forwards to the app on 9090. The first command creates the Route if it does not exist; the second prints the full URL:
+
+[source,sh,role=execute]
+----
+oc expose svc ctf-web-to-system-service -n ctf-web-to-system --port=80 2>/dev/null || true
+oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='https://{.spec.host}{"\n"}'
 ----
 
 . Open the URL shown (or run the next command to print it again):
 
 [source,sh,role=execute]
 ----
-oc get route ctf-web-to-system-service -n ctf-demo -o jsonpath='{.spec.host}'
+oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='{.spec.host}'
 echo
 ----
 
-IMPORTANT: Use the OpenShift Route URL (the hostname from the command above, e.g. `ctf-web-to-system-service-ctf-demo.<apps-domain>`) in your browser to access the vulnerable container. Use `https://` if your cluster uses TLS for routes.
+IMPORTANT: Use the OpenShift Route URL (the hostname from the command above, e.g. `ctf-web-to-system-service-ctf-web-to-system.<apps-domain>`) in your browser to access the vulnerable container. Use `https://` if your cluster uses TLS for routes.
 
+== If the app is not accessible
+
+If the Route URL returns an error (503, connection refused, or does not load):
+
+. Check that the pod is running and ready:
++
+[source,sh,role=execute]
+----
+oc get pods -n ctf-web-to-system -l app=ctf-web-to-system
+----
++
+The pod should show `Running` and `1/1` ready. If it is `Pending`, `CrashLoopBackOff`, or `ImagePullBackOff`, continue to the next step.
+
+. Inspect the pod and deployment events (image pull errors, crash reasons):
++
+[source,sh,role=execute]
+----
+oc describe pod -l app=ctf-web-to-system -n ctf-web-to-system
+oc get events -n ctf-web-to-system --sort-by='.lastTimestamp'
+----
++
+If the image `quay.io/jechoisec/ctf-web-to-system-01` cannot be pulled (e.g. not found or rate limited), you can build and push your own image from the https://github.com/jeremychoi/CTF-web-to-system-01[CTF-web-to-system-01] repository and update the deployment to use your image.
+
+. Confirm the Route exists and points to the service:
++
+[source,sh,role=execute]
+----
+oc get route ctf-web-to-system-service -n ctf-web-to-system
+oc get svc ctf-web-to-system-service -n ctf-web-to-system
+----
++
+The service port should be 80 (forwarding to pod port 9090). If the Route was created earlier without `--port=80`, delete it and recreate: `oc delete route ctf-web-to-system-service -n ctf-web-to-system`, then run the expose command again with `--port=80`.
 
 
