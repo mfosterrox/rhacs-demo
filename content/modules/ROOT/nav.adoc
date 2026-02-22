@@ -25,3 +25,6 @@
 * xref:101-10-security-compliance-addons.adoc[101-10 - Security & Compliance Add-Ons Overview (Compliance Operator Intro)]
 * xref:101-11-rebuilding-images.adoc[101-11 - Rebuilding & Hardening Images]
 * xref:101-12-enforcing-tls-routes.adoc[101-12 - Enforcing TLS on Routes]
+
+.CTF Labs
+* xref:misc-hacking-linux.adoc[Hack a web application]

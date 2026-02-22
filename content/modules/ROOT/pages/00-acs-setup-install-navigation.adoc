@@ -226,7 +226,9 @@ ACS_PORTAL_USERNAME="{acs_portal_username}"
 ACS_PORTAL_PASSWORD="{acs_portal_password}"
 ----
 
+[start=5]
 . Verify your roxctl access to the central service.
+
 [source,sh,subs="attributes",role=execute]
 ----
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
@@ -303,6 +305,7 @@ This command sets the variable TUTORIAL_HOME to equal the working directory, all
 
 [source,sh,subs="attributes",role=execute]
 ----
+cd ~/
 echo export TUTORIAL_HOME="$(pwd)/demo-applications" >> ~/.bashrc
 export TUTORIAL_HOME="$(pwd)/demo-applications"
 ----
@@ -452,18 +455,18 @@ quay-bq65l.apps.cluster-bq65l.bq65l.sandbox209.opentlc.com
 
 [start=3]
 . Install Podman on the bastion host if it is not already installed.
-+ 
+
 To proceed, use the installation instructions that match your operating system (for example, RHEL, Fedora, CentOS, Ubuntu, or Debian).
 
 Install Podman using the appropriate command for your distribution:
-+
+
 * On RHEL, CentOS, Rocky Linux, Alma Linux, or Fedora:*
 [source,sh,subs="attributes",role=execute]
 ----
 sudo dnf install -y podman
 ----
-+
 
+[start=4]
 . Verify Podman is installed:
 
 [source,sh,subs="attributes",role=execute]
@@ -471,7 +474,7 @@ sudo dnf install -y podman
 podman --version
 ----
 
-[start=6]
+[start=5]
 . Using the terminal on the bastion host, login to Quay using the Podman CLI as shown below:
 
 [source,sh,subs="attributes",role=execute]
@@ -735,7 +738,7 @@ Writing manifest to image destination
 
 NOTE: Quay will automatically create a private registry to store the application image because of your admin access.
 
-The frontend application is finally built! The next step is to review it in Quay and deploy it to OpenShift using ACM and OpenShift GitOps.
+The frontend application is finally built! The next step is to review it in Quay and deploy it to OpenShift.
 
 [[quay]]
 

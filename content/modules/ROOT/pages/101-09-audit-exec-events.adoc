@@ -43,56 +43,142 @@ Audit logs are the security camera for API actions—who did what, when, and fro
 * Deploy: Restrict who can exec/port-forward.
 * Runtime: Ship audit logs to SIEM; alert on anomalies.
 
-== How to Try It
-Assuming `audit.json` file (JSON lines).
+== Concepts: API Audit Logs and Sensitive Verbs
 
-=== Basic presence check
+The OpenShift/Kubernetes API server writes *audit logs* for API requests: who made the request, when, from which IP, what resource and verb, and (for some operations) request or response details. These logs are your record of "who did what" for compliance and incident response. *Exec* (pod/exec) and *port-forward* (pod/portforward) are especially sensitive: exec runs a command inside a container (potential tampering or exfiltration), and port-forward creates a tunnel to a pod port (exposing internal services). Other high-value events include RoleBinding creates/updates (privilege escalation) and Secret get/list (credential access). Audit log format is JSON (often one JSON object per line); you can export logs from the API server, from a must-gather, or from a log aggregator. This lab assumes you have an audit log file (e.g., `audit.json`) in JSON lines format and uses `jq` to filter and summarize exec and port-forward events for forensics.
+
+== How to Try It
+
+You will work with a file `audit.json` containing API audit log entries (one JSON object per line). You will verify the file exists, extract exec and port-forward events, filter by user, and produce stage distribution, unique actors, and command counts. No cluster resources are created; `jq` and standard shell tools are used on the file. If you do not have an audit log file, obtain one from your cluster (e.g., API server audit log path, must-gather, or central logging) and save it as `audit.json` in your working directory.
+
+=== Use case 1: Obtain audit log and basic presence check
+Ensure you have an audit log file to analyze. OpenShift API server audit logs are typically available on control plane nodes or via must-gather; your environment may provide a sample or export. Confirm the file exists and has content.
+
+*Procedure*
+
+. Check that the audit log file exists and note its size:
+
 [source,sh]
 ----
 ls -l audit.json
 ----
 
-=== Extract exec events
+*Expected:* A non-zero size file. If the file is missing, obtain audit logs from your cluster (e.g., copy from an API server node, use `oc adm must-gather` and look for audit-related artifacts, or export from your log aggregator) and save as `audit.json` with one JSON object per line.
+
+. Optionally peek at the first line to confirm JSON structure:
+
 [source,sh]
 ----
-jq 'select(.objectRef.subresource=="exec") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name,cmd:.requestObject.command}' audit.json
-----
-Fallback:
-[source,sh]
-----
-grep -F '"exec"' audit.json | head
+head -1 audit.json | jq .
 ----
 
-=== Extract port-forward events
+TIP: Audit log format may vary by OpenShift version. Common fields include `requestReceivedTimestamp`, `user.username`, `objectRef.resource`, `objectRef.subresource`, `objectRef.namespace`, `objectRef.name`, `sourceIPs`, and for exec, `requestObject.command`. Adjust `jq` filters if your schema differs.
+
+=== Use case 2: Extract exec events
+Filter the audit log for pod/exec subresource events. These indicate someone ran a command inside a container; for forensics you want time, user, namespace, pod, and if available the command.
+
+*Procedure*
+
+. Extract exec events into a concise structure (time, user, namespace, pod, command):
+
 [source,sh]
 ----
-jq 'select(.objectRef.subresource=="portforward") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name}' audit.json
+jq -c 'select(.objectRef.subresource=="exec") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name,cmd:.requestObject.command}' audit.json
 ----
 
-=== Focus on suspected user
+*Expected:* One line per exec event (or no output if there are none). Fields may be null if not present in your audit profile (e.g., command is sometimes omitted for privacy).
+
+. Fallback: if `jq` select returns nothing, confirm exec entries exist with grep:
+
+[source,sh]
+----
+grep -F '"exec"' audit.json | head -5
+----
+
+NOTE: Some audit configurations do not log request bodies (e.g., `requestObject.command`) to reduce volume or privacy; you may still see who executed and on which pod. Adjust policy if you need command capture for security.
+
+=== Use case 3: Extract port-forward events
+Port-forward events show who created a tunnel to a pod port. Extract them for the same forensics pattern: time, user, namespace, pod.
+
+*Procedure*
+
+. Extract port-forward events:
+
+[source,sh]
+----
+jq -c 'select(.objectRef.subresource=="portforward") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name}' audit.json
+----
+
+*Expected:* One line per port-forward event. Use this to see who is tunneling into which pods—useful for detecting unauthorized access to internal services.
+
+=== Use case 4: Focus on a suspected user
+Narrow the analysis to a single identity: all exec and port-forward events for that user, with time, subresource, pod, namespace, and source IPs. Replace the example user with a real username from your audit log.
+
+*Procedure*
+
+. Set the user to investigate and run the filter:
+
 [source,sh]
 ----
 USER=suspect@example.com
-jq --arg U "$USER" 'select(.user.username==$U and (.objectRef.subresource=="exec" or .objectRef.subresource=="portforward")) | {time:.requestReceivedTimestamp,sub:.objectRef.subresource,pod:.objectRef.name,ns:.objectRef.namespace,sourceIPs:.sourceIPs}' audit.json
+jq -c --arg U "$USER" 'select(.user.username==$U and (.objectRef.subresource=="exec" or .objectRef.subresource=="portforward")) | {time:.requestReceivedTimestamp,sub:.objectRef.subresource,pod:.objectRef.name,ns:.objectRef.namespace,sourceIPs:.sourceIPs}' audit.json
 ----
 
-=== Stage distribution
+*Expected:* Only events where `user.username` matches `$USER` and the subresource is exec or portforward. Source IPs help correlate with network or VPN logs.
+
+TIP: To get a list of usernames that appear in exec events, use the next use case (unique exec actors); then plug one into `USER` for a focused timeline.
+
+=== Use case 5: Stage distribution for exec
+Audit events can have a `stage` (e.g., RequestReceived, ResponseStarted, ResponseComplete). See how exec events are distributed by stage to understand what your audit profile records.
+
+*Procedure*
+
+. Count exec events by stage:
+
 [source,sh]
 ----
-jq 'select(.objectRef.subresource=="exec") | .stage' audit.json | sort | uniq -c
+jq -r 'select(.objectRef.subresource=="exec") | .stage' audit.json | sort | uniq -c
 ----
 
-=== Unique exec actors
+*Expected:* Lines like `N RequestReceived` or `N ResponseComplete`. Helps confirm which stages are logged and whether you have full request/response coverage.
+
+=== Use case 6: Unique exec actors
+List every user (or service account) that performed at least one exec, with counts. Surfaces who has interactive access to containers.
+
+*Procedure*
+
+. Count exec events per username:
+
 [source,sh]
 ----
-jq 'select(.objectRef.subresource=="exec") | .user.username' audit.json | sort | uniq -c
+jq -r 'select(.objectRef.subresource=="exec") | .user.username' audit.json | sort | uniq -c
 ----
 
-=== Commands (if captured)
+*Expected:* One line per distinct user with the number of exec events. High counts or unexpected users are worth investigating.
+
+IMPORTANT: Ship audit logs to a central SIEM or log store with immutable retention so they survive node loss and tampering. Use RBAC to limit who can exec or port-forward, and alert on unusual volume or off-hours activity.
+
+=== Use case 7: Commands (if captured)
+If your audit configuration logs the exec request body, you can list which commands were run. Not all clusters capture this for privacy or size reasons.
+
+*Procedure*
+
+. Count exec events by command (requestObject.command may be an array; adjust if your format differs):
+
 [source,sh]
 ----
-jq 'select(.objectRef.subresource=="exec") | .requestObject.command' audit.json | sort | uniq -c
+jq -r 'select(.objectRef.subresource=="exec") | .requestObject.command' audit.json | sort | uniq -c
 ----
+
+*Expected:* Command strings with counts, or null/empty if not logged. Use to spot risky commands (e.g., shell download, database dumps) during an investigation.
+
+== What Would You Do?
+
+You filtered audit logs for exec and port-forward events, focused on a user, and summarized stages, actors, and commands. In your own environment, consider:
+
+* How would you automate a daily summary of exec and port-forward events per user or namespace and feed it to your SIEM or incident team?
+* Would you correlate audit events with workload restarts or RHACS alerts to build a fuller incident timeline?
+* How would you tune RBAC and alerting so that only necessary identities can exec/port-forward and anomalies are flagged quickly?
 
 == Solutions / Controls
 
@@ -100,6 +186,10 @@ jq 'select(.objectRef.subresource=="exec") | .requestObject.command' audit.json 
 * RHACS correlation with runtime
 * Least privilege RBAC
 * Alert rules on unusual volume/time
+
+== Summary
+
+You used `jq` on an audit log file (`audit.json`) to extract exec and port-forward events, filter by user, and summarize stage distribution, unique actors, and commands. Audit logs are the record of who did what at the API level; exec and port-forward are high-signal for container access and tunneling. Centralize logs, restrict exec/port-forward via RBAC, and correlate with runtime and RHACS for faster incident response.
 
 == Summary Table
 [cols="1,2,2",options="header"]

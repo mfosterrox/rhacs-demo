@@ -41,6 +41,14 @@ Business value: Resource controls translate to cost predictability, performance 
 NOTE: Permission Requirements for This Lab
 Most steps require only project-level access. Granting the `anyuid` SCC needs cluster-admin (or delegated). LimitRange & ResourceQuota creation usually needs elevated (cluster-admin or delegated) rights. Forbidden errors are expected guardrails.
 
+== Concepts: SCC, LimitRange, and ResourceQuota
+
+*Security Context Constraints (SCCs)* control what security-sensitive settings a pod can use (e.g., runAsUser, privileged, hostPath). The *restricted* SCC is the default for most workloads: it assigns a random non-root UID and blocks privileged ports and elevated capabilities. When an image assumes root or port 80, the pod fails—which is desirable, because it surfaces insecure assumptions early. *anyuid* is an SCC that allows running as any user (including root); granting it bypasses that protection and is only acceptable when you have analyzed the risk and documented the exception (e.g., third-party vendor apps that cannot be rebuilt).
+
+*LimitRange* defines default and min/max resource values for containers in a namespace. Pods with no resource spec get the defaults; pods that request more than the max or violate the maxLimitRequestRatio are rejected at admission. That gives every workload predictable defaults and prevents a single container from claiming unbounded CPU or memory.
+
+*ResourceQuota* sets namespace-wide ceilings (e.g., total CPU requests, total memory limits, number of pods). When the sum of resource usage in the namespace would exceed the quota, new pods are not scheduled and you see FailedCreate events. Together with LimitRange, quotas enable fair multi-tenancy and early warning when a namespace is approaching capacity.
+
 == What it Solves
 * Eliminates silent privilege creep (running as root "just because")
 * Discourages shipping rigid vendor images with hard-coded UIDs
@@ -82,65 +90,135 @@ Attackers look for root-running containers or SCC exceptions. By refusing them u
 
 == Part A: SCC Limits & Non-Root Realities
 
-=== How to Try It
+You will deploy an image that tries to bind to privileged port 80 and run as root, observe failures under the restricted SCC, then (with cluster-admin) grant anyuid to see the anti-pattern, and finally register risk acceptance with namespace annotations so exceptions are auditable. The goal is to understand why guardrails exist and how to document exceptions when fixing the image is not an option.
 
-==== Project
+=== Use case A1: Create project and deploy (attempting port 80)
+Create a sandbox project and deploy a UBI Python image that starts an HTTP server on port 80. Under the restricted SCC, the container runs with a random non-root UID and cannot bind to port 80, so the pod will crash.
+
+*Procedure*
+
+. Create the project:
+
 [source,sh]
 ----
 oc new-project 101-04-s-scc-demo
 ----
 
-==== Deploy (attempting privileged port 80)
+. Deploy the app with a command that binds to port 80:
+
 [source,sh]
 ----
-oc create deployment vendor-app --image=registry.access.redhat.com/ubi9/python-311 -- python3 -m http.server 80
-oc logs -l app=vendor-app --tail=50
+oc create deployment vendor-app --image=registry.access.redhat.com/ubi9/python-311 -- python3 -m http.server 80 -n 101-04-s-scc-demo
 ----
-Expected: CrashLoopBackOff with PermissionError (binding port 80).
 
-==== Attempt to force root (runAsUser=0) – expect denial
+. Wait a few seconds, then check pod status and logs:
+
 [source,sh]
 ----
-oc patch deployment vendor-app --type='json' -p='[{"op":"add","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
-oc rollout restart deployment/vendor-app
-oc get events --sort-by=.lastTimestamp | grep vendor-app | tail -n 5 || true
+oc get pods -l app=vendor-app -n 101-04-s-scc-demo
+oc logs -l app=vendor-app --tail=50 -n 101-04-s-scc-demo
 ----
-Look for invalid UID range / runAsUser errors.
 
-==== Grant anyuid (anti-pattern, requires cluster-admin)
+*Expected:* Pod in `CrashLoopBackOff` or `Error`. Logs show a permission error binding to port 80, for example:
+
+[source,text]
+----
+PermissionError: [Errno 13] Permission denied
+----
+
+TIP: The correct fix is to change the app to listen on a high port (e.g., 8080). Do not grant anyuid just to satisfy port 80.
+
+=== Use case A2: Attempt to force root (runAsUser=0) – expect denial
+Patch the deployment to set `runAsUser: 0` (root). The restricted SCC does not allow UID 0, so the admission controller or SCC logic will reject the pod or you will see security-related events.
+
+*Procedure*
+
+. Patch the deployment to add a securityContext with runAsUser 0:
+
 [source,sh]
 ----
-oc adm policy add-scc-to-user anyuid -z default || echo 'Expected Forbidden if not admin'
-oc rollout restart deployment/vendor-app
-oc exec deploy/vendor-app -- id -u || true
-oc logs -l app=vendor-app --tail=10 || true
+oc patch deployment vendor-app -n 101-04-s-scc-demo --type='json' -p='[{"op":"add","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
 ----
-If succeeded (not recommended): id -u = 0 and server listens on 80.
 
-==== Register Risk Acceptance (namespace annotation)
-For third‑party apps where rebuilding is not possible, analyze the risk and formally register the acceptance so it's discoverable and auditable.
+. Restart the deployment and check events:
 
-Multiple deployments? Use one of these patterns:
-* Preferred: annotate each Deployment with its own risk-acceptance metadata
-* Optional index: annotate the namespace with per-deployment keys to avoid overlap (suffix the key with the deployment name)
+[source,sh]
+----
+oc rollout restart deployment/vendor-app -n 101-04-s-scc-demo
+oc get events -n 101-04-s-scc-demo --sort-by=.lastTimestamp | grep vendor-app | tail -n 10
+----
+
+*Expected:* Look for messages indicating invalid UID range, runAsUser not allowed, or similar SCC/security context rejection. The pod may remain in a failed state.
+
+IMPORTANT: This step demonstrates that the platform blocks root by default. Do not rely on "we'll patch it later"—fix the image to run as non-root and use a high port.
+
+=== Use case A3: Grant anyuid (anti-pattern, requires cluster-admin)
+If you have cluster-admin (or equivalent), you can grant the default service account the anyuid SCC. The pod will then run as root and can bind to port 80. This is shown only to illustrate the risk; in production, avoid broad anyuid grants and prefer image fixes or scoped, documented exceptions.
+
+*Procedure*
+
+. Grant the default service account in the project the anyuid SCC (requires cluster-admin):
+
+[source,sh]
+----
+oc adm policy add-scc-to-user anyuid -z default -n 101-04-s-scc-demo
+----
+
+If you get `Forbidden`, you do not have sufficient rights—that is expected and indicates the guardrail is in place.
+
+. Restart the deployment so the new SCC is applied:
+
+[source,sh]
+----
+oc rollout restart deployment/vendor-app -n 101-04-s-scc-demo
+oc rollout status deployment/vendor-app -n 101-04-s-scc-demo --timeout=120s
+----
+
+. Verify the container is running as root and the server is listening on 80:
+
+[source,sh]
+----
+oc exec deploy/vendor-app -n 101-04-s-scc-demo -- id -u
+oc logs -l app=vendor-app --tail=10 -n 101-04-s-scc-demo
+----
+
+*Expected (if anyuid was granted):* `id -u` prints `0` and logs show the server started on port 80. This confirms that anyuid bypasses the non-root and privileged-port guardrails—and why it should be avoided except when explicitly accepted.
+
+=== Use case A4: Register risk acceptance (namespace annotation)
+For third-party or legacy apps where rebuilding is not feasible, document the exception with namespace (or deployment) annotations so it is discoverable and auditable. Use a consistent key pattern such as `openshift.io/risk-accepted.<deployment-name>`.
+
+*Procedure*
+
+. Annotate the namespace with risk-acceptance metadata for this deployment:
 
 [source,sh]
 ----
 oc annotate namespace 101-04-s-scc-demo \
-	openshift.io/risk-accepted.vendor-app="Requires anyuid for privileged port" \
-	openshift.io/risk-accepted-approved-by.vendor-app="InfoSec Team" \
-	--overwrite
+  openshift.io/risk-accepted.vendor-app="Requires anyuid for privileged port" \
+  openshift.io/risk-accepted-approved-by.vendor-app="InfoSec Team" \
+  --overwrite
 ----
 
-==== Verify annotation
+. Verify the annotations are present:
+
 [source,sh]
 ----
 oc get ns 101-04-s-scc-demo -o yaml | grep -E 'openshift.io/risk-accepted'
 ----
 
-NOTE: Keep this for exceptional cases. The preferred path is to rebuild images so they run under the restricted SCC without anyuid.
+*Sample output*
 
-==== Cleanup (optional)
+[source,text]
+----
+  openshift.io/risk-accepted-approved-by.vendor-app: InfoSec Team
+  openshift.io/risk-accepted.vendor-app: Requires anyuid for privileged port
+----
+
+NOTE: Reserve this pattern for exceptional cases. The preferred path is to rebuild images to run under the restricted SCC without anyuid. For multiple deployments, annotate each (e.g., suffix keys with the deployment name) or annotate the Deployment object itself.
+
+=== Use case A5: Cleanup (Part A)
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-04-s-scc-demo --wait=false
@@ -148,17 +226,23 @@ oc delete project 101-04-s-scc-demo --wait=false
 
 == Part B: Resource Usage (Quotas & Limits)
 
-=== How to Try It
-Namespace: `101-04-s-resources-demo`. Image: UBI `sleep infinity`.
+You will create a second namespace, apply a LimitRange (defaults, min/max, and maxLimitRequestRatio) and a ResourceQuota (namespace ceilings). Then you will deploy a pod with no resource spec (it inherits defaults), override resources within bounds, attempt to exceed the LimitRange max (admission rejects), and scale beyond the quota (FailedCreate events). All steps use the namespace `101-04-s-resources-demo` and a UBI image running `sleep infinity`.
 
-==== Namespace setup
+=== Use case B1: Namespace and LimitRange
+Create the resources namespace and apply a LimitRange so every container gets default requests and limits and is constrained by min/max and ratio.
+
+*Procedure*
+
+. Create the project and switch to it:
+
 [source,sh]
 ----
 oc new-project 101-04-s-resources-demo
-oc project
+oc project 101-04-s-resources-demo
 ----
 
-==== LimitRange (defaults + bounds + ratios)
+. Create a LimitRange with defaults, min, max, and maxLimitRequestRatio:
+
 [source,sh]
 ----
 oc apply -f - <<'EOF'
@@ -187,65 +271,169 @@ spec:
       memory: "4"
 EOF
 ----
-==== Verify
+
+. Verify the LimitRange was created:
+
 [source,sh]
 ----
-oc get limitrange default-limits -o jsonpath='{.spec.limits[0]}' | sed 's/,/\n/g'
+oc get limitrange default-limits -n 101-04-s-resources-demo -o yaml
+# Or a compact view:
+oc get limitrange default-limits -n 101-04-s-resources-demo -o jsonpath='{.spec.limits[0]}' | sed 's/,/\n/g'
 ----
 
-==== ResourceQuota (namespace ceilings)
+TIP: The maxLimitRequestRatio prevents a container from requesting a small amount and then using a much larger limit (e.g., request 100m CPU but limit 2 CPU), which can lead to unfair burst usage.
+
+=== Use case B2: ResourceQuota (namespace ceilings)
+Apply a ResourceQuota so the namespace cannot exceed aggregate CPU, memory, and pod counts. New pods that would push the namespace over the quota will fail with a quota-related FailedCreate event.
+
+*Procedure*
+
+. Create the quota (single --hard with comma-separated values; requires permission to create resourcequotas):
+
 [source,sh]
 ----
-oc create quota compute-quota \
-  --hard=requests.cpu=2 \
-  --hard=requests.memory=2Gi \
-  --hard=limits.cpu=4 \
-  --hard=limits.memory=4Gi \
-  --hard=pods=10
-oc describe quota compute-quota | sed -n '1,25p'
+oc create quota compute-quota -n 101-04-s-resources-demo \
+  --hard=requests.cpu=2,requests.memory=2Gi,limits.cpu=4,limits.memory=4Gi,pods=10
 ----
 
-==== Deploy unbounded workload (inherits defaults)
+. Inspect the quota and current usage:
+
 [source,sh]
 ----
-oc create deployment stress --image=registry.access.redhat.com/ubi9/ubi -- /bin/sh -c "sleep infinity"
-oc wait --for=condition=Available deployment/stress --timeout=90s
-oc get pod -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
+oc describe quota compute-quota -n 101-04-s-resources-demo
 ----
-Expected: requests 100m/128Mi; limits 500m/256Mi.
 
-==== Override within bounds
+*Sample output*
+
+[source,text]
+----
+Name:            compute-quota
+Namespace:       101-04-s-resources-demo
+Resource         Used  Hard
+--------         ----  ----
+limits.cpu       0     4
+limits.memory    0     4Gi
+pods             0     10
+requests.cpu     0     2
+requests.memory  0     2Gi
+----
+
+=== Use case B3: Deploy unbounded workload (inherits defaults)
+Deploy a pod that does not specify resources. The LimitRange admission controller injects the default request and limit, so the pod is scheduled with predictable values.
+
+*Procedure*
+
+. Create a deployment with no resource spec:
+
 [source,sh]
 ----
-oc set resources deploy/stress --requests=cpu=300m,memory=256Mi --limits=cpu=800m,memory=512Mi
-oc rollout restart deploy/stress
-oc wait --for=condition=Available deployment/stress --timeout=90s
-oc get pod -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
+oc create deployment stress -n 101-04-s-resources-demo --image=registry.access.redhat.com/ubi9/ubi -- /bin/sh -c "sleep infinity"
 ----
 
-==== Exceed max (admission rejects new pods)
+. Wait for the deployment to be available and inspect the pod's injected resources:
+
 [source,sh]
 ----
-oc set resources deployment/stress --limits=cpu=2,memory=1Gi
-oc rollout restart deploy/stress
-oc get deploy stress -o jsonpath='{range .status.conditions[*]}{.type}:{.reason}:{.message}{"\n"}{end}' | grep -i FailedCreate || true
-oc get pod -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
-oc get deploy stress -o jsonpath='{.spec.template.spec.containers[0].resources.limits}{"\n"}'
+oc wait --for=condition=Available deployment/stress -n 101-04-s-resources-demo --timeout=90s
+oc get pod -l app=stress -n 101-04-s-resources-demo -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
 ----
 
-==== Scale beyond quota (pods limit)
+*Expected:* The container has requests (e.g., cpu 100m, memory 128Mi) and limits (e.g., cpu 500m, memory 256Mi) from the LimitRange defaults.
+
+=== Use case B4: Override within bounds
+Change the deployment's resource requests and limits to values within the LimitRange min/max. The rollout should succeed and the new pods reflect your overrides.
+
+*Procedure*
+
+. Set requests and limits within the allowed range:
+
 [source,sh]
 ----
-oc scale deployment stress --replicas=25 || true
-oc get events --sort-by=.lastTimestamp | grep -E 'FailedCreate.*compute-quota' | tail -1 || true
-oc get quota compute-quota
+oc set resources deploy/stress -n 101-04-s-resources-demo --requests=cpu=300m,memory=256Mi --limits=cpu=800m,memory=512Mi
+oc rollout restart deploy/stress -n 101-04-s-resources-demo
+oc wait --for=condition=Available deployment/stress -n 101-04-s-resources-demo --timeout=90s
 ----
 
-==== Cleanup (optional)
+. Confirm the pod spec shows the new values:
+
+[source,sh]
+----
+oc get pod -l app=stress -n 101-04-s-resources-demo -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
+----
+
+NOTE: 800m CPU and 512Mi memory are at the LimitRange max; 300m/256Mi are within the default and ratio. If you exceed max (e.g., limits.cpu=2), the next step demonstrates the rejection.
+
+=== Use case B5: Exceed max (admission rejects new pods)
+Set the deployment's limits above the LimitRange max (e.g., cpu: 2, memory: 1Gi). The new replica set will not be able to create pods; you will see FailedCreate events or conditions indicating the pod was rejected (e.g., LimitRange or Forbidden).
+
+*Procedure*
+
+. Set limits above the LimitRange max:
+
+[source,sh]
+----
+oc set resources deployment/stress -n 101-04-s-resources-demo --limits=cpu=2,memory=1Gi
+oc rollout restart deploy/stress -n 101-04-s-resources-demo
+----
+
+. Check deployment conditions and events for the rejection reason:
+
+[source,sh]
+----
+oc get deploy stress -n 101-04-s-resources-demo -o jsonpath='{range .status.conditions[*]}{.type}:{.reason}:{.message}{"\n"}{end}'
+oc get events -n 101-04-s-resources-demo --sort-by=.lastTimestamp | tail -15
+----
+
+*Expected:* FailedCreate or similar, with a message about exceeding maximum allowed or LimitRange. The existing pod (from the previous spec) may still be running; the new replica set's pods will not be created.
+
+. Revert to a valid spec so you can continue (e.g., back within bounds):
+
+[source,sh]
+----
+oc set resources deployment/stress -n 101-04-s-resources-demo --requests=cpu=300m,memory=256Mi --limits=cpu=800m,memory=512Mi
+oc rollout status deployment/stress -n 101-04-s-resources-demo --timeout=90s
+----
+
+=== Use case B6: Scale beyond quota (pods limit)
+Scale the deployment to more replicas than the quota allows (e.g., 25 pods when the quota allows 10). Extra pods will not be scheduled and you will see FailedCreate events citing the quota.
+
+*Procedure*
+
+. Scale to a number of replicas that exceeds the quota (e.g., pods=10 in the quota):
+
+[source,sh]
+----
+oc scale deployment stress -n 101-04-s-resources-demo --replicas=25
+----
+
+. Check events and quota usage:
+
+[source,sh]
+----
+oc get events -n 101-04-s-resources-demo --sort-by=.lastTimestamp | grep -E 'FailedCreate|compute-quota' | tail -5
+oc get quota compute-quota -n 101-04-s-resources-demo
+oc get pods -n 101-04-s-resources-demo -l app=stress
+----
+
+*Expected:* Only up to 10 pods (or whatever the quota allows) are created; the rest show FailedCreate with a reason related to quota (e.g., "exceeded quota"). The quota describe output shows Used at the Hard limit for pods.
+
+IMPORTANT: ResourceQuota and LimitRange work together: LimitRange injects defaults and enforces per-container bounds; ResourceQuota enforces namespace totals. Use both for predictable, fair multi-tenancy.
+
+=== Use case B7: Cleanup (Part B)
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-04-s-resources-demo --wait=false
 ----
+
+== What Would You Do?
+
+You saw how the restricted SCC blocks root and privileged port 80, how anyuid bypasses those guardrails (and why to avoid it), and how to document risk acceptance with annotations. You also enforced resource defaults and ceilings with LimitRange and ResourceQuota. In your own environment, consider:
+
+* How would you decide when to allow an anyuid exception versus requiring an image change or a high-port variant?
+* Would you standardize LimitRange and ResourceQuota per namespace (e.g., via GitOps) so every project has predictable defaults and caps?
+* How would you monitor quota denial events and saturation trends to plan capacity before users hit hard limits?
 
 == Solutions / Controls
 
@@ -257,6 +445,10 @@ oc delete project 101-04-s-resources-demo --wait=false
 * ResourceQuota: namespace aggregate cap
 * Monitoring: watch denial events & saturation trends
 * Autoscaling: accurate requests enable fair scaling
+
+== Summary
+
+In Part A you observed a container fail on port 80 and when forced to runAsUser 0 under the restricted SCC, then (with cluster-admin) granted anyuid and saw it run as root on port 80—illustrating why anyuid is a last resort. You recorded risk acceptance with namespace annotations for auditability. In Part B you applied a LimitRange for container defaults and bounds, and a ResourceQuota for namespace ceilings; you verified default injection, allowed overrides within bounds, and saw admission reject over-max limits and quota deny excess replicas. Prefer fixing images and using high ports; when exceptions are unavoidable, document them. Use LimitRange and ResourceQuota in every namespace for fair, predictable multi-tenancy.
 
 == Summary Table
 [cols="1,2,2",options="header"]

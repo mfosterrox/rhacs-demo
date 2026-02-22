@@ -61,65 +61,220 @@ By adopting existing defaults, you eliminate redundant YAML, ease training, and 
 * Runtime: Monitor audit logs or RHACS for privilege jumps (view → admin unexpectedly) and new RoleBindings.
 * Governance: Periodically export bindings; compare against team roster. Remove drift quickly.
 
-== How to Try It
-We will impersonate a fictitious user name `dev-user` and only bind built-in ClusterRoles in a single namespace.
+== Concepts: Built-in Roles and Impersonation
 
-=== Create sandbox project
+OpenShift ships with *ClusterRoles* such as `view`, `edit`, and `admin` that you bind at namespace scope with a *RoleBinding*. That gives a user or group a well-defined set of permissions in that namespace only. You don't need to create custom Roles for common personas—the platform already encodes least-privilege tiers: view (read most things, no secret data, no RBAC), edit (mutate workloads but not RBAC), admin (full namespace control including RoleBindings and secrets). To test permissions without creating real users, you use *impersonation*: `oc auth can-i <verb> <resource> --as=dev-user` (or `--as=system:serviceaccount:ns:name` for a service account). Impersonation lets you verify exactly what each role allows before rolling it out to your team.
+
+== How to Try It
+
+You will create a sandbox project, bind the built-in roles `view`, `edit`, and `admin` one at a time to a fictitious user `dev-user`, and use `oc auth can-i --as=dev-user` to observe what each role permits. Then you'll confirm that a new ServiceAccount has no permissions until explicitly bound. All steps use only default ClusterRoles and impersonation—no custom Roles or real identities required.
+
+=== Use case 1: Create sandbox project
+Create a dedicated namespace so your role-binding experiments don't affect other workloads.
+
+*Procedure*
+
+. Create the project:
+
 [source,sh]
 ----
 oc new-project 101-03-r-rbac
 ----
 
-=== Bind view (read-most objects, no writes, no RBAC changes)
+NOTE: The project name is arbitrary; use any namespace name that fits your lab conventions.
+
+=== Use case 2: Bind view and verify read-only scope
+Bind the `view` ClusterRole to the user `dev-user` in the sandbox namespace. View allows reading and listing most namespaced resources but not secret contents, not RBAC objects, and no create/update/delete. This is the right role for dashboards and read-only troubleshooting.
+
+*Procedure*
+
+. Create a RoleBinding that grants the `view` ClusterRole to `dev-user` in the current namespace:
+
 [source,sh]
 ----
-oc create rolebinding dev-view --clusterrole=view --user=dev-user
-oc auth can-i get pods --as=dev-user
-oc auth can-i create deployment --as=dev-user
-oc auth can-i get secret/mysecret --as=dev-user || true
+oc create rolebinding dev-view --clusterrole=view --user=dev-user -n 101-03-r-rbac
 ----
-Expected: get pods = yes; create deployment = no; secret access should fail (cannot read secret contents).
 
-=== Escalate to edit (can mutate workloads, still cannot edit RBAC)
+. Check that `dev-user` can get pods (read):
+
 [source,sh]
 ----
-oc delete rolebinding dev-view
-oc create rolebinding dev-edit --clusterrole=edit --user=dev-user
-oc auth can-i create deployment --as=dev-user
-oc auth can-i create rolebinding --as=dev-user
+oc auth can-i get pods --as=dev-user -n 101-03-r-rbac
 ----
-Expected: create deployment = yes; create rolebinding = no.
 
-=== Escalate to admin (full namespace administration including RBAC objects)
+*Expected output:* `yes`
+
+. Check that `dev-user` cannot create a deployment (no write):
+
 [source,sh]
 ----
-oc delete rolebinding dev-edit
-oc create rolebinding dev-admin --clusterrole=admin --user=dev-user
-oc auth can-i create rolebinding --as=dev-user
-oc auth can-i delete secret --as=dev-user
+oc auth can-i create deployment --as=dev-user -n 101-03-r-rbac
 ----
-Expected: both now permitted (RBAC + secret mutation) within the namespace.
 
-=== Workload check under edit/admin
+*Expected output:* `no`
+
+. Check that `dev-user` cannot read secret data (view deliberately excludes secret contents):
+
 [source,sh]
 ----
-oc create deployment sample --image=registry.access.redhat.com/ubi9/ubi -- sleep infinity
-oc get deploy --as=dev-user
+oc auth can-i get secret/mysecret --as=dev-user -n 101-03-r-rbac
 ----
 
-=== ServiceAccount conservative default
+*Expected output:* `no` (or the command may error if the secret doesn't exist—the important point is that view does not grant secret read).
+
+TIP: Use `oc auth can-i --list --as=dev-user -n 101-03-r-rbac` to see a matrix of allowed verbs and resources for that identity in the namespace.
+
+=== Use case 3: Escalate to edit and verify mutation without RBAC
+Remove the view binding and bind `edit` instead. Edit allows typical application mutations (deployments, services, configmaps, etc.) but still does *not* allow creating or changing RoleBindings or Roles. That prevents a compromised or careless identity from granting itself or others more power.
+
+*Procedure*
+
+. Remove the view binding and create an edit binding:
+
 [source,sh]
 ----
-oc create sa app-sa
-oc auth can-i list secrets --as=system:serviceaccount:101-03-r-rbac:app-sa
+oc delete rolebinding dev-view -n 101-03-r-rbac
+oc create rolebinding dev-edit --clusterrole=edit --user=dev-user -n 101-03-r-rbac
 ----
-Expected: denied until explicitly bound (shows default restraint for service accounts).
 
-=== Cleanup (optional)
+. Confirm `dev-user` can create deployments:
+
+[source,sh]
+----
+oc auth can-i create deployment --as=dev-user -n 101-03-r-rbac
+----
+
+*Expected output:* `yes`
+
+. Confirm `dev-user` still cannot create a RoleBinding (no RBAC changes):
+
+[source,sh]
+----
+oc auth can-i create rolebinding --as=dev-user -n 101-03-r-rbac
+----
+
+*Expected output:* `no`
+
+IMPORTANT: The separation between "can change workloads" and "cannot change RBAC" is intentional. Edit is safe for developers and CI/CD that need to deploy and update apps but should not be able to escalate their own permissions.
+
+=== Use case 4: Escalate to admin and verify full namespace control
+Replace the edit binding with `admin`. Admin grants full namespace stewardship: create/update/delete workloads, manage secrets, and create or modify RoleBindings and Roles within the namespace. It does *not* grant cluster-scoped privileges (e.g., creating namespaces or cluster-wide resources).
+
+*Procedure*
+
+. Remove the edit binding and create an admin binding:
+
+[source,sh]
+----
+oc delete rolebinding dev-edit -n 101-03-r-rbac
+oc create rolebinding dev-admin --clusterrole=admin --user=dev-user -n 101-03-r-rbac
+----
+
+. Confirm `dev-user` can now create a RoleBinding:
+
+[source,sh]
+----
+oc auth can-i create rolebinding --as=dev-user -n 101-03-r-rbac
+----
+
+*Expected output:* `yes`
+
+. Confirm `dev-user` can delete secrets (full namespace control):
+
+[source,sh]
+----
+oc auth can-i delete secret --as=dev-user -n 101-03-r-rbac
+----
+
+*Expected output:* `yes`
+
+=== Use case 5: Workload check under edit or admin
+With `dev-user` still bound as admin (or you can re-bind edit and compare), create a deployment and then list it as `dev-user` to confirm the identity can see and interact with workloads in the namespace.
+
+*Procedure*
+
+. Create a simple deployment in the sandbox namespace:
+
+[source,sh]
+----
+oc create deployment sample --image=registry.access.redhat.com/ubi9/ubi -- sleep infinity -n 101-03-r-rbac
+----
+
+. List deployments as `dev-user` (works with either edit or admin):
+
+[source,sh]
+----
+oc get deploy -n 101-03-r-rbac --as=dev-user
+----
+
+*Sample output*
+
+[source,text]
+----
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE
+sample   1/1     1            1           30s
+----
+
+NOTE: With edit or admin, the user can create, update, and delete such workloads. With view only, the user could list and get but not modify.
+
+=== Use case 6: ServiceAccount conservative default
+A newly created ServiceAccount has *no* RoleBindings by default. So it cannot list, create, or delete resources until you explicitly bind a role to it. This demonstrates that OpenShift does not grant service accounts any default permissions—you must opt in.
+
+*Procedure*
+
+. Create a ServiceAccount in the sandbox namespace:
+
+[source,sh]
+----
+oc create sa app-sa -n 101-03-r-rbac
+----
+
+. Check whether that ServiceAccount can list secrets (it should be denied):
+
+[source,sh]
+----
+oc auth can-i list secrets --as=system:serviceaccount:101-03-r-rbac:app-sa -n 101-03-r-rbac
+----
+
+*Expected output:* `no`
+
+. Optionally bind a role to the ServiceAccount and re-run the same check to see it change to `yes`:
+
+[source,sh]
+----
+oc create rolebinding app-sa-view --clusterrole=view --serviceaccount=101-03-r-rbac:app-sa -n 101-03-r-rbac
+oc auth can-i list pods --as=system:serviceaccount:101-03-r-rbac:app-sa -n 101-03-r-rbac
+----
+
+TIP: For CI/CD or in-cluster apps, bind the minimum role needed (often `edit` for deploy pipelines, never `cluster-admin` unless break-glass). Document each binding and review periodically.
+
+=== Use case 7: Cleanup
+Remove the project and all resources. Use `--wait=false` to return immediately while the namespace terminates in the background.
+
+*Procedure*
+
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-03-r-rbac --wait=false
 ----
+
+. Optionally wait for the namespace to be gone:
+
+[source,sh]
+----
+oc get namespace 101-03-r-rbac
+# Repeat until "NotFound"
+----
+
+== What Would You Do?
+
+You tested view, edit, and admin with a single impersonated user and saw that a new ServiceAccount starts with no permissions. In your own environment, consider:
+
+* How would you map your teams (e.g., developers, SRE, auditors) to view vs edit vs admin in each namespace?
+* Would you use a GitOps repo to store RoleBindings so every change is reviewed and auditable?
+* How would you detect unexpected privilege changes—for example, a service account suddenly bound to admin—using RHACS or OpenShift audit logs?
 
 == Solutions / Controls
 [cols="1,2,2",options="header"]
@@ -143,6 +298,10 @@ oc delete project 101-03-r-rbac --wait=false
 |basic-user | Self & project discovery | Workload mutation | User info queries | Minimal risk
 |cluster-admin (avoid) | Everything | — | Break-glass ops only | Total cluster compromise
 |===
+
+== Summary
+
+You used impersonation to test the built-in roles view, edit, and admin in a sandbox namespace: view allowed read-only access, edit allowed workload mutation but not RBAC changes, and admin allowed full namespace control including RoleBindings and secrets. You also confirmed that a new ServiceAccount has no permissions until you bind a role to it. Relying on these defaults reduces custom YAML, clarifies escalation paths, and avoids the "just bind cluster-admin" anti-pattern.
 
 == FAQs
 How do I quickly test a permission?:: `oc auth can-i <verb> <resource> --as=<user>` (add `-n <ns>` if needed).

@@ -41,16 +41,47 @@ Images from random registries are risky, you don’t know who built them, what�
 |Missing Signature / SBOM | Weak chain of custody | Broken package seal
 |===
 
+== Concepts: Image Provenance and Allow-Lists
+
+*Provenance* means knowing where an image came from and what it is. Images from arbitrary registries (e.g., public Docker Hub) may be unmaintained, contain known vulnerabilities, or be tampered with. An *allow-list* restricts which image sources are permitted: only images from trusted registries (e.g., Red Hat, Quay, or your internal registry) can be deployed. OpenShift can enforce this with admission control: a ValidatingAdmissionPolicy checks every new pod or deployment and denies those whose image references do not match the allowed prefixes.
+
+*Digest vs tag:* A tag like `:latest` or `:9.6` can be moved to a different image at any time. A *digest* (e.g., `@sha256:abc123...`) is immutable—it identifies one exact image content. For audit and reproducibility, prefer pinning by digest or at least using a trusted registry plus a fixed tag. This lab uses a namespace label to scope the allow-list so you can opt in namespaces progressively without affecting the whole cluster.
+
 == How to Try It
 
-=== Create & label project
+You will create a project labeled for enforcement, apply a ValidatingAdmissionPolicy (and bindings) that allow only images from Red Hat registries, Quay.io, or the internal OpenShift registry. Then you will attempt to deploy an image from Docker Hub (expect denial), deploy a trusted UBI image (success), and verify provenance by inspecting the pod's Image and Image ID. Cluster-admin is required to create the policy and bindings; the rest uses the project namespace `101-07-i-trusted`.
+
+=== Use case 1: Create and label project
+Create the project and add a label so the allow-list policy applies only to this namespace. That way you can roll out enforcement per namespace instead of cluster-wide.
+
+*Procedure*
+
+. Create the project and attach the label used by the policy binding:
+
 [source,sh]
 ----
 oc new-project 101-07-i-trusted
 oc label namespace 101-07-i-trusted trusted-registry-enforce=true --overwrite
 ----
 
-=== Apply namespace-scoped allow‑list (cluster-admin)
+. Confirm the label is set:
+
+[source,sh]
+----
+oc get namespace 101-07-i-trusted --show-labels
+----
+
+*Expected:* The namespace shows `trusted-registry-enforce=true` in LABELS.
+
+TIP: Using a namespace selector lets you enable the allow-list in specific namespaces (e.g., production) first and avoid blocking workloads in namespaces that are not yet compliant.
+
+=== Use case 2: Apply namespace-scoped allow-list (cluster-admin)
+Apply a ValidatingAdmissionPolicy that rejects pods and deployments whose container images do not come from allowed registry prefixes. The binding ties the policy to namespaces with the label you set above. These resources are cluster-scoped; you need cluster-admin (or equivalent) to create them.
+
+*Procedure*
+
+. Apply the policy and bindings (one policy and one binding for pods, one for deployments). The CEL expression allows only images whose name starts with the listed registries:
+
 [source,sh]
 ----
 oc apply -f - <<'EOF'
@@ -114,46 +145,134 @@ spec:
 EOF
 ----
 
-=== Attempt disallowed image (expect deny)
+. Verify the policies and bindings exist (cluster-scoped, no namespace):
+
 [source,sh]
 ----
-oc -n 101-07-i-trusted create deployment bad --image=docker.io/library/nginx:latest || true
+oc get validatingadmissionpolicy
+oc get validatingadmissionpolicybinding
 ----
 
-=== Deploy trusted UBI image (should succeed)
+NOTE: If you get "Forbidden" or "the server doesn't have a resource type", you need cluster-admin. The policy applies only to namespaces that have the label `trusted-registry-enforce: "true"`. To allow another registry, extend the CEL expression with another `startsWith('...')` clause.
+
+=== Use case 3: Attempt disallowed image (expect deny)
+Try to create a deployment using an image from Docker Hub. The admission controller should reject it because the image prefix is not in the allow-list.
+
+*Procedure*
+
+. Create a deployment with an image from docker.io (not in the allow-list):
+
 [source,sh]
 ----
-oc -n 101-07-i-trusted create deployment good --image=registry.access.redhat.com/ubi9/ubi:9.6 -- sleep infinity
-oc -n 101-07-i-trusted wait --for=condition=Available deployment/good --timeout=60s
+oc create deployment bad -n 101-07-i-trusted --image=docker.io/library/nginx:latest 2>&1 || true
 ----
 
-=== Verify provenance
+*Expected:* The command fails with an admission error. You may see a message like "Deployment rejected: only Red Hat registries, Quay.io, or internal registry images allowed." or similar validation failure.
+
+. Confirm the deployment was not created (or is not present):
+
 [source,sh]
 ----
-oc -n 101-07-i-trusted describe pod -l app=good | grep -E 'Image:|Image ID:'
+oc get deployment bad -n 101-07-i-trusted 2>&1 || true
 ----
 
-What to look for:
+*Expected:* "NotFound" or no deployment named `bad`. The allow-list is enforcing trusted sources only.
 
-- Image: should show a trusted registry host (registry.access.redhat.com, registry.redhat.io, quay.io, or your internal registry)
-- Image ID: should show an immutable sha256 digest. This proves the exact content that ran; tags like :latest can change, digests do not.
+IMPORTANT: Blocking unapproved registries reduces supply-chain and provenance risk. For images you must use from other sources, mirror or import them into your trusted registry first, then reference the trusted URL.
 
-If both are correct (trusted host + sha256 digest), you have a basic provenance check: approved source and exact, verifiable content.
+=== Use case 4: Deploy trusted UBI image
+Create a deployment using an image from an allowed registry (Red Hat UBI). Admission should allow it and the deployment should become available.
 
-Example (if you use UBI 9.6):
+*Procedure*
 
-- Image: registry.redhat.io/ubi9/ubi:9.6 (trusted source)
-- Image ID: …@sha256:dbc1e98d14a022542e45b5f22e0206d3f86b5bdf237b58ee7170c9ddd1b3a283 (immutable digest)
+. Create the deployment with a Red Hat registry image:
 
-=== Cleanup (optional)
+[source,sh]
+----
+oc create deployment good -n 101-07-i-trusted --image=registry.access.redhat.com/ubi9/ubi:9.6 -- sleep infinity
+----
+
+. Wait for the deployment to be available:
+
+[source,sh]
+----
+oc wait --for=condition=Available deployment/good -n 101-07-i-trusted --timeout=90s
+oc get pods -l app=good -n 101-07-i-trusted
+----
+
+*Expected:* Deployment is Available; pod is Running. The image passed the allow-list because it starts with `registry.access.redhat.com`.
+
+=== Use case 5: Verify provenance
+Inspect the running pod to confirm the image reference (trusted registry) and the immutable Image ID (sha256 digest). That gives you a basic provenance check: approved source and exact content.
+
+*Procedure*
+
+. Describe the pod and show Image and Image ID:
+
+[source,sh]
+----
+oc describe pod -l app=good -n 101-07-i-trusted | grep -E 'Image:|Image ID:'
+----
+
+*What to look for:*
+
+* *Image:* A trusted registry host (e.g., `registry.access.redhat.com`, `registry.redhat.io`, `quay.io`, or your internal registry).
+* *Image ID:* An immutable `sha256:` digest. Tags like `:latest` can change; the digest identifies the exact image that ran and supports reproducibility and audit.
+
+*Example output (UBI 9.6):*
+
+[source,text]
+----
+  Image:         registry.access.redhat.com/ubi9/ubi:9.6
+  Image ID:      registry.access.redhat.com/ubi9/ubi@sha256:...
+----
+
+If both show a trusted host and a digest, you have a basic provenance check: approved source and verifiable content.
+
+TIP: In pipelines, pin images by digest (e.g., `ubi9/ubi@sha256:abc123...`) so builds are reproducible and not affected by tag moves.
+
+=== Use case 6: Cleanup
+Remove the project and the cluster-scoped admission policy and bindings so they do not affect other labs or namespaces.
+
+*Procedure*
+
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-07-i-trusted --wait=false
-oc delete validatingadmissionpolicybinding trusted-images-only-pods || true
-oc delete validatingadmissionpolicybinding trusted-images-only-deployments || true
-oc delete validatingadmissionpolicy allow-trusted-registries-pods || true
-oc delete validatingadmissionpolicy allow-trusted-registries-deployments || true
 ----
+
+. Remove the policy bindings and policies (cluster-scoped; requires cluster-admin):
+
+[source,sh]
+----
+oc delete validatingadmissionpolicybinding trusted-images-only-pods --ignore-not-found
+oc delete validatingadmissionpolicybinding trusted-images-only-deployments --ignore-not-found
+oc delete validatingadmissionpolicy allow-trusted-registries-pods --ignore-not-found
+oc delete validatingadmissionpolicy allow-trusted-registries-deployments --ignore-not-found
+----
+
+== What Would You Do?
+
+You enforced an allow-list so only images from Red Hat, Quay, or the internal registry could be deployed in the labeled namespace, saw Docker Hub nginx denied, and deployed and verified a UBI image. In your own environment, consider:
+
+* How would you extend the policy to StatefulSets, DaemonSets, or other workload types that specify container images?
+* Would you use a warn-only binding in development namespaces and Deny in production to reduce surprise while still gathering data?
+* How would you integrate signature verification (e.g., cosign) so only signed images from trusted registries are accepted?
+
+== Solutions / Controls
+
+* ValidatingAdmissionPolicy allow-list for image sources
+* Namespace label scoping for progressive rollout
+* Provenance verification (registry + digest) in describe and audit
+* Mirror or import external images into a trusted registry
+* Pin by digest in CI/CD for reproducibility
+* RHACS and image scanning as a complement to admission
+
+== Summary
+
+You created a project with a label that triggers the allow-list, applied ValidatingAdmissionPolicies that deny pods and deployments whose images are not from Red Hat, Quay, or the internal registry, and saw an unapproved image (Docker Hub nginx) rejected and a trusted UBI image admitted. You verified provenance by checking the pod's Image and Image ID (trusted host and sha256 digest). Trusted registries and allow-lists reduce supply-chain and provenance risk; use namespace scoping to roll out enforcement safely.
 
 == Summary Table
 [cols="1,2,2,2",options="header"]

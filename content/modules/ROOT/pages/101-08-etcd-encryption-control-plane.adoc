@@ -38,32 +38,93 @@ Etcd stores all cluster data including secrets, configmaps, and other sensitive 
 |Key Management | Key compromise | Secure key storage
 |===
 
+== Concepts: Etcd Encryption at Rest and Control Plane
+
+*Etcd* is the cluster's key-value store; it holds all API objects, including Secrets, ConfigMaps, and other sensitive data. By default, etcd may store data in plaintext (or base64 only for Secrets). *Encryption at rest* means the API server encrypts resources before writing them to etcd and decrypts them when reading, so that anyone with access to etcd storage cannot read secret data. OpenShift can enable this via an encryption configuration that specifies which resources to encrypt and how. Enabling or changing encryption typically requires cluster-admin and may involve API server restarts or node coordination.
+
+The *control plane* consists of the API server, etcd, scheduler, controller manager, and the nodes that run them. Hardening includes restricting access to control plane nodes, ensuring API server and etcd are configured securely, and using encryption and audit logging. This lab focuses on *checking* current encryption status and control plane health rather than changing encryption (which is usually done at install or via cluster configuration).
+
 == How to Try It
 
-=== Check current encryption status
+You will inspect the cluster's encryption configuration and API server encryption type, then review control plane namespaces (API server and etcd pods) and node layout. No resources are created or modified; this is an observational lab. Cluster-admin (or read access to cluster-scoped resources) is required to view encryption config and API server spec.
+
+=== Use case 1: Check current encryption status
+The cluster may expose an `EncryptionConfig` or similar resource that describes what is encrypted at rest. Inspect it to see whether encryption is enabled and for which resources.
+
+*Procedure*
+
+. Retrieve the cluster encryption configuration (cluster-scoped resource):
+
 [source,sh]
 ----
 oc get encryptionconfig cluster -o yaml
 ----
 
-=== Verify API server encryption configuration
+*What to look for:* The spec may list resources (e.g., `secrets`) and the encryption type (e.g., `aesgcm` or identity for no encryption). If the resource does not exist or shows identity/no encryption, secrets may be stored in etcd without encryption. If it shows a non-identity type and includes `secrets`, encryption at rest is enabled for those resources.
+
+NOTE: On some OpenShift versions the resource name or API may differ (e.g., `apiserver.config.openshift.io` or operator-managed encryption). If the command fails, check the documentation for your version. Enabling etcd encryption usually requires cluster-admin and is done during installation or via the cluster-wide encryption configuration.
+
+=== Use case 2: Verify API server encryption configuration
+The API server's spec may indicate the encryption type in use. This complements the encryption config and confirms what the API server is applying.
+
+*Procedure*
+
+. Print the API server's encryption type (cluster-scoped):
+
 [source,sh]
 ----
-oc get apiserver cluster -o jsonpath='{.spec.encryption.type}'
+oc get apiserver cluster -o jsonpath='{.spec.encryption.type}' ; echo
 ----
 
-NOTE: Enabling etcd encryption requires cluster-admin access and may require cluster restart. This is typically done during cluster installation or through cluster configuration updates.
+*Expected:* A value such as `aesgcm` or similar if encryption is enabled, or empty/identity if not. Document what you see for your cluster so you know the current state.
 
-=== Basic control plane hardening check
+IMPORTANT: Enabling or changing etcd encryption requires cluster-admin and may require API server restarts or rolling node updates. It is typically done during cluster installation or through managed cluster configuration (e.g., install config or operator). Do not change encryption in a production cluster without a maintenance window and backup plan.
+
+=== Use case 3: Basic control plane hardening check
+Review control plane nodes and the pods running in the API server and etcd namespaces. Healthy, running pods and a clear view of control plane nodes are part of basic hardening awareness.
+
+*Procedure*
+
+. List nodes with wide output to see roles and status:
+
 [source,sh]
 ----
 oc get nodes -o wide
+----
+
+*What to look for:* Control plane (master) nodes and worker nodes. Ensure control plane nodes are Ready and that you know which nodes run etcd and the API server.
+
+. List pods in the API server namespace:
+
+[source,sh]
+----
 oc get pods -n openshift-kube-apiserver
+----
+
+*Expected:* Running API server pods (e.g., one per control plane node). These serve the cluster API and apply encryption when writing to etcd if encryption is enabled.
+
+. List pods in the etcd namespace:
+
+[source,sh]
+----
 oc get pods -n openshift-etcd
 ----
 
-=== Cleanup
-No cleanup needed for this lab.
+*Expected:* Running etcd pods. Etcd holds the encrypted (or plaintext) data; access to these pods and their storage should be restricted as part of control plane hardening.
+
+TIP: Use `oc get nodes -l node-role.kubernetes.io/master` (or the equivalent label for your version) to list only control plane nodes. Restrict SSH and network access to these nodes and ensure they receive security updates.
+
+=== Use case 4: Cleanup
+
+No cleanup is needed for this lab. You only inspected cluster state; no projects or test resources were created.
+
+== What Would You Do?
+
+You checked the cluster's encryption configuration and API server encryption type and reviewed control plane pods and nodes. In your own environment, consider:
+
+* If encryption at rest is not enabled, how would you plan to enable it (e.g., at next install or via managed cluster config) and what downtime or coordination is acceptable?
+* How would you integrate an external KMS for key management so encryption keys are not stored only on the cluster?
+* How would you regularly verify control plane node and pod health and restrict access to etcd and API server components?
 
 == Solutions / Controls
 
@@ -72,6 +133,10 @@ No cleanup needed for this lab.
 * Control plane node hardening
 * API server security configuration
 * Audit logging
+
+== Summary
+
+You inspected the cluster's encryption configuration and API server encryption type to see whether etcd encryption at rest is enabled, and you reviewed control plane nodes and the openshift-kube-apiserver and openshift-etcd namespaces. Enabling or changing encryption is typically done at install or via cluster configuration and may require restarts; this lab focused on observation and awareness. Encryption at rest plus control plane hardening reduce the risk of secret exposure and unauthorized access to cluster data.
 
 == Summary Table
 [cols="1,2,2",options="header"]

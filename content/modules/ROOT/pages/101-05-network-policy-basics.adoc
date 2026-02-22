@@ -48,6 +48,10 @@ Business value: Segmentation contains breaches before they spread, reduces the s
 * Deploy: Default deny early; allowlists per service.
 * Runtime: RHACS network graph to refine policy.
 
+== Concepts: Default Allow vs Default Deny
+
+By default, pods in a Kubernetes or OpenShift cluster can reach any other pod—there is no network segmentation. A compromised workload can probe internal services, scrape credentials, or pivot laterally. *NetworkPolicies* let you change that: they are namespace-scoped, label-driven rules that restrict *ingress* (who can talk to a pod) and optionally *egress* (where a pod can talk to). The secure pattern is *default deny*: first apply a policy that selects all pods in the namespace and allows no ingress (so all inbound traffic is dropped), then add *allow* policies that permit only specific sources (e.g., pods with a given label). That way only explicitly allowed traffic reaches your services; everything else is blocked. This lab has you observe open connectivity, apply default-deny ingress, then allow only one labeled client so you can see the difference in behavior.
+
 == How it Works (Labels 101)
 NetworkPolicies are label-driven and namespace-scoped. You control two sides with labels:
 
@@ -70,23 +74,71 @@ Tip: For cross-namespace access, add namespace labels (e.g., env=clients) and us
 
 == How to Try It
 
-=== Create project & baseline pods
+You will create a project with an API server and two client pods (one labeled allowed, one denied), verify that both can reach the API with no policies, apply a default-deny ingress policy so all inbound traffic is blocked, then add an allow policy so only the labeled "allowed" client can reach the API. You will validate each step with curl from the client pods. All commands use the namespace `101-05-n-netpol-demo`.
+
+=== Use case 1: Create project and baseline pods
+Create the project, deploy a simple HTTP API, expose it as a service, and run two client pods with distinct labels so you can later allow one and block the other.
+
+*Procedure*
+
+. Create the project:
+
 [source,sh]
 ----
 oc new-project 101-05-n-netpol-demo
-oc create deployment api --image=registry.access.redhat.com/ubi9/python-311 -- python3 -m http.server 8080
-oc expose deployment api --port=8080 --target-port=8080
-oc run client-allowed --image=registry.access.redhat.com/ubi9/ubi -l role=allowed -- sleep infinity
-oc run client-denied  --image=registry.access.redhat.com/ubi9/ubi -l role=denied  -- sleep infinity
-SVC=$(oc get svc api -o jsonpath='{.spec.clusterIP}')
 ----
 
-=== Test open connectivity (both succeed)
+. Deploy the API server (Python HTTP server on port 8080) and expose it as a service:
+
 [source,sh]
 ----
-oc exec client-allowed -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
-oc exec client-denied  -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
+oc create deployment api -n 101-05-n-netpol-demo --image=registry.access.redhat.com/ubi9/python-311 -- python3 -m http.server 8080
+oc expose deployment api -n 101-05-n-netpol-demo --port=8080 --target-port=8080
 ----
+
+. Create two client pods with labels `role=allowed` and `role=denied` (used later by the allow policy):
+
+[source,sh]
+----
+oc run client-allowed -n 101-05-n-netpol-demo --image=registry.access.redhat.com/ubi9/ubi -l role=allowed -- sleep infinity
+oc run client-denied -n 101-05-n-netpol-demo --image=registry.access.redhat.com/ubi9/ubi -l role=denied -- sleep infinity
+----
+
+. Wait for pods to be ready, then store the API service ClusterIP for later curl tests:
+
+[source,sh]
+----
+oc wait --for=condition=Ready pod -l app=api -n 101-05-n-netpol-demo --timeout=90s
+oc wait --for=condition=Ready pod -l role=allowed -n 101-05-n-netpol-demo --timeout=60s
+oc wait --for=condition=Ready pod -l role=denied -n 101-05-n-netpol-demo --timeout=60s
+SVC=$(oc get svc api -n 101-05-n-netpol-demo -o jsonpath='{.spec.clusterIP}')
+echo "API ClusterIP: $SVC"
+----
+
+TIP: Use a consistent label taxonomy (e.g., `app`, `role`, `tier`) so NetworkPolicy rules stay readable and auditable. Here `role=allowed` and `role=denied` are used only to demonstrate allow vs block.
+
+=== Use case 2: Test open connectivity (both succeed)
+With no NetworkPolicies, all pods can reach each other. Curl from both client pods to the API service and confirm HTTP 200.
+
+*Procedure*
+
+. From the allowed client pod, curl the API (replace with the pod name from `oc get pods -l role=allowed -n 101-05-n-netpol-demo` if your pod name has a random suffix):
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=allowed -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
+----
+
+*Expected output:* `200`
+
+. From the denied client pod, curl the API:
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=denied -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
+----
+
+*Expected output:* `200`
 
 [mermaid]
 ----
@@ -101,10 +153,16 @@ flowchart LR
   end
 ----
 
-=== Apply default deny (Ingress)
+=== Use case 3: Apply default deny (Ingress)
+Apply a NetworkPolicy that selects all pods in the namespace (`podSelector: {}`) and allows no ingress. Every pod is now selected by at least one Ingress policy, so the default behavior becomes deny: no inbound traffic is allowed unless another policy explicitly permits it.
+
+*Procedure*
+
+. Apply the default-deny ingress policy:
+
 [source,sh]
 ----
-oc apply -f - <<'EOF'
+oc apply -f - -n 101-05-n-netpol-demo <<'EOF'
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -116,12 +174,37 @@ spec:
 EOF
 ----
 
-=== Retest (expect timeouts)
+. Verify the policy is in place:
+
 [source,sh]
 ----
-oc exec client-allowed -- sh -c "curl -s --max-time 3 -o /dev/null http://$SVC:8080" >/dev/null 2>&1 || echo TIMEOUT
-oc exec client-denied  -- sh -c "curl -s --max-time 3 -o /dev/null http://$SVC:8080" >/dev/null 2>&1 || echo TIMEOUT
+oc get networkpolicy -n 101-05-n-netpol-demo
 ----
+
+IMPORTANT: Once a pod is selected by any NetworkPolicy that includes Ingress in policyTypes, only traffic explicitly allowed by some policy can reach it. With only this default-deny policy, no ingress is allowed, so both clients will be blocked in the next step.
+
+=== Use case 4: Retest after default deny (expect timeouts)
+Curl from both client pods again. Both should fail to reach the API (connection timeout or refused) because the default-deny policy blocks all ingress to the API pod.
+
+*Procedure*
+
+. Curl from the allowed client with a short timeout (expect failure):
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=allowed -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- sh -c "curl -s --max-time 3 -o /dev/null -w '%{http_code}' http://$SVC:8080" || echo TIMEOUT
+----
+
+*Expected:* TIMEOUT or non-200 (no connection).
+
+. Curl from the denied client (expect failure):
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=denied -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- sh -c "curl -s --max-time 3 -o /dev/null http://$SVC:8080" || echo TIMEOUT
+----
+
+*Expected:* TIMEOUT.
 
 [mermaid]
 ----
@@ -136,10 +219,16 @@ flowchart LR
   end
 ----
 
-=== Allow only approved client
+=== Use case 5: Allow only the approved client
+Add a second NetworkPolicy that selects the API pods (`app: api`) and allows ingress only from pods with `role: allowed` on port 8080. The default-deny policy still applies to all pods, but this allow policy adds an exception for the API from the allowed client. The denied client remains blocked.
+
+*Procedure*
+
+. Apply the allow policy:
+
 [source,sh]
 ----
-oc apply -f - <<'EOF'
+oc apply -f - -n 101-05-n-netpol-demo <<'EOF'
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -161,12 +250,37 @@ spec:
 EOF
 ----
 
-=== Retest (allowed=200, denied timeout)
+. List NetworkPolicies to confirm both are present:
+
 [source,sh]
 ----
-oc exec client-allowed -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
-oc exec client-denied  -- sh -c "curl -s --max-time 3 -o /dev/null http://$SVC:8080" >/dev/null 2>&1 || echo BLOCKED
+oc get networkpolicy -n 101-05-n-netpol-demo
 ----
+
+NOTE: Multiple policies can apply to the same pod. If any policy allows a given flow, the traffic is permitted. So the API pod is still selected by default-deny-ingress (no ingress), but allow-api-from-allowed adds an explicit allow for pods with `role=allowed` on port 8080.
+
+=== Use case 6: Retest (allowed=200, denied blocked)
+Curl from the allowed client (expect 200) and from the denied client (expect timeout or blocked). This validates that segmentation is in effect.
+
+*Procedure*
+
+. From the allowed client (expect 200):
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=allowed -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- curl -s -o /dev/null -w '%{http_code}\n' http://$SVC:8080
+----
+
+*Expected output:* `200`
+
+. From the denied client (expect timeout or BLOCKED):
+
+[source,sh]
+----
+oc exec -n 101-05-n-netpol-demo $(oc get pod -l role=denied -n 101-05-n-netpol-demo -o jsonpath='{.items[0].metadata.name}') -- sh -c "curl -s --max-time 3 -o /dev/null http://$SVC:8080" || echo BLOCKED
+----
+
+*Expected:* BLOCKED or TIMEOUT (no 200).
 
 [mermaid]
 ----
@@ -181,11 +295,23 @@ flowchart LR
   end
 ----
 
-=== Cleanup (optional)
+=== Use case 7: Cleanup
+*Procedure*
+
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-05-n-netpol-demo --wait=false
 ----
+
+== What Would You Do?
+
+You observed default allow-all connectivity, applied default-deny ingress so all traffic was blocked, then allowed only the client with `role=allowed` to reach the API. In your own environment, consider:
+
+* How would you design labels (app, role, tier, env) so every namespace has a consistent vocabulary for NetworkPolicy rules?
+* Would you start with default deny in every namespace and then add allow rules from observed flows (e.g., using RHACS network graph)?
+* How would you test policies before rollout—e.g., a canary namespace with the same policies and synthetic traffic?
 
 == Solutions / Controls
 
@@ -193,6 +319,10 @@ oc delete project 101-05-n-netpol-demo --wait=false
 * Standard labels as controlled vocabulary
 * RHACS network graph for visualization
 * Zero trust mindset: default deny + explicit allow
+
+== Summary
+
+You created an API and two client pods, confirmed both could reach the API with no policies, then applied a default-deny ingress policy so all inbound traffic was blocked. After adding an allow policy for pods with `role=allowed`, only that client could reach the API; the other client was blocked. NetworkPolicies are label-driven and namespace-scoped—default deny plus explicit allow rules shrink lateral movement and support zero-trust segmentation. Use consistent labels and refine policies with observed flows (e.g., RHACS network graph).
 
 == Summary Table
 [cols="1,2,2",options="header"]

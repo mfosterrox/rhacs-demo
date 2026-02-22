@@ -38,35 +38,204 @@ Projects and namespaces are fundamental security boundaries in OpenShift. They p
 |Label Inconsistency | Policy gaps | Standardized labeling
 |===
 
+== Concepts: Projects vs Namespaces
+
+In OpenShift, every *project* is a *namespace* with additional metadata and access controls. When you run `oc new-project`, OpenShift creates a namespace and attaches project-specific resources (e.g., project request template, role bindings). For security and multi-tenancy, you use namespaces to isolate workloads, apply RBAC and quotas, and—with NetworkPolicy—control network traffic between namespaces. Think of a project as a "tenant workspace" and the namespace as the boundary within which that tenant's resources and policies apply.
+
 == How to Try It
 
-=== Create a project with security labels
+In this lab you will create a dedicated project, apply security labels, configure RBAC and resource quotas, add a minimal NetworkPolicy, and verify behavior from the CLI. All steps assume you have cluster-admin or equivalent access.
+
+=== Use case 1: Create a project with security labels
+Create a project and attach labels that you can use later for policy selection, compliance reporting, and automation. Standardized labels (e.g., `security-tier`, `environment`) help teams and tools apply the right controls per namespace.
+
+*Procedure*
+
+. Create the project with a display name and description:
+
 [source,sh]
 ----
 oc new-project 101-02-demo --display-name="Security Demo" --description="101-02 Lab Project"
+----
+
+. Apply security and environment labels to the namespace:
+
+[source,sh]
+----
 oc label namespace 101-02-demo security-tier=basic environment=dev
+----
+
+. Verify the namespace and its labels:
+
+[source,sh]
+----
 oc get namespace 101-02-demo --show-labels
 ----
 
-=== Configure namespace-level RBAC
+*Sample output*
+
+[source,text]
+----
+NAME          STATUS   AGE   LABELS
+101-02-demo   Active   30s   environment=dev,kubernetes.io/metadata.name=101-02-demo,security-tier=basic
+----
+
+TIP: Use a consistent labeling scheme across namespaces (e.g., `team`, `cost-center`, `compliance-tier`) so that RHACS policies, network policies, and GitOps can target groups of namespaces by label.
+
+=== Use case 2: Configure namespace-level RBAC
+Restrict who can do what inside the namespace by binding cluster roles or defining local roles and role bindings. Here you create a role binding that grants the `edit` cluster role to a group scoped to the demo namespace, then verify what the default service account can do.
+
+*Procedure*
+
+. Create a role binding that grants the `edit` cluster role to the group `dev-team` in the demo namespace:
+
 [source,sh]
 ----
 oc create rolebinding dev-team --clusterrole=edit --group=dev-team -n 101-02-demo
+----
+
+NOTE: The group `dev-team` is used for illustration. In a real cluster you would use an actual group from your identity provider (e.g., LDAP, OIDC). Users in that group will have edit permissions only in `101-02-demo`.
+
+. Check whether the default service account in the namespace can create pods (it typically can within its own namespace):
+
+[source,sh]
+----
 oc auth can-i create pods --as=system:serviceaccount:101-02-demo:default -n 101-02-demo
 ----
 
-=== Apply ResourceQuota
+*Expected output:* `yes`
+
+. Optionally check other verbs or resources to see the boundary of allowed actions:
+
+[source,sh]
+----
+oc auth can-i create deployments --as=system:serviceaccount:101-02-demo:default -n 101-02-demo
+oc auth can-i create pods --as=system:serviceaccount:101-02-demo:default -n default
+----
+
+IMPORTANT: The second command should return `no` when the service account is not granted access to the `default` namespace, illustrating that RBAC is namespace-scoped and enforces boundaries between projects.
+
+=== Use case 3: Apply a ResourceQuota
+ResourceQuotas prevent a single namespace from consuming more than its share of cluster resources. They also make "noisy neighbor" scenarios visible when a deployment hits the quota and cannot schedule more pods.
+
+*Procedure*
+
+. Create a quota that limits CPU and memory requests/limits and the number of pods:
+
 [source,sh]
 ----
 oc create quota demo-quota --hard=requests.cpu=2,requests.memory=2Gi,limits.cpu=4,limits.memory=4Gi,pods=10 -n 101-02-demo
+----
+
+. Inspect the quota and its current usage:
+
+[source,sh]
+----
 oc describe quota demo-quota -n 101-02-demo
 ----
 
-=== Cleanup
+*Sample output*
+
+[source,text]
+----
+Name:            demo-quota
+Namespace:       101-02-demo
+Resource         Used  Hard
+--------         ----  ----
+limits.cpu       0     4
+limits.memory    0     4Gi
+pods             0     10
+requests.cpu     0     2
+requests.memory  0     2Gi
+----
+
+. Deploy a small workload and confirm the quota usage updates:
+
+[source,sh]
+----
+oc create deployment nginx --image=registry.access.redhat.com/ubi9/nginx-120 -n 101-02-demo
+oc get pods -n 101-02-demo
+oc describe quota demo-quota -n 101-02-demo
+----
+
+TIP: For production, pair ResourceQuota with LimitRange in the same namespace so that every pod gets default limits and requests, making quota enforcement predictable.
+
+=== Use case 4: Add a namespace-level NetworkPolicy
+By default, pods in different namespaces can communicate. A NetworkPolicy restricts ingress (and optionally egress) so that only allowed traffic is permitted. This example denies all ingress to pods in the demo namespace unless explicitly allowed (e.g., from the same namespace or from a specific label).
+
+*Procedure*
+
+. Create a default-deny ingress policy so that only traffic explicitly allowed by other policies can reach pods in this namespace:
+
+[source,sh]
+----
+cat <<'EOF' | oc apply -f - -n 101-02-demo
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+EOF
+----
+
+. Allow ingress from pods within the same namespace (so that frontend and backend in the same project can talk):
+
+[source,sh]
+----
+cat <<'EOF' | oc apply -f - -n 101-02-demo
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {}
+EOF
+----
+
+. Verify the policies are in place:
+
+[source,sh]
+----
+oc get networkpolicy -n 101-02-demo
+----
+
+NOTE: The first policy denies all ingress; the second allows ingress only from pods in the same namespace (matched by the empty `podSelector: {}`). Together they form a simple boundary: external and cross-namespace traffic is blocked unless you add more rules.
+
+=== Use case 5: Cleanup
+Remove the project and all resources in it. Using `--wait=false` returns immediately while the namespace is still terminating in the background.
+
+*Procedure*
+
+. Delete the project:
+
 [source,sh]
 ----
 oc delete project 101-02-demo --wait=false
 ----
+
+. Optionally wait for the namespace to disappear:
+
+[source,sh]
+----
+oc get namespace 101-02-demo
+# Repeat until "NotFound"
+----
+
+== What Would You Do?
+
+You created a single project with labels, RBAC, quota, and network policy. In your own environment, consider:
+
+* How would you name namespaces so that team, environment, and application are clear (e.g., `team-app-env`)?
+* Would you use a GitOps workflow to create namespaces and apply ResourceQuota and NetworkPolicy from Git?
+* How would you combine namespace labels with RHACS collections or policies to scope vulnerability reports and policy enforcement by namespace?
 
 == Solutions / Controls
 
@@ -85,6 +254,10 @@ oc delete project 101-02-demo --wait=false
 |ResourceQuota | Resource isolation | Fair multi-tenancy
 |NetworkPolicy | Network boundaries | Segmentation
 |===
+
+== Summary
+
+You created a project, applied security and environment labels, configured namespace-scoped RBAC, set a ResourceQuota, and added NetworkPolicies to restrict ingress. Projects and namespaces are the foundation of multi-tenant security in OpenShift—clear boundaries, quotas, and network policies enable safe collaboration and easier compliance.
 
 == FAQs
 What's the difference between project and namespace?:: In OpenShift, a project is a namespace with additional metadata and access controls.

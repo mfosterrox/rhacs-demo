@@ -1,0 +1,61 @@
+= Capture the Flag
+
+== Module goals
+.Goals
+* A CTF challenge: Web hacking a running container on OpenShift
+* There are three flags found during the journey.
+
+== The CTF challenge
+
+This vulnerable web application is intentionally designed with minimal interaction but contains flaws that can be exploited through SQL injection and cross-site scripting (XSS) attacks. There are three hidden flags to discover.
+
+Have fun exploring!
+
+== Getting access
+
+Start by deploying the vulnerable container to your OpenShift cluster and exposing it with a Route so you can access it from your browser.
+
+*Procedure*
+
+. Ensure you are logged into your OpenShift cluster and create a project for the CTF (or use an existing project):
+
+[source,sh,role=execute]
+----
+oc new-project ctf-demo
+oc project ctf-demo
+----
+
+. Apply the CTF manifest (deployment and service):
+
+[source,sh,role=execute]
+----
+oc apply -f $TUTORIAL_HOME/kubernetes-manifests/ctf-web-to-system/ctf-w2s.yml -n ctf-demo
+----
+
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+service/ctf-web-to-system-service unchanged
+deployment.apps/ctf-web-to-system configured
+----
+
+. Expose the service with an OpenShift Route so it is reachable outside the cluster:
+
+[source,sh,role=execute]
+----
+oc expose svc ctf-web-to-system-service -n ctf-demo 2>/dev/null || true
+oc get route ctf-web-to-system-service -n ctf-demo -o jsonpath='https://{.spec.host}{"\n"}'
+----
+
+. Open the URL shown (or run the next command to print it again):
+
+[source,sh,role=execute]
+----
+oc get route ctf-web-to-system-service -n ctf-demo -o jsonpath='{.spec.host}'
+echo
+----
+
+IMPORTANT: Use the OpenShift Route URL (the hostname from the command above, e.g. `ctf-web-to-system-service-ctf-demo.<apps-domain>`) in your browser to access the vulnerable container. Use `https://` if your cluster uses TLS for routes.
+
+
+
