@@ -22,21 +22,20 @@ RHACS monitors container processes and collects data to help create policies tha
 
 The example below shows how security may block a package manager from downloading packages. This runtime enforcement is the first step in shifting security left. After enforcing runtime policies, the next step will be to prevent the package manager from being used in the container entirely.
 
-IMPORTANT: For the *Runtime* stage, RHACS stops all pods that match the conditions of the policy. It does not scale the deployment down to zero.
+
 
 *Procedure*
+
 . On the left-hand side of the application, click the *Platform Configuration* tab and select *Policy Management*:
-
++
 image::04-policy-00.png[link=self, window=blank, width=100%, Policy Management Dashboard]
-
-[start=2]
++
 . Filter through the policies to find *Alpine Linux Package Manager Execution* or use the search bar to select *Policy*:
-
++
 image::04-policy-01.png[link=self, window=blank, width=100%, Policy Management Search]
-
-[start=3]
-. Once you have found the policy *Alpine Linux Package Manager (apk) in Image*, click on it to learn more:
-
++
+. Once you have found the policy *Alpine Linux Package Manager Execution*, click on it to learn more:
++
 image::04-policy-02.png[link=self, window=blank, width=100%, Policy Management Details]
 
 [[runtime-enforce]]
@@ -52,29 +51,26 @@ This policy shows how RHACS detects and prevents such violations by using Linux 
 *Procedure*
 
 . Click the *Actions* button, then click *CLONE policy*. Then give it the name "Alpine Linux Package Manager Execution - Runtime":
-
++
 [source,sh,role=execute]
 ----
 Alpine Linux Package Manager Execution - Runtime
 ----
-
++
 image::04-policy-03.png[link=self, window=blank, width=100%]
-
-[start=2]
++
 . Select *Policy Behavior -> Actions*:
-
++
 image::04-policy-04.png[link=self, window=blank, width=100%]
-
-[start=3]
++
 . Enable runtime enforcement by clicking the *inform and enforce* button:
 . Configure enforcement behavior by selecting *Enforce at Runtime*:
-
++
 image::04-policy-03.png[link=self, window=blank, width=100%, Enforce Runtime Policy]
-
-[start=5]
++
 . Click *Next*:
 . Review the changes, then click save:
-
++
 IMPORTANT: Make sure to save the policy changes! If you do not save the policy, the process will not be blocked!
 
 === Testing the Configured Policy
@@ -138,8 +134,8 @@ node@frontend-6db858448f-stwhq:/$ command terminated with exit code 137
 
 
 [start=6]
-. Examine the output and expect to see that the package manager attempts to perform an update operation:
-. Examine the oc get events tmux pane (the pane on the bottom), and note that it shows that RHACS detected the package manager invocation and deleted the pod:
+. Examine the output and expect to see that the package manager attempts to perform an update operation.
+. Examine the oc get events tmux pane (the pane on the bottom), and note that it shows that RHACS detected the package manager invocation and deleted the pod.
 
 [source,texinfo,subs="attributes"]
 ----
@@ -182,21 +178,16 @@ Next, we'll set up a Deploy-Time policy to block applications from deploying int
 
 [source,sh,subs="attributes",role=execute]
 ----
-oc delete -f $APP_HOME/skupper-demo/frontend.yml
+oc delete -f $APP_HOME/frontend.yml
 ----
 
 *Sample output*
 [source,texinfo,subs="attributes"]
 ----
-[lab-user@bastion ~]$ oc delete -f $APP_HOME/skupper-demo/
-namespace "patient-portal" deleted
-deployment.apps "database" deleted
-service "database" deleted
+[lab-user@bastion ~]$ oc delete -f $APP_HOME/frontend.yml
 deployment.apps "frontend" deleted
 route.route.openshift.io "frontend-patient-route" deleted
 service "frontend-service" deleted
-deployment.apps "payment-processor" deleted
-service "payment-service" deleted
 ----
 
 [start=2]
@@ -222,7 +213,7 @@ Alpine Linux Package Manager in Image - Enforce Deploy
 
 [start=5]
 . Click *Next*
-. Next, deselect *Build* stage so that only the Deploy stage is selected:
+. Next, deselect *Build & Deploy* stage so that only the Deploy stage is selected:
 
 image::04-deploy-01.png[link=self, window=blank, width=100%]
 
@@ -256,14 +247,14 @@ Now, let's test it out! We're going to redeploy the frontend application from ea
 
 [source,sh,subs="attributes",role=execute]
 ----
-oc delete -f $APP_HOME/skupper-demo/frontend.yml
+oc delete -f $APP_HOME/frontend.yml
 ----
 
 > Now reapply the frontend service and deployment:
 
 [source,sh,subs="attributes",role=execute]
 ----
-oc apply -f $APP_HOME/skupper-demo/frontend.yml
+oc apply -f $APP_HOME/frontend.yml
 ----
 
 [.console-output]
@@ -296,12 +287,38 @@ In case of emergency, add the annotation {"admission.stackrox.io/break-glass": "
 
 [source,sh,subs="attributes",role=execute]
 ----
-roxctl -e $ROX_CENTRAL_ADDRESS:443 deployment check --file $APP_HOME/skupper-demo/frontend.yml --insecure-skip-tls-verify
+roxctl -e $ROX_CENTRAL_ADDRESS:443 deployment check --file $APP_HOME/frontend.yml --insecure-skip-tls-verify
 ----
 
 image::04-deploy-04.png[link=self, window=blank, width=100%]
 
 > The new policy will fail the check when in enforce mode. In inform mode, you will get a policy violation without the "Failed policy" error.
+
+====
+If you need to bypass the policy (for example, during an emergency), add the break-glass annotation to the Deployment in the YAML file before applying, then apply the file.
+====
+
+[source,sh,subs="attributes",role=execute]
+----
+sed -i '/^kind: Deployment$/,/^spec:/{/^metadata:$/a\
+  annotations:\
+    admission.stackrox.io/break-glass: "ticket-1234"
+}' $APP_HOME/frontend.yml
+oc apply -f $APP_HOME/frontend.yml
+----
+
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+[lab-user@bastion ~]$ sed -i '/^kind: Deployment$/,/^spec:/{/^metadata:$/a\
+  annotations:\
+    admission.stackrox.io/break-glass: "ticket-1234"
+}' $APP_HOME/frontend.yml
+oc apply -f $APP_HOME/frontend.yml
+deployment.apps/frontend created
+route.route.openshift.io/frontend-patient-route unchanged
+service/frontend-service unchanged
+----  
 
 *Congrats!* 
 
@@ -476,7 +493,7 @@ curl -X DELETE \
       }' \
   https://$ROX_CENTRAL_ADDRESS/v1/policies/$POLICY_ID
 
-oc apply -f $APP_HOME/skupper-demo/
+oc apply -f $APP_HOME/
 ----
 
 In summary, we made use of the features provided by Red Hat Advanced Cluster Security for Kubernetes to display potential security violations in your cluster in a central dashboard. You crafted both deploy-time and runtime policies to help prevent malicious events from occurring in our cluster. Hopefully this lab has helped demonstrate to you the immense value provided by RHACS and OpenShift Platform Plus. Please feel free to continue and explore the RHACS lab environment.

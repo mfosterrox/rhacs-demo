@@ -21,39 +21,37 @@ First, make sure you can access the Red Hat^(R)^ OCP console user interface.
 
 *Procedure*
 
-[start=1]
 . Log into the OCP console at `{openshift_cluster_console_url}[{openshift_cluster_console_url}^]`.
 . Enter the OCP credentials.
-
++
 [cols="1,1"]
 |===
 | *User:* | {openshift_cluster_admin_username}
 | *Password:* | {openshift_cluster_admin_username}
 |===
-
++
 image::01-ocp-login-password.png[OpenShift console login,link=self, window=blank, width=100%]
-
++
 === Access the Red Hat^(R)^ Advanced Cluster Security (RHACS) User Interface
 
 Ensure that you have access to the RHACS user interface.
 
 *Procedure*
 
-[start=1]
 . Log into the RHACS console at `{acs_route}[{acs_route}^]`.
-
++
 image::01-rhacs-login.png[RHACS console,link=self, window=blank, width=100%]
-
-[start=2]
++
 . Enter the RHACS credentials:
-
++
 [cols="1,1"]
 |===
 | *RHACS Console Username:* | {acs_portal_username}
 | *RHACS Console Password:* | {acs_portal_password}
 |===
-
++
 image::01-rhacs-console-dashboard.png[RHACS console,link=self, window=blank, width=100%]
+
 
 === Access the Red Hat^(R)^ Quay UI
 
@@ -65,14 +63,12 @@ Let's ensure that you have access to the Quay User Interface.
 
 *Procedure*
 
-[start=1]
 . Log into the Quay console at `{quay_console_url}[{quay_console_url}^]`
-
++
 image::00-quay-login.png[Quay Console,link=self, window=blank, width=100%]
-
-[start=2]
++
 . Enter the Quay credentials:
-
++
 [cols="1,1"]
 |===
 | *Quay Console Username:* | {quay_admin_username}
@@ -85,23 +81,21 @@ Verify that you have admin-level access using the `oc` CLI. Run this in the bast
 
 *Procedure*
 
-[start=1]
 . Switch to the admin context:
-
++
 [source,sh,role=execute]
 ----
 oc config use-context admin
 ----
-
-[start=2]
++
 . Verify access and check available nodes:
-
++
 [source,sh,role=execute]
 ----
 oc whoami
 oc get nodes -A
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -122,29 +116,27 @@ Next, verify that we have access to the RHACS Central Service.
 
 *Procedure*
 
-[start=1]
 . Run the following command:
-
++
 [NOTE]
 ====
 This command uses variables saved in the ~/.bashrc file to authenticate with the RHACS Central Service.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
 [lab-user@bastion ~]$ roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
 -bash: roxctl: command not found
 ----
-
-[start=2]
++
 . Install the roxctl CLI on the bastion and set the Central address. Run the following commands:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 mkdir -p ~/.local/bin
@@ -155,8 +147,7 @@ echo 'export ROX_CENTRAL_ADDRESS="$(oc -n stackrox get route central -o jsonpath
 source ~/.bashrc
 roxctl
 ----
-
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -173,11 +164,9 @@ roxctl
 Usage:
   roxctl [command]
 ----
-
-
-[start=3]
++
 . Next, let's grab an API token and save a few variables for later use.
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 export ROX_API_TOKEN=$(curl -sk -u "admin:{acs_portal_password}" "{acs_route}:443/v1/apitokens/generate" \
@@ -186,19 +175,18 @@ export ROX_API_TOKEN=$(curl -sk -u "admin:{acs_portal_password}" "{acs_route}:44
   | (jq -r .token 2>/dev/null || sed -n 's/.*"token":"\([^"]*\)".*/\1/p'))
 echo $ROX_API_TOKEN
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
 [lab-user@bastion ~]$ echo $ROX_API_TOKEN
 YOUR_API_TOKEN_HERE
 ----
-
-[start=4]
++
 . Save the API token and a few other variables to the .bashrc file. These variables will stay in the .bashrc file so they're saved in case you need to refresh the terminal.
-
-Include `GRPC_ENFORCE_ALPN_ENABLED=false` so that roxctl gRPC calls (e.g. image scan) succeed when the TLS handshake does not advertise ALPN (avoids "missing selected ALPN property" errors with OpenShift routes).
-
++
+NOTE: Include `GRPC_ENFORCE_ALPN_ENABLED=false` so that roxctl gRPC calls (e.g. image scan) succeed when the TLS handshake does not advertise ALPN (avoids "missing selected ALPN property" errors with OpenShift routes).
++
 [source,sh,subs="attributes",role=execute]
 ----
 echo 'export ROX_API_TOKEN='"$ROX_API_TOKEN" >> ~/.bashrc
@@ -208,14 +196,14 @@ echo 'export ACS_PORTAL_USERNAME="{acs_portal_username}"' >> ~/.bashrc
 echo 'export ACS_PORTAL_PASSWORD="{acs_portal_password}"' >> ~/.bashrc
 source ~/.bashrc
 ----
-
-[start=4]
++
 Verify the API token, and variables were saved correctly.
++
 [source,sh,subs="attributes",role=execute]
 ----
 cat ~/.bashrc
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -225,15 +213,14 @@ ROX_CENTRAL_ADDRESS="{acs_route}"
 ACS_PORTAL_USERNAME="{acs_portal_username}"
 ACS_PORTAL_PASSWORD="{acs_portal_password}"
 ----
-
-[start=5]
++
 . Verify your roxctl access to the central service.
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" central whoami
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -270,11 +257,11 @@ Access:
         rw WatchedImage
         rw WorkflowAdministration
 ----
-
++
 IMPORTANT: This output shows that you have unrestricted access to the RHACS product. These permissions can be seen in the **RHACS Access Control** tab that we will review later.
-
++
 image::00-acs-access-control.png[RHACS access control,link=self, window=blank, width=100%]
-
++
 *Great job!*
 
 == Deploy the Vulnerable Workshop Applications
@@ -287,39 +274,38 @@ After deploying the applications, you'll scan some of these containers using the
 
 *Procedure*
 
-[start=1]
 . Run the following commands in the terminal, one after the other.
-
++
 ====
 This command downloads a repository containing Dockerfiles, attack scripts, and Kubernetes manifests that you will use to deploy the containerized applications to OpenShift.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 git clone https://github.com/mfosterrox/demo-applications.git demo-applications
 ----
-
++
 ====
 This command sets the variable TUTORIAL_HOME to equal the working directory, allowing you to make references to various files easily.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cd ~/
 echo export TUTORIAL_HOME="$(pwd)/demo-applications" >> ~/.bashrc
 export TUTORIAL_HOME="$(pwd)/demo-applications"
 ----
-
++
 ====
 This command applies the manifests to the OpenShift environment.
 ====
-
++  
 [source,sh,subs="attributes",role=execute]
 ----
 oc apply -f $TUTORIAL_HOME/k8s-deployment-manifests/ --recursive
 oc apply -f $TUTORIAL_HOME/skupper-demo/ --recursive
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -330,18 +316,18 @@ namespace/backend created
 route.route.openshift.io/webgoat created
 configmap/webgoat-config created
 ----
-
++
 NOTE: You should see warnings such as: *Warning: would violate PodSecurity "baseline:latest": privileged (container "proxy" must not set securityContext.privileged=true)*. This is because you are deploying flawed container configurations and vulnerable container applications to the OpenShift cluster.
-
++
 ====
 The following command will watch all of the applications as they are successfully deployed to the OpenShift cluster. You can press ctrl+c to terminate the command.
 ====
-
++
 [source,bash,role="execute"]
 ----
 oc get deployments -l demo=roadshow -A
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -372,23 +358,22 @@ payments                visa-processor          1/1     1            1          
 web-ctf-container       web-ctf-container       1/1     1            1           12m
 webgoat                 webgoat                 1/1     1            1           12m
 ----
-
++
 IMPORTANT: Please ensure the deployed applications are deployed and available before moving on to the next module.
-
-[start=2]
++
 . Run the following roxctl commands to check on the vulnerability status of the applications you deployed.
-
++
 ====
 The following command triggers a vulnerability scan by RHACS, roxctl filters the results into a table. The severity flag means only the critical and important vulnerabilities will be shown. This image is known as the "Damn Vulnerable Web Application" and it contains a significant amount of vulnerabilities.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=quay.io/skupper/patient-portal-frontend:latest --severity CRITICAL,IMPORTANT --force -o table
 ----
-
++
 TIP: The following output can be configured using flags. You can configure different outputs (table, CSV, JSON, and sarif) and filter for specific severities.
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -400,7 +385,7 @@ Scan results for image: quay.io/skupper/patient-portal-frontend:latest
 +-------------+----------------------+----------------+-----------+------+---------------------------------------------------+----------------------+----------+---------------+
 WARN:   A total of 15 unique vulnerabilities were found in 11 components
 ----
-
++
 image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbnY0NDA0ZnJqNXh6cGNqeHNxZGd5Zm5qMnlpOHhrbm1hY2pwcG5ydSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/p18ohAgD3H60LSoI1C/giphy.gif[link=self, window=blank, width=100%, class="center"]
 
 [[build-a-container-image]]
@@ -413,37 +398,34 @@ Next, you are going to
 
 *Procedure*
 
-[start=1]
 . Run the following command.
-
++
 ====
 Let's export a few variables to make things easier. These variables will stay in the .bashrc file so they're saved in case you need to refresh the terminal.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 echo export QUAY_USER={quay_admin_username} >> ~/.bashrc
 QUAY_USER={quay_admin_username}
 ----
-
-[start=2]
-
++
 . Run the following command to set the Quay URL variable
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 echo export QUAY_URL=$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}') >> ~/.bashrc
 QUAY_URL=$(oc -n quay get route quay-quay -o jsonpath='{.spec.host}')
 ----
-
++
 IMPORTANT: Verify that the variables are correct
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 echo $QUAY_USER
 echo $QUAY_URL
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -452,33 +434,32 @@ echo $QUAY_URL
 quayadmin
 quay-bq65l.apps.cluster-bq65l.bq65l.sandbox209.opentlc.com
 ----
-
-[start=3]
++
 . Install Podman on the bastion host.
-
++
 On RHEL, CentOS, Rocky Linux, Alma Linux, or Fedora:
++
 [source,sh,subs="attributes",role=execute]
 ----
 sudo dnf install -y podman
 ----
-
-[start=4]
++
 . Verify Podman is installed:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman --version
 ----
-
-[start=5]
++
 . Using the terminal on the bastion host, login to Quay using the Podman CLI as shown below:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman login $QUAY_URL -u $QUAY_USER -p {quay_admin_password}
 ----
-
++
 console output:
++
 [source,bash,subs="+macros,+attributes"]
 ----
 [demo-user@bastion ~]$ podman login $QUAY_URL -u $QUAY_USER -p {quay_admin_password}
@@ -486,15 +467,15 @@ Username: quayadmin
 Password:
 Login Succeeded!
 ----
-
++
 NOTE: Use the quay admin credentials to sign in if you run into issues.
-
++
 [cols="2,2"]
 |===
 | *Quay Username:* | *{quay_admin_username}*
 | *Quay Password:* | *{quay_admin_password}*
 |===
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -514,12 +495,12 @@ Imagine a base image as a blank canvas, providing a reliable foundation like a m
 *Procedure*
 
 . Run the following commands in succession:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman pull python:3.12-alpine
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -534,25 +515,25 @@ Copying config 451fdb03e1 done   |
 Writing manifest to image destination
 451fdb03e17285d3263d88f0f3bed692c82556935490d233096974386cd0381b
 ----
-
++
 ====
 This command tags the python:3.12-alpine image with your Quay repository and username, allowing you to accurately push the image in a later step.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman tag docker.io/library/python:3.12-alpine $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1
 ----
-
++
 ====
 This command shows you the local images available.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman images
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -561,16 +542,16 @@ REPOSITORY                                                                      
 quay-w2t4c.apps.cluster-w2t4c.w2t4c.sandbox1647.opentlc.com/quayadmin/python-alpine-golden  0.1          451fdb03e172  5 weeks ago  50.6 MB
 docker.io/library/python                                                                    3.12-alpine  451fdb03e172  5 weeks ago  50.6 MB
 ----
-
++
 ====
 This command pushes the golden image to your repository.
 ====
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman push $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -583,7 +564,7 @@ Copying blob 375bee7d34e2 done   |
 Copying config 451fdb03e1 done   |
 Writing manifest to image destination
 ----
-
++
 Perfect!
 
 [[dev-app]]
@@ -597,27 +578,26 @@ TIP: With the variables saved in the ~/.bashrc file, you will not have to declar
 *Procedure*
 
 . List the contents of the `frontend` directory inside the `image-builds` folder to see the files available for the project:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 ls $TUTORIAL_HOME/image-builds/frontend/
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
 [demo-user@bastion ~]$ ls $TUTORIAL_HOME/image-builds/frontend/
 Dockerfile  main.py  static
 ----
-
-[start=2]
++
 . Display the contents of the `Dockerfile` to understand how the image is built, including installed dependencies and the copied files:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -658,24 +638,21 @@ WORKDIR /home/fritz
 # Set the entry point to start the application
 ENTRYPOINT ["python", "main.py"]
 ----
-
-
-[start=3]
++
 . Update the `FROM` statement in the Dockerfile to reference a custom base image hosted in a private registry, using `sed` to modify the line:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 sed -i "s|^FROM python:3\.12-alpine AS \(\w\+\)|FROM $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1 AS \1|" $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
-
-[start=4]
++
 . Check the Dockerfile again to verify that the `FROM` statement has been updated correctly:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cat $TUTORIAL_HOME/image-builds/frontend/Dockerfile
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -686,16 +663,15 @@ RUN pip install --no-cache-dir
 
 ....
 ----
-
-[start=5]
++
 . Build the Docker image using `podman` from the `frontend` directory. The `-t` flag tags the image with a version (`0.1`) and a registry URL:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cd $TUTORIAL_HOME/image-builds/frontend/
 podman build -t $QUAY_URL/$QUAY_USER/frontend:0.1 .
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -707,15 +683,14 @@ podman build -t $QUAY_URL/$QUAY_USER/frontend:0.1 .
 Successfully tagged quay-w2t4c.apps.cluster-w2t4c.w2t4c.sandbox1647.opentlc.com/quayadmin/frontend:0.1
 46ea42cba3f17c366b0c534164ae088719266df9ab4122532b0bffd1bbefaec9
 ----
-
-[start=6]
++
 . Upload the built image to a remote registry using `podman push`. The `--remove-signatures` flag ensures that image signatures are not included in the pushed image:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 podman push $QUAY_URL/$QUAY_USER/frontend:0.1 --remove-signatures
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -731,9 +706,9 @@ Copying blob 57a6ec527341 skipped: already exists
 Copying config 46ea42cba3 done   |
 Writing manifest to image destination
 ----
-
++
 NOTE: Quay will automatically create a private registry to store the application image because of your admin access.
-
++
 The frontend application is finally built! The next step is to review it in Quay and deploy it to OpenShift.
 
 [[quay]]
@@ -767,21 +742,21 @@ Let's take a look at our application in the registry.
 *Procedure*
 
 . First, click on the *frontend* repository.
-
++
 image::00-quay-login.png[link=self, window=blank, width=100%]
-
++
 The information tab shows you information such as:
-
++
 - Podman and Docker commands
 - Repository activity
 - The repository description
-
++
 image::00-frontend-repo.png[link=self, window=blank, width=100%]
-
++
 ====
 On the left-hand side of the window, you should see the following icons labeled in order from top to bottom:
 ====
-
++
 image::00-quay-sidebar.png[link=self, window=blank, width=100%]
 
 - Information
@@ -789,61 +764,52 @@ image::00-quay-sidebar.png[link=self, window=blank, width=100%]
 - Tag History
 - Usage Logs
 - Settings
-
-
-[start=2]
++
 . Click on the *Tags* icon.
-
++
 image::00-quay-tags.png[link=self, window=blank, width=100%]
-
++
 This tab displays all of the images and tags that have been uploaded, providing information such as fixable vulnerabilities, the image size, and allows for bulk changes to images based on the security posture.
-
++
 We will explore this tab a little later in this module.
-
-[start=3]
++
 . Click on the *Tags History* icon.
-
++
 image::00-quay-history.png[link=self, window=blank, width=100%]
-
++
 This tab simply displays the container image history over time.
-
-[start=4]
++
 . Click into the SHA256 hash number.
-
++
 image::00-image-details.png[link=self, window=blank, width=100%]
-
++
 From this dashboard, you will be able to see the image manifest of that container image.
-
++
 image::00-image-manifest.png[link=self, window=blank, width=100%]
-
-[start=5]
++
 . Click the *BACK* icon in the top left of the dashboard then click on the *Usage Logs* icon.
-
++
 image::00-quay-back.png[link=self, window=blank, width=100%]
 image::00-quay-usage.png[link=self, window=blank, width=100%]
-
-
++
 This tab displays the usage over time along with details about who/how the images were pushed to the cluster.
-
++
 ====
 You should see that you (the "quayadmin") pushed an image tagged 0.1 to the repository today.
 ====
-
-[start=6]
++
 . Lastly click on the *Settings* icon.
-
++
 image::00-quay-settings.png[link=self, window=blank, width=100%]
-
++
 In this tab, you can add/remove users and update permissions, alter the privacy of the repository, and even schedule alerts based on found vulnerabilities.
-
-[start=7]
++
 . Make your repository public before deploying our application in the next step by clicking the *Make Public* button under *Repository Visibility*:
-
++
 image::00-quay-public.png[link=self, window=blank, width=100%]
-
-[start=8]
++
 . Click OK:
-
++
 image::00-quay-public-yes.png[link=self, window=blank, width=100%]
 
 [[vulnerability-scanning-with-quay]]
@@ -860,28 +826,25 @@ Use the following procedure to check the security scan results for our Java cont
 *Procedure*
 
 . Click on the *Tags* icon on the left side of the screen like before.
-
++
 image::00-quay-tags.png[link=self, window=blank, width=100%]
-
++
 NOTE: You may need to click the checkbox near the image you would like more information on, but the column for *Security Scan* should populate.
-
-[start=2]
++
 . By default, the security scan color codes the vulnerabilities, you can hover over the security scan for more information.
-
++
 image::00-quay-scan-hover.png[link=self, window=blank, width=100%]
-
++
 NOTE: The Alpine container image you are using in this lab shows 34 vulnerabilities, with 2 critical vulnerabilities. This number will change with time and will be different between container scanners for a variety of reasons such as reporting mechanisms, vulnerability feeds, and operating system support.
-
-[start=3]
++
 . Click on the list of vulnerabilities to see a more detailed view.
-
++
 image::00-quay-vuln-overview.png[link=self, window=blank, width=100%]
-
-[start=4]
++
 . Click on a vulnerable package on the left menu to get more information about the vulnerability and see what you have to do to fix the issue.
-
++
 image::00-quay-vuln-detailed.png[link=self, window=blank, width=100%]
-
++
 NOTE: Toggling for fixable/unfixable vulnerabilities is an excellent way for developers to understand what is within their responsibility for fixing. For example, since you are using an older version of Java, many fixes are available for these common issues.
 
 === Check if RHACS Can Pull the Image Manifest from Your Quay Instance
@@ -906,7 +869,7 @@ Why would this error occur?
 ====
 
 . Add the Quay registry integration to RHACSvia API so ACS can pull the image manifest.
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 curl -sk -X POST "https://${ROX_CENTRAL_ADDRESS}:443/v1/imageintegrations" \
@@ -922,17 +885,16 @@ curl -sk -X POST "https://${ROX_CENTRAL_ADDRESS}:443/v1/imageintegrations" \
     }
   }'
 ----
-
++
 TIP: The following output can be configured using flags. You can configure different outputs (table, CSV, JSON, and sarif) and filter for specific severities.
-
++
 . Run the command again to verify the integration was successful.
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=$QUAY_URL/$QUAY_USER/frontend:0.1 --force -o table
 ----
-
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----

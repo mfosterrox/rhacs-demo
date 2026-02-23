@@ -5,6 +5,11 @@
 
 == Module Goals
 
+* Understand and implement CI/CD integration with Red Hat Advanced Cluster Security (RHACS)
+* Learn how to scan container images and deployments as part of a CI/CD pipeline
+* Automate policy enforcement and compliance checks in a DevSecOps workflow
+* Use RHACS APIs and CLI tools (roxctl) for automation within CI pipelines
+* Implement policy-as-code for security automation with Advanced Cluster Management (ACM) and OpenShift GitOps
 
 == Implement Policy-as-Code in ACM with OpenShift GitOps
 
@@ -19,12 +24,10 @@ Administrator login is available with:
 [cols="1,1"]
 |===
 | *Username:* | {openshift_cluster_admin_username}
-| *Password:* | {openshift_cluster_admin_username} 
+| *Password:* | {openshift_cluster_admin_password} 
 |===
 
-Navigate to the *Cluster* dropdown menu and then select *All Clusters*: 
-
-image::05-acm-00.png[link=self, window=blank, width=100%, Cluster Selection Menu]
+Click on *Fleet Management* in the left side menu.
 
 === Implement Security Policy-as-Code
 
@@ -58,11 +61,17 @@ image::05-acm-03.png[link=self, window=blank, width=100%]
 
 image::05-acm-04.png[link=self, window=blank, width=100%]
 
-link:https://github.com/mfosterrox/skupper-security-demo/tree/main/PaC-custom-policies[PaC Custom Policies on GitHub]
-
 [start=7]
 . Click "*Next*"
-. In the Template tab, select *Git Repository* and enter the URL of the GitHub repository containing the custom policies - URL: https://github.com/mfosterrox/skupper-security-demo.git:
+. In the Template tab, select *Git Repository* and enter the URL of the GitHub repository containing the custom policies
++
+[source,sh,subs="attributes",role=execute]
+----
+https://github.com/mfosterrox/skupper-security-demo.git
+----
++
+IMPORTANT: Make sure to click "Create new option"
++
 . Select "Main":
 . Select "PaC-custom-policies":
 . Enter the remote namespace of "stackrox":
@@ -188,46 +197,17 @@ First, make sure you can access the Red Hat^(R)^ OCP console web console.
 
 *Procedure*
 
-[start=1]
-. Log into the OCP console at `{openshift_cluster_console_url}`:
-. Click the *rhsso* option
-
-image::01-ocp-login-admin.png[OpenShift console]
-
-[start=3]
-. Enter the OCP credentials: 
-
-[cols="1,1"]
-|===
-| *User:*| {openshift_cluster_admin_username} 
-| *Password:*| {openshift_cluster_admin_username} 
-|===
-
-
-[start=4]
-. Enter the OpenShift username *{openshift_cluster_admin_username}* and password: *{openshift_cluster_admin_username}*:
-
-image::01-ocp-login-password.png[OpenShift console login]
-
-====
-You should be directed to the RHACM dashboard. RHACM is integrated into the OpenShift dashboard.
-====
-
-[start=5]
-. To get to your cluster's local OpenShift dashboard, click the top dropdown and select *local-cluster*:
-
-image::05-cd-01.png[link=self, window=blank, width=100%]
-image::05-cd-02.png[link=self, window=blank, width=100%]
-
-[start=6]
+. To get to your cluster's local OpenShift dashboard, click the top dropdown and select *Administrator*:
++
 . Click on the *Pipelines* tab on the left side of the page and select "*Pipelines*": 
 . There's no pipeline currently. Let's apply it now:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
+oc create ns pipeline-demo
 oc apply -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -238,47 +218,45 @@ clustertask.tekton.dev/rox-deployment-check created
 clustertask.tekton.dev/rox-image-check created
 clustertask.tekton.dev/rox-image-scan created
 ----
-
++
 > The pipeline we are looking for is called *rox-pipeline*, and you can either find it and select it or you can change the *Project to "pipeline-demo"*.
-
++
 image::05-cd-03.png[link=self, window=blank, width=100%]
-
++
 image::05-cd-04.png[link=self, window=blank, width=100%]
-
++
 > The pipeline has not been run yet, so start a pipeline run: 
-
++
 [start=8]
 . Click the three dots on the right side of the screen and select *start*:
-
++
 image::05-cd-05.png[link=self, window=blank, width=100%]
-
++
 ----
 This pipeline works by taking an image that you have created and passing it through a "roxctl image scan" and a "roxctl image check" process.
 ----
-
-[start=9]
++
 . Let's use the *frontend:0.1* image that we've been using all day. Run the following and input it into the image bar:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 echo $QUAY_URL/$QUAY_USER/frontend:0.1
 ----
-
++
 image::05-cd-06.png[link=self, window=blank, width=100%]
-
++
 IMPORTANT: The pipeline should fail. 
-
++
 ====
 Why do you think the pipeline failed?
 ====
-
++
 Let's look at the logs.
-
-[start=10]
++
 . Take a look at the log snippet on the bottom right of the page:
-
++
 image::05-cd-09.png[link=self, window=blank, width=100%]
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -287,36 +265,35 @@ Getting roxctl
 chmod: cannot access './roxctl': No such file or directory
 /tekton/scripts/script-0-ftdft: line 5: ./roxctl: No such file or directory
 ----
-
++
 This snippet indicates that there are incorrect variables. With RHACS, API access is required to query Central for results.
-
++
 > Let's take a look at the secret file necessary for *OpenShift Pipelines*:
-
-[start=11]
++
 . Run the following in the terminal:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 ls $TUTORIAL_HOME/openshift-pipelines
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
 [lab-user@bastion pipeline]$ ls $TUTORIAL_HOME/openshift-pipelines
 pipeline  secrets  tasks
 ----
-
++
 As you can see, the pipelines are broken up into one pipeline, with three tasks that need a secret file. Let's take a look at what variables are needed for the pipeline.
-
++
 [start=12]
 . Run the following in the terminal:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cat $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -333,12 +310,11 @@ metadata:
   name: roxsecrets
   namespace: pipeline-demo
 ----
-
++
 Ok. So we need the RHACS Central endpoint and an API token with the right permissions. Luckily we have the RHACS Central endpoint and an admin access token that we can use.
-
-[start=13]
++
 . Run the following in the terminal to update the RHACS Central address and API Token:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 ACS_URL=$(oc -n stackrox get route central -o jsonpath='{.spec.host}')
@@ -346,15 +322,14 @@ ACS_URL_PORT=$(echo "$ACS_URL" | sed 's/$/:443/')
 sed -i "s|ROXCTL_CENTRAL_ENDPOINT|$ACS_URL_PORT|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 sed -i "s|API_TOKEN|$ROX_API_TOKEN|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 ----
-
-[start=14]
++
 . Verify by running the following command:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
 cat $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 ----
-
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
@@ -369,16 +344,37 @@ kind: Secret
 metadata:
   name: roxsecrets
 ----
-
-
-[start=15]
++
 . Lastly, apply the following and head over to the OpenShift Console:
-
++
 [source,sh,subs="attributes",role=execute]
 ----
-oc apply -f $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
+oc apply -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
 ----
-
++
+[NOTE]
+====
+This error is a known OpenShift Pipelines (Tekton) controller issue (validation webhook vs. finalizer cleanup), not a problem with your pipeline or tasks. If `oc delete` hangs or you see _Failed to update finalizers for "rox-pipeline-…": the object has been modified; please apply your changes to the latest version and try again_, a stuck PipelineRun is holding finalizers. Remove them and retry:
++
+. Find the stuck PipelineRun. Check the pipeline namespace first, then all namespaces if needed:
++
+[source,sh,subs="attributes",role=execute]
+----
+oc get pipelinerun -n pipeline-demo
+# If no resources found, the run may be in another namespace (e.g. where you started the pipeline):
+oc get pipelinerun -A
+----
++
+. If you see a PipelineRun listed, patch it using that run's *name* and *namespace* (not necessarily `pipeline-demo`). If no PipelineRuns are found, skip to step 3.
++
+[source,sh,subs="attributes",role=execute]
+----
+kubectl patch pipelinerun <pipelinerun-name> -n <namespace> --type=json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
+----
++
+. Run the delete and apply again.
+====
++
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----

