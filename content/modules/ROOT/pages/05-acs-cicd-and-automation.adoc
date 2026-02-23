@@ -204,8 +204,15 @@ First, make sure you can access the Red Hat^(R)^ OCP console web console.
 +
 [source,sh,subs="attributes",role=execute]
 ----
-oc create ns pipeline-demo
+git pull
+oc delete -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
+ACS_URL=$(oc -n stackrox get route central -o jsonpath='{.spec.host}')
+ACS_URL_PORT=$(echo "$ACS_URL" | sed 's/$/:443/')
+sed -i "s|ROXCTL_CENTRAL_ENDPOINT|$ACS_URL_PORT|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
+sed -i "s|API_TOKEN|$ROX_API_TOKEN|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 oc apply -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
+
+quay.apps.cluster-kdwsf.dynamic.redhatworkshops.io/quayadmin/frontend:0.1
 ----
 +
 [.console-output]
@@ -350,36 +357,6 @@ metadata:
 [source,sh,subs="attributes",role=execute]
 ----
 oc apply -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
-----
-+
-[NOTE]
-====
-This error is a known OpenShift Pipelines (Tekton) controller issue (validation webhook vs. finalizer cleanup), not a problem with your pipeline or tasks. If `oc delete` hangs or you see _Failed to update finalizers for "rox-pipeline-…": the object has been modified; please apply your changes to the latest version and try again_, a stuck PipelineRun is holding finalizers. Remove them and retry:
-+
-. Find the stuck PipelineRun. Check the pipeline namespace first, then all namespaces if needed:
-+
-[source,sh,subs="attributes",role=execute]
-----
-oc get pipelinerun -n pipeline-demo
-# If no resources found, the run may be in another namespace (e.g. where you started the pipeline):
-oc get pipelinerun -A
-----
-+
-. If you see a PipelineRun listed, patch it using that run's *name* and *namespace* (not necessarily `pipeline-demo`). If no PipelineRuns are found, skip to step 3.
-+
-[source,sh,subs="attributes",role=execute]
-----
-kubectl patch pipelinerun <pipelinerun-name> -n <namespace> --type=json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
-----
-+
-. Run the delete and apply again.
-====
-+
-[.console-output]
-[source,bash,subs="+macros,+attributes"]
-----
-[lab-user@bastion pipeline]$ oc apply -f $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
-secret/roxsecrets configured
 ----
 
 === Let's Try Again

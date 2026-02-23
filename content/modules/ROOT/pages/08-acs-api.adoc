@@ -282,9 +282,22 @@ The official RHACS API documentation provides detailed information on all availa
 
 image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcTN6N2l3OXR0OXo4eGRkb3dpaHdocWRxZzQzN3A4OHQ3NTEycjFhaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/C1AaD43G6rMlZjT628/giphy.gif[link=self, window=blank, width=100%, class="center"]
 
-Review the API and come up with your own use case that can help automate your day-to-day workflows.
+*API Challenge*
 
-We'll discuss after the module is done. 
+Using the RHACS API and the techniques in this module, complete the following:
+
+. *List policies* — Call the policies endpoint and use `jq` to output only policy *names* and *severity* (one line per policy).
+. *Filter alerts* — Get all *ACTIVE* alerts with severity `HIGH_SEVERITY`. Use either a query parameter or `jq` (or both). How many did you find?
+. *Build a combined query* — Request alerts that match *both* a namespace of your choice (e.g. `payments` or `vault`) *and* a violation time in the last 24 hours. Confirm you get a non-empty list or an empty list with valid JSON.
+. *Optional* — Use the API to list deployments (explore `/v1/deployments` or the API docs in the RHACS console) and report how many deployments are in a specific cluster or namespace.
+
+*Tips*
+
+* Reuse your `ROX_CENTRAL_ADDRESS` and `ROX_API_TOKEN` from earlier in the module.
+* For time-based queries, use the `Violation Time:>1d` style shown in the examples.
+* Combine query terms with `+` and URL-encode special characters (e.g. `%3A` for `:`, `%3E` for `>`).
+
+When you're done, think of one automation idea (e.g. daily report of high-severity alerts, or syncing policy names to a wiki). We'll discuss after the module is done. 
 
 == Summary
 
