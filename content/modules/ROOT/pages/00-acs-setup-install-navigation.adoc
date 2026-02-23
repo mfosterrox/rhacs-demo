@@ -454,13 +454,9 @@ quay-bq65l.apps.cluster-bq65l.bq65l.sandbox209.opentlc.com
 ----
 
 [start=3]
-. Install Podman on the bastion host if it is not already installed.
+. Install Podman on the bastion host.
 
-To proceed, use the installation instructions that match your operating system (for example, RHEL, Fedora, CentOS, Ubuntu, or Debian).
-
-Install Podman using the appropriate command for your distribution:
-
-* On RHEL, CentOS, Rocky Linux, Alma Linux, or Fedora:*
+On RHEL, CentOS, Rocky Linux, Alma Linux, or Fedora:
 [source,sh,subs="attributes",role=execute]
 ----
 sudo dnf install -y podman
@@ -888,7 +884,7 @@ image::00-quay-vuln-detailed.png[link=self, window=blank, width=100%]
 
 NOTE: Toggling for fixable/unfixable vulnerabilities is an excellent way for developers to understand what is within their responsibility for fixing. For example, since you are using an older version of Java, many fixes are available for these common issues.
 
-=== Ensure ACS Can Pull the Image Manifest from Your Quay Instance
+=== Check if RHACS Can Pull the Image Manifest from Your Quay Instance
 
 *Procedure*
 
@@ -899,17 +895,53 @@ Run the following command to test the RHACS/Quay integration:
 roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=$QUAY_URL/$QUAY_USER/frontend:0.1 --force -o table
 ----
 
+[.console-output]
+[source,bash,subs="+macros,+attributes"]
+----
+ERROR:  Scanning image failed: retrieving image scan result: could not scan image: "quay.apps.cluster-p2z2g.dynamic.redhatworkshops.io/quayadmin/frontend:0.1": rpc error: code = Canceled desc = context canceled. Retrying after 3 seconds...
+----
+
+====
+Why would this error occur?
+====
+
+. Add the Quay registry integration to RHACSvia API so ACS can pull the image manifest.
+
+[source,sh,subs="attributes",role=execute]
+----
+curl -sk -X POST "https://${ROX_CENTRAL_ADDRESS}:443/v1/imageintegrations" \
+  -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Quay Workshop Registry",
+    "type": "quay",
+    "categories": ["REGISTRY"],
+    "quay": {
+      "endpoint": "'"$QUAY_URL"'",
+      "insecure": true
+    }
+  }'
+----
+
 TIP: The following output can be configured using flags. You can configure different outputs (table, CSV, JSON, and sarif) and filter for specific severities.
+
+. Run the command again to verify the integration was successful.
+
+[source,sh,subs="attributes",role=execute]
+----
+roxctl --insecure-skip-tls-verify -e "$ROX_CENTRAL_ADDRESS:443" image scan --image=$QUAY_URL/$QUAY_USER/frontend:0.1 --force -o table
+----
+
 
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
 .
-.
-+----------+---------------+
-|             |           | GHSA-r64q-w8jr-g9qp |    LOW    |  0   |                  https://github.com/urllib3/urllib3/issues/1553                  |    1.24.3     |    -     |       -       |
-+-------------+-----------+---------------------+-----------+------+----------------------------------------------------------------------------------+---------------+----------+---------------+
-WARN:   A total of 43 unique vulnerabilities were found in 8 components
+|    pip     | 25.0.1  |  CVE-2025-8869   | MODERATE  |  0   |  https://nvd.nist.gov/vuln/detail/CVE-2025-8869   |     25.3      |    -     |       -       |
+|            |         +------------------+-----------+------+---------------------------------------------------+---------------+----------+---------------+
+|            |         |  CVE-2026-1703   |    LOW    |  0   |  https://nvd.nist.gov/vuln/detail/CVE-2026-1703   |     26.0      |    -     |       -       |
++------------+---------+------------------+-----------+------+---------------------------------------------------+---------------+----------+---------------+
+WARN:   A total of 33 unique vulnerabilities were found in 8 components
 ----
 
 === Deploy Your Newly Built Application

@@ -5,9 +5,9 @@
 
 == Module Goals
 * Understanding how notification and alerting work in RHACS
-* Set up a notification alert to a Microsoft Teams channel
-* Set up a notification alert to a Slack channel
-* Configure policies to send alerts to both Teams and Slack
+* Set up a notification using an open-source–friendly option (generic webhook) that requires no account
+* Optionally set up a notification alert to a Microsoft Teams or Slack channel
+* Configure policies to send alerts to your chosen notifier(s)
 
 == How Do Notifications and Alerts Work in RHACS
 
@@ -36,6 +36,37 @@ Policies can be assigned different severity levels (Low, Medium, High, Critical)
 RHACS continuously monitors Kubernetes clusters for runtime anomalies. Alerts can be configured to trigger on suspicious activities such as unexpected network connections, process executions, or file system changes. By analyzing the runtime behavior of applications, RHACS can alert on deviations from known good states or behaviors.
 
 == Configuring Alerting in RHACS
+
+== Integrating a generic webhook
+
+RHACS can send alerts to any HTTP endpoint using a *Generic Webhook* notifier. This option works well for workshops because it requires no Slack or Teams account: each attendee gets a unique webhook URL from a free service and sees alert payloads in their browser.
+
+*Open-source–friendly options:*
+
+* *webhook.site* — Visit https://webhook.site and use the unique URL shown. No signup. Requests appear on the page as they arrive.
+* *Mattermost* or *Rocket.Chat* — Self-hosted, open-source Slack alternatives. If your lab provides an instance, use an incoming webhook in a channel (similar to Slack).
+* *ntfy* — Open-source push notifications (e.g. https://ntfy.sh). You can POST to a topic and subscribe in the browser or app; no account needed to receive.
+
+The steps below use *webhook.site* so everyone can complete the notification lab without access to Slack or Teams.
+
+=== Prerequisites
+* A browser to open https://webhook.site and copy your unique URL.
+
+=== Steps for setting up the generic webhook integration
+
+*Procedure*
+
+. Open https://webhook.site in your browser. The page shows a unique URL (e.g. `https://webhook.site/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Copy this URL.
+. Log into the RHACS console and go to **Platform Configuration** → **Integrations**.
+. Under **Notifier Integrations**, select **Generic** (or **Generic Webhook**, depending on your RHACS version).
+. Click **New integration** and configure:
+* **Integration Name:** e.g. `webhook-alerts`
+* **Endpoint:** Paste the webhook URL you copied from webhook.site.
+* Leave other options at defaults (or disable TLS verification if your environment uses self-signed certificates).
+. Click **Test**. If the test succeeds, the request appears on the webhook.site page.
+. Click **Save**.
+
+You can now attach this notifier to policies (see <<Configure Notifications>>). When a policy violation triggers an alert, the full JSON payload will appear on your webhook.site page.
 
 == Integrating Slack with RHACS
 
@@ -174,8 +205,8 @@ image::07-pol-not-01.png[link=self, window=blank, width=100%]
 image::08-not-2.png[link=self, window=blank, width=100%]
 
 [start=4]
-. Go to Policy behavior - actions. There should be your slack-alerts and teams-alerts notifier options available:
-. Click the desired notifier(s) and save the policy:
+. Go to Policy behavior - actions. Your configured notifier(s) appear here (e.g. *webhook-alerts*, *slack-alerts*, *teams-alerts*).
+. Select the desired notifier(s) and save the policy:
 
 IMPORTANT: Run the following command if you have not created the policy in the earlier module:
 
@@ -245,7 +276,7 @@ tomcat@visa-processor-9bfcf46f7-cwtjb:/usr/local/tomcat$
 NOTE: If you see *tomcat@visa-processor...*, you've confirmed you have a shell and access to the visa-processor application.
 
 [start=7]
-. Lastly, review your Slack and/or Teams channel for the alert: 
+. Check that the alert was delivered: open your webhook.site page (or Slack/Teams channel) and confirm the alert payload appeared. 
 
 *Congrats!* 
 
@@ -255,6 +286,6 @@ image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjJmczc4MmswYmk1cnhvZ254
 
 Nice!
 
-You integrated webhooks into RHACS for both Slack and Microsoft Teams and configured notifications based on previous policies.
+You integrated webhooks into RHACS (generic webhook, and optionally Slack or Microsoft Teams) and configured notifications based on previous policies.
 
 Time to review the *RHACS API*!

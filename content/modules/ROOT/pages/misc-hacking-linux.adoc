@@ -1,4 +1,4 @@
-= Capture the Flag
+== Capture the Flag
 
 == Module goals
 .Goals
@@ -168,6 +168,8 @@ oc create route edge ctf-web-to-system-service --service=ctf-web-to-system-servi
 oc get route ctf-web-to-system-service -n ctf-web-to-system -o jsonpath='https://{.spec.host}{"\n"}'
 ----
 
+[source,sh,subs="attributes"]
+----
 # 1. Clone Shannon
 git clone https://github.com/KeygraphHQ/shannon.git
 cd shannon
@@ -186,3 +188,4 @@ EOF
 
 # 3. Run a pentest
 ./shannon start URL=https://your-app.com REPO=your-repo
+----
