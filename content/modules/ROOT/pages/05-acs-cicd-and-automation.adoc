@@ -211,8 +211,6 @@ ACS_URL_PORT=$(echo "$ACS_URL" | sed 's/$/:443/')
 sed -i "s|ROXCTL_CENTRAL_ENDPOINT|$ACS_URL_PORT|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 sed -i "s|API_TOKEN|$ROX_API_TOKEN|g" $TUTORIAL_HOME/openshift-pipelines/secrets/rox-secrets.yml
 oc apply -f $TUTORIAL_HOME/openshift-pipelines/ --recursive
-
-quay.apps.cluster-kdwsf.dynamic.redhatworkshops.io/quayadmin/frontend:0.1
 ----
 +
 [.console-output]

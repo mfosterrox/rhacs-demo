@@ -27,7 +27,7 @@ First, make sure you can access the Red Hat^(R)^ OCP console user interface.
 [cols="1,1"]
 |===
 | *User:* | {openshift_cluster_admin_username}
-| *Password:* | {openshift_cluster_admin_username}
+| *Password:* | {openshift_cluster_admin_password}
 |===
 +
 image::01-ocp-login-password.png[OpenShift console login,link=self, window=blank, width=100%]
@@ -201,7 +201,7 @@ Verify the API token, and variables were saved correctly.
 +
 [source,sh,subs="attributes",role=execute]
 ----
-cat ~/.bashrc
+tail ~/.bashrc
 ----
 +
 [.console-output]
@@ -309,7 +309,7 @@ oc apply -f $TUTORIAL_HOME/skupper-demo/ --recursive
 [.console-output]
 [source,bash,subs="+macros,+attributes"]
 ----
-[demo-user@bastion ~]$ oc apply -f $TUTORIAL_HOME/kubernetes-manifests/ --recursive
+[demo-user@bastion ~]$ oc apply -f $TUTORIAL_HOME/k8s-deployment-manifests/ --recursive
 namespace/operations created
 namespace/backend created
 ....
