@@ -327,9 +327,12 @@ update_rhacs_version() {
     
     print_info "Updating RHACS to version ${target_version}..."
     
-    # Check if Central resource exists (for operator-managed installation)
-    if check_resource_exists "central" "central" "${RHACS_NAMESPACE}"; then
-        print_info "Updating Central resource..."
+    # Discover Central CR name (operator may use "central" or "stackrox-central-services")
+    local central_cr_name
+    central_cr_name=$(get_central_cr_name)
+    
+    if [ -n "${central_cr_name}" ]; then
+        print_info "Updating Central resource (${central_cr_name})..."
         
         # Ensure operator subscription is on a channel that can provide target version,
         # so the operator doesn't revert our image tag (e.g. 4.10 needs channel stable-4.10 or stable).
@@ -353,10 +356,15 @@ update_rhacs_version() {
         
         # Get current Central spec
         local current_image
+        current_image=$(oc get central "${central_cr_name}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.image}' 2>/dev/null || echo "")
+        local current_image
         current_image=$(oc get central central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.image}' 2>/dev/null || echo "")
         
         if [ -n "${current_image}" ]; then
             # Update the image tag
+            local image_repo
+            image_repo=$(echo "${current_image}" | sed 's/:.*//')
+            oc patch central "${central_cr_name}" -n "${RHACS_NAMESPACE}" --type=json -p="[
             local image_repo
             image_repo=$(echo "${current_image}" | sed 's/:.*//')
             oc patch central central -n "${RHACS_NAMESPACE}" --type=json -p="[
@@ -375,6 +383,8 @@ update_rhacs_version() {
         fi
         
         print_info "Waiting for update to complete..."
+        oc wait --for=condition=ready --timeout=600s "central/${central_cr_name}" -n "${RHACS_NAMESPACE}" || {
+            print_warn "Update may still be in progress. Please check manually."
         oc wait --for=condition=ready --timeout=600s central/central -n "${RHACS_NAMESPACE}" 2>/dev/null || {
             print_warn "Update may still be in progress. Check: oc get central -n ${RHACS_NAMESPACE} && oc get pods -n ${RHACS_NAMESPACE}"
         }
@@ -386,13 +396,24 @@ update_rhacs_version() {
         oc set image deployment/central -n "${RHACS_NAMESPACE}" central="quay.io/rhacs-eng/central:${target_version}" || {
             print_error "Failed to update deployment image"
             return 1
-        }
-        
-        print_info "Waiting for rollout to complete..."
+        fi
+        local current_channel
+        current_channel=$(oc get subscription "${sub_name}" -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.spec.channel}' 2>/dev/null || echo "")
+        if [ "${current_channel}" != "${desired_channel}" ]; then
+            print_info "Switching operator channel: ${current_channel:-unknown} -> ${desired_channel} (for version ${target_version})"
+            if ! oc patch subscription "${sub_name}" -n "${RHACS_OPERATOR_NAMESPACE}" --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/channel\",\"value\":\"${desired_channel}\"}]" 2>/dev/null; then
+                print_error "Failed to update subscription channel to ${desired_channel}"
+                return 1
+            fi
+            print_info "Waiting for operator to reconcile (45s)..."
+            sleep 45
+        else
+            print_info "Subscription already on channel ${desired_channel}; operator should rollout ${target_version}."
+        fi
+        print_info "Waiting for deployment rollout to complete..."
         oc rollout status deployment/central -n "${RHACS_NAMESPACE}" --timeout=600s || {
-            print_warn "Rollout may still be in progress. Please check manually."
+            print_warn "Rollout may still be in progress. Check: oc get pods -n ${RHACS_NAMESPACE} && oc get subscription -n ${RHACS_OPERATOR_NAMESPACE}"
         }
-        
         print_info "✓ RHACS update initiated"
     fi
     
