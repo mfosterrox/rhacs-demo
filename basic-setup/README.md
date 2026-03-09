@@ -78,9 +78,9 @@ The script intelligently handles RHACS version management:
 ```bash
 ./install.sh
 ```
-- Uses whatever version is currently installed
-- Will upgrade to latest if operator offers an upgrade
-- **Never downgrades automatically**
+- Default target version is **4.10**; script will upgrade to 4.10 if currently older
+- If already at 4.10, no version change
+- **Never downgrades automatically** (set `RHACS_FORCE_DOWNGRADE=true` to allow)
 
 **Pin to Specific Version:**
 ```bash
@@ -104,7 +104,7 @@ export RHACS_FORCE_DOWNGRADE=true
 
 | Current Version | Target Version | RHACS_FORCE_DOWNGRADE | Result |
 |-----------------|----------------|----------------------|--------|
-| 4.9.3 | (not set) | - | Keeps 4.9.3 |
+| 4.9.3 | (not set, default 4.10) | - | Upgrades to 4.10 ✓ |
 | 4.9.2 | 4.9.3 | - | Upgrades to 4.9.3 ✓ |
 | 4.9.3 | 4.9.2 | false | Refuses, keeps 4.9.3 ✓ |
 | 4.9.3 | 4.9.2 | true | Downgrades to 4.9.2 ⚠️ |
@@ -116,7 +116,7 @@ The following scripts are executed in numerical order:
 | Script | Description | Requires Token | Auto-Run |
 |--------|-------------|----------------|----------|
 | `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-07 | N/A | N/A |
-| `01-verify-rhacs-install.sh` | Verifies RHACS installation, checks version, ensures TLS encryption | No | ✓ |
+| `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, checks/updates version (e.g. 4.10), then ensures Console plugin is enabled | No | ✓ |
 | `02-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
 | `03-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
 | `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
@@ -194,6 +194,9 @@ This optional script configures Central with a custom TLS certificate and passth
 
 ## Requirements
 
+### RHACS Operator installation
+When installing the **RHACS Operator** from OperatorHub (OpenShift Console → Operators → OperatorHub → Red Hat Advanced Cluster Security for Kubernetes), on the **Install Operator** page ensure that the **Console plugin** option is set to **Enable**. This enables the RHACS plugin in the OpenShift web console. The basic-setup script `01-verify-rhacs-install.sh` updates RHACS to the target version (e.g. 4.10) first, then ensures the Console plugin is enabled.
+
 ### Cluster Access
 - Must be logged into OpenShift cluster via `oc login`
 - Requires cluster-admin or equivalent permissions
@@ -225,7 +228,7 @@ The install script checks for required variables in this order:
 - `RHACS_NAMESPACE` - RHACS namespace (default: `stackrox`)
 - `RHACS_ROUTE_NAME` - Route name (default: `central`)
 - `RHACS_VERSION` - Target RHACS version (optional)
-  - If not set: Uses currently installed version (no version enforcement)
+  - If not set: Defaults to **4.10**; script upgrades to 4.10 if current version is older
   - If set to older version: Refuses to downgrade unless `RHACS_FORCE_DOWNGRADE=true`
   - If set to newer version: Upgrades to specified version
 - `RHACS_FORCE_DOWNGRADE` - Allow downgrade to older version (default: `false`)

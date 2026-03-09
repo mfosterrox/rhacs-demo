@@ -604,6 +604,20 @@ EOF
 # Update Route to Passthrough
 #================================================================
 
+# Set to 1 when route was already passthrough (so we skip restart)
+ROUTE_ALREADY_PASSTHROUGH=0
+# Set to 1 when route + TLS are already configured (skip cert creation, central config, route update, restart)
+ALREADY_CONFIGURED=0
+
+# Returns 0 if route is passthrough and central-tls secret exists (already fully configured)
+is_tls_already_configured() {
+    local term=$(oc get route "${RHACS_ROUTE_NAME}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.tls.termination}' 2>/dev/null || echo "")
+    if [ "${term}" != "passthrough" ]; then
+        return 1
+    fi
+    check_resource_exists "secret" "central-tls" "${RHACS_NAMESPACE}"
+}
+
 update_route_to_passthrough() {
     print_step "Updating route to passthrough termination"
     
@@ -614,6 +628,7 @@ update_route_to_passthrough() {
     
     if [ "${current_termination}" = "passthrough" ]; then
         print_info "✓ Route already configured with passthrough termination"
+        ROUTE_ALREADY_PASSTHROUGH=1
         return 0
     fi
     
@@ -801,20 +816,34 @@ main() {
     # Verify cert-manager is installed (prerequisite)
     install_cert_manager || exit 1
     
-    # Create Let's Encrypt ClusterIssuer
-    create_letsencrypt_issuer || exit 1
+    ROUTE_ALREADY_PASSTHROUGH=0
+    ALREADY_CONFIGURED=0
     
-    # Create Certificate for Central
-    create_certificate || exit 1
+    # If route is already passthrough and custom TLS secret exists, skip all changes and restart
+    if is_tls_already_configured; then
+        ALREADY_CONFIGURED=1
+        ROUTE_ALREADY_PASSTHROUGH=1
+        print_info "Route and custom TLS already configured; skipping certificate creation, route update, and Central restart"
+    else
+        # Create Let's Encrypt ClusterIssuer
+        create_letsencrypt_issuer || exit 1
+        
+        # Create Certificate for Central
+        create_certificate || exit 1
+        
+        # Configure Central to use custom certificate
+        configure_central_tls
+        
+        # Update route to passthrough
+        update_route_to_passthrough || exit 1
+    fi
     
-    # Configure Central to use custom certificate
-    configure_central_tls
-    
-    # Update route to passthrough
-    update_route_to_passthrough || exit 1
-    
-    # Restart Central to apply changes
-    restart_central
+    # Restart Central only if we changed something (route was not already passthrough)
+    if [ "${ROUTE_ALREADY_PASSTHROUGH:-0}" = "1" ]; then
+        print_info "Skipping Central restart (no changes to apply)"
+    else
+        restart_central
+    fi
     
     # Verify TLS configuration
     verify_tls_configuration
