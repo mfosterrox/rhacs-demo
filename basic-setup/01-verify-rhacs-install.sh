@@ -30,6 +30,8 @@ print_step() {
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 RHACS_ROUTE_NAME="${RHACS_ROUTE_NAME:-central}"
 RHACS_OPERATOR_NAMESPACE="${RHACS_OPERATOR_NAMESPACE:-rhacs-operator}"
+# Default target version when not set (script will upgrade to this version)
+RHACS_VERSION="${RHACS_VERSION:-4.10}"
 
 # Function to check if a resource exists
 check_resource_exists() {
