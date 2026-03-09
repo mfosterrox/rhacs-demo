@@ -217,15 +217,48 @@ verify_route_encryption() {
     return 0
 }
 
+# Ensure operator subscription is on a channel that provides the target version (e.g. 4.10 -> stable-4.10).
+# Call this first so the operator can install the target version; otherwise it may stay on 4.9.
+ensure_subscription_channel_for_version() {
+    local target_version=$1
+    local desired_channel
+    desired_channel=$(get_channel_for_version "${target_version}")
+    local sub_name
+    sub_name=$(oc get subscription -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.items[?(@.spec.name=="rhacs-operator")].metadata.name}' 2>/dev/null || echo "")
+    if [ -z "${sub_name}" ]; then
+        return 0
+    fi
+    local current_channel
+    current_channel=$(oc get subscription "${sub_name}" -n "${RHACS_OPERATOR_NAMESPACE}" -o jsonpath='{.spec.channel}' 2>/dev/null || echo "")
+    if [ "${current_channel}" = "${desired_channel}" ]; then
+        print_info "Operator subscription already on channel: ${desired_channel}"
+        return 0
+    fi
+    print_step "Setting operator subscription to channel ${desired_channel} (for RHACS ${target_version})..."
+    if ! oc patch subscription "${sub_name}" -n "${RHACS_OPERATOR_NAMESPACE}" --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/channel\",\"value\":\"${desired_channel}\"}]" 2>/dev/null; then
+        print_warn "Could not set subscription channel to ${desired_channel}"
+        return 1
+    fi
+    print_info "Waiting for operator to reconcile to ${desired_channel} (60s)..."
+    sleep 60
+    return 0
+}
+
 # Function to check and update RHACS version
 # Uses RHACS_VERSION as target (default 4.10). Only reports "up to date" when installed equals target.
+# Ensures subscription is on the correct channel (e.g. stable-4.10) first so 4.10 is available.
 check_and_update_version() {
     print_step "Checking RHACS version..."
     
     # Single target: user-set or default 4.10 (so we always try to reach 4.10 when not set)
     local target_version="${RHACS_VERSION:-4.10}"
+    print_info "Target version: ${target_version}"
     
-    # Get current installed version
+    # First: ensure subscription is on a channel that provides the target (e.g. 4.9 -> stable-4.9, 4.10 -> stable-4.10).
+    # Otherwise the operator only has 4.9 and we can't upgrade to 4.10.
+    ensure_subscription_channel_for_version "${target_version}" || true
+    
+    # Get current installed version (after possible channel switch)
     local installed_version=$(get_installed_version)
     local current_image_tag=$(get_current_image_tag)
     
@@ -239,13 +272,11 @@ check_and_update_version() {
         print_info "Installed RHACS version: ${installed_version}"
     fi
     
-    # Get latest available version from operator (informational)
+    # Latest from operator (after channel switch; informational)
     local latest_version=$(get_latest_available_version)
     if [ -n "${latest_version}" ]; then
         print_info "Latest available version from operator: ${latest_version}"
     fi
-    
-    print_info "Target version: ${target_version}"
     
     # Already at target
     if [ "${current_image_tag}" = "${target_version}" ]; then
