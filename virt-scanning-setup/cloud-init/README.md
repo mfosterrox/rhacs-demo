@@ -102,7 +102,7 @@ Edit the VM manifests to change:
 ## Accessing VMs
 
 - **Console**: OpenShift Console → Workloads → Virtualization → VirtualMachines → select VM → Console
-- **SSH** (if keys injected): `virtctl ssh cloud-user@rhel-webserver -n $NAMESPACE`
+- **SSH** (if keys injected): `virtctl ssh cloud-user@vmi/rhel-webserver -n $NAMESPACE` (KubeVirt v1.6+ syntax)
 
 ## Relationship to 02-deploy-sample-vms.sh
 
