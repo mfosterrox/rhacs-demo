@@ -118,6 +118,17 @@ generate_cloudinit() {
     local vm_profile=$1
     local packages="${VM_PROFILES[$vm_profile]}"
     
+    # Collect SSH public keys for virtctl ssh (enables key-based login)
+    local ssh_key_file=""
+    if [ -n "${VM_SSH_PUBKEY}" ]; then
+        ssh_key_file="/tmp/vm_ssh_pubkey_$$"
+        echo "${VM_SSH_PUBKEY}" > "${ssh_key_file}"
+    elif [ -f "${HOME}/.ssh/id_ed25519.pub" ]; then
+        ssh_key_file="${HOME}/.ssh/id_ed25519.pub"
+    elif [ -f "${HOME}/.ssh/id_rsa.pub" ]; then
+        ssh_key_file="${HOME}/.ssh/id_rsa.pub"
+    fi
+    
     # Start cloud-init
     cat <<EOF
 #cloud-config
@@ -128,6 +139,15 @@ users:
   - name: cloud-user
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
+EOF
+    if [ -n "${ssh_key_file}" ] && [ -f "${ssh_key_file}" ]; then
+        echo "    ssh_authorized_keys:"
+        while read -r key; do
+            [ -n "${key}" ] && echo "      - ${key}"
+        done < "${ssh_key_file}"
+        [ "${ssh_key_file}" = "/tmp/vm_ssh_pubkey_$$" ] && rm -f "${ssh_key_file}"
+    fi
+    cat <<EOF
 
 chpasswd:
   list: |
@@ -418,6 +438,9 @@ deploy_vm() {
     # Create cloud-init secret
     local secret_name="cloudinit-${vm_profile}"
     print_info "Creating cloud-init secret: ${secret_name}"
+    if [ -n "${VM_SSH_PUBKEY}" ] || [ -f "${HOME}/.ssh/id_ed25519.pub" ] || [ -f "${HOME}/.ssh/id_rsa.pub" ]; then
+        print_info "Injecting SSH public key for virtctl ssh access"
+    fi
     
     local cloudinit_content
     cloudinit_content=$(generate_cloudinit "${vm_profile}")
