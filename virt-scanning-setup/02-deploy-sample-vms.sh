@@ -174,6 +174,13 @@ EOF
     # Continue with runcmd
     cat <<EOF
 runcmd:
+  # Enable PAM nullok so empty password works (RHEL disables this by default)
+  - |
+    authselect enable-feature with-nullok 2>/dev/null || \
+    for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+      [ -f "$f" ] && grep -q 'pam_unix.so' "$f" && ! grep -q 'nullok' "$f" && \
+        sed -i '/pam_unix\.so/s/pam_unix\.so/& nullok/' "$f"
+    done
   # Remove password from cloud-user (passwordless login for console)
   - passwd -d cloud-user
   # Allow empty password for SSH (enables passwordless virtctl ssh when no key)
