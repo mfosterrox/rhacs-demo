@@ -159,6 +159,8 @@ EOF
     # Continue with runcmd
     cat <<EOF
 runcmd:
+  # Set password explicitly (chpasswd can fail on some RHEL/CNV setups)
+  - echo "cloud-user:redhat" | chpasswd
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   
