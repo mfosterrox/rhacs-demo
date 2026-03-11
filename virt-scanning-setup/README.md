@@ -16,11 +16,20 @@ RHACS can scan RHEL virtual machines for vulnerabilities using the roxagent bina
 
 ### Installing virtctl manually
 
-If you need to install `virtctl` manually:
+The `install.sh` script installs `virtctl` to match the KubeVirt version running in the cluster (avoids client/server version mismatch). To force reinstall if you have a mismatched version:
 
 ```bash
-# Official recommended method
-VERSION=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+export VIRTCTL_FORCE_REINSTALL=true
+./install.sh
+```
+
+Manual install (match cluster version):
+
+```bash
+# Get cluster KubeVirt version first
+CLUSTER_VERSION=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' | grep -oP '^v\d+\.\d+\.\d+')
+# Or use latest stable if cluster not available
+VERSION=${CLUSTER_VERSION:-$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)}
 curl -L https://github.com/kubevirt/kubevirt/releases/download/${VERSION}/virtctl-${VERSION}-linux-amd64 -o virtctl
 chmod +x virtctl
 sudo mv virtctl /usr/local/bin/virtctl

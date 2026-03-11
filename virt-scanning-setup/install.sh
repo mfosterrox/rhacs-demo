@@ -399,12 +399,41 @@ install_virtctl() {
     print_header "════════════════════════════════════════════════════════════"
     echo ""
     
-    # Check if virtctl already exists
+    # Get cluster KubeVirt version to match virtctl (avoids client/server version mismatch)
+    local cluster_version=""
+    cluster_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null || true)
+    if [ -n "${cluster_version}" ] && [ "${cluster_version}" != "null" ]; then
+        # Extract vX.Y.Z from versions like v1.6.3 or v1.6.3-87-g83d6bf9c79
+        cluster_version=$(echo "${cluster_version}" | grep -oP '^v\d+\.\d+\.\d+' || echo "${cluster_version}")
+        print_info "Cluster KubeVirt version: ${cluster_version}"
+    fi
+    
+    # Check if virtctl already exists and matches cluster version
     if command -v virtctl &>/dev/null; then
         local current_version=$(virtctl version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[^"]+' || echo "unknown")
-        print_info "✓ virtctl is already installed (version: ${current_version})"
-        sleep 1
-        return 0
+        print_info "Installed virtctl version: ${current_version}"
+        if [ -n "${cluster_version}" ]; then
+            local cluster_major_minor=$(echo "${cluster_version}" | grep -oP 'v?\d+\.\d+' | sed 's/^/v/')
+            local current_major_minor=$(echo "${current_version}" | grep -oP '\d+\.\d+' | sed 's/^/v/')
+            if [ -n "${cluster_major_minor}" ] && [ "${cluster_major_minor}" = "${current_major_minor}" ]; then
+                print_info "✓ virtctl matches cluster version (${cluster_major_minor}.x)"
+                sleep 1
+                return 0
+            else
+                print_warn "virtctl ${current_version} does not match cluster ${cluster_version}"
+                if [ "${VIRTCTL_FORCE_REINSTALL:-false}" = "true" ]; then
+                    print_info "VIRTCTL_FORCE_REINSTALL=true - reinstalling to match cluster..."
+                else
+                    print_info "To reinstall matching version: export VIRTCTL_FORCE_REINSTALL=true"
+                    sleep 1
+                    return 0
+                fi
+            fi
+        else
+            print_info "✓ virtctl is already installed"
+            sleep 1
+            return 0
+        fi
     fi
     
     print_info "Installing virtctl CLI tool..."
@@ -435,60 +464,59 @@ install_virtctl() {
     # Remove any existing temp file
     rm -f "$temp_file"
     
-    # Method 1: Official stable release (recommended)
-    print_info "Trying official stable release..."
-    local stable_version=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt 2>/dev/null)
-    
-    if [ -n "$stable_version" ] && [ "$stable_version" != "null" ]; then
-        print_info "Stable version: ${stable_version}"
-        
-        # Official URL format uses: virtctl-VERSION-linux-amd64
-        local official_binary="virtctl-${stable_version}-linux-amd64"
+    # Method 1: Cluster KubeVirt version (preferred - avoids client/server mismatch)
+    if [ -n "${cluster_version}" ] && [ "$download_success" = false ]; then
+        print_info "Trying cluster version ${cluster_version} (matches KubeVirt in cluster)..."
+        local official_binary="virtctl-${cluster_version}-linux-amd64"
         if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
-            official_binary="virtctl-${stable_version}-linux-arm64"
+            official_binary="virtctl-${cluster_version}-linux-arm64"
         fi
-        
-        local download_url="https://github.com/kubevirt/kubevirt/releases/download/${stable_version}/${official_binary}"
+        local download_url="https://github.com/kubevirt/kubevirt/releases/download/${cluster_version}/${official_binary}"
         
         if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
             if file "$temp_file" 2>/dev/null | grep -q "executable"; then
-                print_info "✓ Successfully downloaded virtctl ${stable_version} (official stable)"
+                print_info "✓ Successfully downloaded virtctl ${cluster_version} (matches cluster)"
                 download_success=true
             else
-                print_warn "Downloaded file is not executable, trying alternative method..."
                 rm -f "$temp_file"
             fi
-        else
-            print_warn "Official stable download failed, trying alternative versions..."
         fi
-    else
-        print_warn "Could not determine stable version, trying alternative method..."
     fi
     
-    # Method 2: Fallback to known working versions
+    # Method 2: Official stable release (fallback)
     if [ "$download_success" = false ]; then
-        print_info "Trying alternative download method..."
+        print_info "Trying official stable release..."
+        local stable_version=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt 2>/dev/null)
         
-        # Try to get version from installed OpenShift Virtualization
-        local kubevirt_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null)
-        
-        local versions_to_try=(
-            "${kubevirt_version}"  # Cluster version if available
-            "v1.3.1"
-            "v1.2.2"
-            "v1.2.0"
-        )
+        if [ -n "$stable_version" ] && [ "$stable_version" != "null" ]; then
+            print_info "Stable version: ${stable_version}"
+            local official_binary="virtctl-${stable_version}-linux-amd64"
+            if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+                official_binary="virtctl-${stable_version}-linux-arm64"
+            fi
+            local download_url="https://github.com/kubevirt/kubevirt/releases/download/${stable_version}/${official_binary}"
+            
+            if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
+                if file "$temp_file" 2>/dev/null | grep -q "executable"; then
+                    print_info "✓ Successfully downloaded virtctl ${stable_version} (official stable)"
+                    download_success=true
+                else
+                    rm -f "$temp_file"
+                fi
+            fi
+        fi
+    fi
+    
+    # Method 3: Fallback to known working versions
+    if [ "$download_success" = false ]; then
+        print_info "Trying alternative versions..."
+        local versions_to_try=("v1.6.3" "v1.5.0" "v1.3.1" "v1.2.2")
+        [ -n "${cluster_version}" ] && versions_to_try=("${cluster_version}" "${versions_to_try[@]}")
         
         for version in "${versions_to_try[@]}"; do
-            # Skip empty versions
-            if [ -z "$version" ] || [ "$version" = "null" ]; then
-                continue
-            fi
-            
+            [ -z "$version" ] || [ "$version" = "null" ] && continue
             local download_url="https://github.com/kubevirt/kubevirt/releases/download/${version}/${virtctl_binary}"
-            
             print_info "Trying version: ${version}"
-            
             if curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
                 if file "$temp_file" 2>/dev/null | grep -q "executable"; then
                     print_info "✓ Successfully downloaded virtctl ${version}"
