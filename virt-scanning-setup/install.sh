@@ -401,36 +401,52 @@ install_virtctl() {
     
     # Get cluster KubeVirt version to match virtctl (avoids client/server version mismatch)
     local cluster_version=""
-    cluster_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null || true)
-    if [ -n "${cluster_version}" ] && [ "${cluster_version}" != "null" ]; then
-        # Extract vX.Y.Z from versions like v1.6.3 or v1.6.3-87-g83d6bf9c79
-        cluster_version=$(echo "${cluster_version}" | grep -oP '^v\d+\.\d+\.\d+' || echo "${cluster_version}")
-        print_info "Cluster KubeVirt version: ${cluster_version}"
+    local raw_version
+    raw_version=$(oc get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}' 2>/dev/null || true)
+    if [ -n "${raw_version}" ] && [ "${raw_version}" != "null" ] && [[ ! "${raw_version}" =~ ^sha256: ]]; then
+        cluster_version=$(echo "${raw_version}" | grep -oP '^v\d+\.\d+\.\d+' || echo "")
     fi
+    
+    # If observedKubeVirtVersion is a hash (digest-based install), get server version from virtctl
+    if [ -z "${cluster_version}" ] && command -v virtctl &>/dev/null; then
+        cluster_version=$(virtctl version 2>/dev/null | grep -i "server" | grep -oP 'v\d+\.\d+\.\d+' | head -1)
+        [ -n "${cluster_version}" ] && print_info "Cluster KubeVirt version from virtctl: ${cluster_version}"
+    fi
+    [ -n "${cluster_version}" ] && print_info "Target virtctl version: ${cluster_version}"
     
     # Check if virtctl already exists and matches cluster version
     if command -v virtctl &>/dev/null; then
-        local current_version=$(virtctl version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[^"]+' || echo "unknown")
+        local current_version
+        current_version=$(virtctl version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[^"]+' || virtctl version 2>/dev/null | grep -oP 'Client Version:\s*v\K[^\s]+' || echo "unknown")
         print_info "Installed virtctl version: ${current_version}"
         if [ -n "${cluster_version}" ]; then
-            local cluster_major_minor=$(echo "${cluster_version}" | grep -oP 'v?\d+\.\d+' | sed 's/^/v/')
-            local current_major_minor=$(echo "${current_version}" | grep -oP '\d+\.\d+' | sed 's/^/v/')
-            if [ -n "${cluster_major_minor}" ] && [ "${cluster_major_minor}" = "${current_major_minor}" ]; then
+            local cluster_major_minor
+            cluster_major_minor=$(echo "${cluster_version}" | grep -oP '\d+\.\d+' | sed 's/^/v/')
+            local current_major_minor
+            current_major_minor=$(echo "${current_version}" | grep -oP '\d+\.\d+' | sed 's/^/v/')
+            if [ -n "${cluster_major_minor}" ] && [ -n "${current_major_minor}" ] && [ "${cluster_major_minor}" = "${current_major_minor}" ]; then
                 print_info "✓ virtctl matches cluster version (${cluster_major_minor}.x)"
                 sleep 1
                 return 0
             else
-                print_warn "virtctl ${current_version} does not match cluster ${cluster_version}"
-                if [ "${VIRTCTL_FORCE_REINSTALL:-false}" = "true" ]; then
-                    print_info "VIRTCTL_FORCE_REINSTALL=true - reinstalling to match cluster..."
-                else
-                    print_info "To reinstall matching version: export VIRTCTL_FORCE_REINSTALL=true"
-                    sleep 1
-                    return 0
+                print_warn "virtctl v${current_version} does not match cluster v${cluster_version} - reinstalling..."
+                local virtctl_path
+                virtctl_path=$(command -v virtctl)
+                if [ -n "${virtctl_path}" ]; then
+                    if [ -w "${virtctl_path}" ]; then
+                        rm -f "${virtctl_path}"
+                        print_info "Removed ${virtctl_path}"
+                    elif sudo -n true 2>/dev/null; then
+                        sudo rm -f "${virtctl_path}"
+                        print_info "Removed ${virtctl_path}"
+                    else
+                        print_error "Cannot remove virtctl (need write access or sudo). Run: sudo rm ${virtctl_path}"
+                        return 1
+                    fi
                 fi
             fi
         else
-            print_info "✓ virtctl is already installed"
+            print_info "✓ virtctl is already installed (cluster version unknown)"
             sleep 1
             return 0
         fi
