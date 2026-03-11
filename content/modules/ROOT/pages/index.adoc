@@ -161,7 +161,7 @@ rhel-monitoring   12m   Running   10.128.2.48   worker-0
 In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
 
 *Additional information*
-* VM console access: `virtctl console rhel-webserver -n default` (login: cloud-user / redhat). If you see "Login incorrect", wait 5–10 minutes after the VM is Running—cloud-init sets the password on first boot.
+* VM console access: `virtctl console rhel-webserver -n default` (login: cloud-user, passwordless—press Enter at password prompt). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
 * Webserver VM is exposed via an OpenShift Route; get the URL with: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
 * Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
 

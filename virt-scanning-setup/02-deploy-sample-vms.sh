@@ -118,10 +118,6 @@ generate_cloudinit() {
     local vm_profile=$1
     local packages="${VM_PROFILES[$vm_profile]}"
     
-    # Generate password hash for cloud-user (chpasswd can fail on RHEL/CNV)
-    local password_hash
-    password_hash=$(openssl passwd -6 "redhat" 2>/dev/null || echo "")
-    
     # Collect SSH public keys for virtctl ssh (enables key-based login)
     local ssh_key_file=""
     if [ -n "${VM_SSH_PUBKEY:-}" ]; then
@@ -144,7 +140,6 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
 EOF
-    [ -n "${password_hash}" ] && echo "    passwd: ${password_hash}"
     if [ -n "${ssh_key_file}" ] && [ -f "${ssh_key_file}" ]; then
         echo "    ssh_authorized_keys:"
         while read -r key; do
@@ -153,11 +148,6 @@ EOF
         [ "${ssh_key_file}" = "/tmp/vm_ssh_pubkey_$$" ] && rm -f "${ssh_key_file}"
     fi
     cat <<EOF
-
-chpasswd:
-  list: |
-    cloud-user:redhat
-  expire: false
 
 EOF
 
@@ -184,8 +174,12 @@ EOF
     # Continue with runcmd
     cat <<EOF
 runcmd:
-  # Set password via chpasswd (fallback if passwd hash failed)
-  - echo "cloud-user:redhat" | chpasswd
+  # Remove password from cloud-user (passwordless login for console)
+  - passwd -d cloud-user
+  # Allow empty password for SSH (enables passwordless virtctl ssh when no key)
+  - sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   
@@ -850,7 +844,7 @@ main() {
     
     if [ "${SKIP_SUBSCRIPTION}" != "true" ] && { [ -n "${RHEL_USERNAME}" ] || [ -n "${RHEL_ORG}" ]; }; then
         print_info "Cloud-init will (this takes 5-10 minutes):"
-        echo "  1. Create cloud-user with password 'redhat'"
+        echo "  1. Create cloud-user with passwordless login"
         echo "  2. Register Red Hat subscription"
         echo "  3. Install profile-specific packages"
         echo "  4. Download and start roxagent"
@@ -882,7 +876,7 @@ main() {
         echo "  Vulnerability Management → Workload CVEs"
     else
         print_info "Cloud-init will:"
-        echo "  • Create cloud-user with password 'redhat'"
+        echo "  • Create cloud-user with passwordless login"
         echo "  • Download and start roxagent"
         echo ""
         print_warn "⚠ No subscription configured - packages NOT installed"
