@@ -1,6 +1,8 @@
 #cloud-config
 # Cloud-init userdata for rhel-webserver VM
-# Optional: Add bastion SSH public key for virtctl ssh. Console always works (cloud-user + Enter)
+# REQUIRED for virtctl ssh: Replace REPLACE_WITH_YOUR_SSH_PUBLIC_KEY with your bastion's
+# public key (e.g. cat ~/.ssh/id_ed25519.pub). virtctl ssh does NOT support password auth.
+# Console: virtctl console rhel-webserver -n default (cloud-user + Enter)
 hostname: rhel-webserver
 fqdn: rhel-webserver.local
 
@@ -8,7 +10,7 @@ users:
   - name: cloud-user
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
-    # Optional - add bastion SSH public key for virtctl ssh:
+    # REQUIRED for virtctl ssh - use your actual public key:
     ssh_authorized_keys:
       - REPLACE_WITH_YOUR_SSH_PUBLIC_KEY
 

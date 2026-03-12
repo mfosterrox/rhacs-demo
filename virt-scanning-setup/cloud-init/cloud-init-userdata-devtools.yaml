@@ -1,6 +1,6 @@
 #cloud-config
 # Cloud-init userdata for rhel-devtools VM
-# Optional: Add bastion SSH public key for virtctl ssh. Console always works (cloud-user + Enter)
+# REQUIRED for virtctl ssh: Replace REPLACE_WITH_YOUR_SSH_PUBLIC_KEY with your bastion's public key.
 hostname: rhel-devtools
 fqdn: rhel-devtools.local
 

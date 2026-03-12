@@ -73,15 +73,20 @@ oc apply -f vm-webserver.yaml -f vm-database.yaml -f vm-devtools.yaml -f vm-moni
 
 ### SSH keys for virtctl ssh (required)
 
-VMs support both **console** (cloud-user + Enter) and **SSH keys** (optional, for virtctl ssh). Inject your bastion's SSH public key for virtctl ssh access.
+**virtctl ssh does NOT support password authentication** — it only works with key-based auth. You must inject your bastion's SSH public key into the cloud-init.
 
-**Option A – Edit the file:** Replace `REPLACE_WITH_YOUR_SSH_PUBLIC_KEY` in each cloud-init file with your public key content.
+**Option A – Edit the file:** Replace `REPLACE_WITH_YOUR_SSH_PUBLIC_KEY` in each cloud-init file with your public key content (e.g. from `cat ~/.ssh/id_ed25519.pub`).
 
 **Option B – Inject via sed when creating the secret:**
 
 ```bash
 sed "s|REPLACE_WITH_YOUR_SSH_PUBLIC_KEY|$(cat ~/.ssh/id_ed25519.pub)|" cloud-init-userdata-webserver.yaml | \
   oc create secret generic cloudinit-webserver --from-file=userdata=/dev/stdin -n $NAMESPACE
+```
+
+**Connect with explicit key:**
+```bash
+virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/rhel-webserver -n $NAMESPACE
 ```
 
 ### RHEL subscription
@@ -102,7 +107,7 @@ Edit the VM manifests to change:
 ## Accessing VMs
 
 - **Console**: OpenShift Console → Workloads → Virtualization → VirtualMachines → select VM → Console
-- **SSH** (if keys injected): `virtctl ssh cloud-user@vmi/rhel-webserver -n $NAMESPACE` (KubeVirt v1.6+ syntax)
+- **SSH** (if keys injected): `virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/rhel-webserver -n $NAMESPACE`
 
 ## Relationship to 02-deploy-sample-vms.sh
 

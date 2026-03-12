@@ -695,7 +695,7 @@ display_vm_info() {
     done
     
     echo ""
-    print_info "SSH into VMs (key-based): virtctl ssh cloud-user@vmi/<vm-name> -n ${NAMESPACE}"
+    print_info "SSH into VMs: virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/<vm-name> -n ${NAMESPACE}"
     print_info "Check roxagent status inside VM: systemctl status roxagent"
     print_info "View installed DNF packages: dnf list installed"
     print_info "Monitor RHACS: Platform Configuration → Clusters → Virtual Machines"
@@ -910,8 +910,8 @@ main() {
             echo "  (Route will be available once created)"
         fi
         echo ""
-        print_info "SSH into VM (uses bastion key, KubeVirt v1.6+ syntax):"
-        echo "  $ virtctl ssh cloud-user@vmi/rhel-webserver -n ${NAMESPACE}"
+        print_info "SSH into VM (key-based; virtctl ssh does not support password):"
+        echo "  $ virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/rhel-webserver -n ${NAMESPACE}"
         echo ""
         print_warn "If SSH fails, use console: virtctl console rhel-webserver -n ${NAMESPACE} (login: cloud-user, password: Enter)"
         print_warn "Or recreate VMs to pick up bastion key: oc delete vm rhel-webserver rhel-database rhel-devtools rhel-monitoring -n ${NAMESPACE} && $0"
@@ -939,7 +939,7 @@ main() {
         print_info "To add vulnerability data:"
         echo ""
         echo "  1. SSH into VM:"
-        echo "     $ virtctl ssh cloud-user@vmi/rhel-webserver -n ${NAMESPACE}"
+        echo "     $ virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/rhel-webserver -n ${NAMESPACE}"
         echo ""
         echo "  2. Register subscription:"
         echo "     $ sudo subscription-manager register --username USER --password PASS"

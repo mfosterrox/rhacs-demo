@@ -161,7 +161,7 @@ rhel-monitoring   12m   Running   10.128.2.48   worker-0
 In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
 
 *Additional information*
-* VM access: `virtctl console rhel-webserver -n default` (login: cloud-user, password: Enter) or `virtctl ssh cloud-user@vmi/rhel-webserver -n default` (if bastion key injected). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
+* VM access: Console `virtctl console rhel-webserver -n default` (cloud-user + Enter). SSH `virtctl ssh -i ~/.ssh/id_ed25519 cloud-user@vmi/rhel-webserver -n default` (requires bastion key in cloud-init; virtctl ssh does not support password). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
 * Webserver VM is exposed via an OpenShift Route; get the URL with: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
 * Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
 
