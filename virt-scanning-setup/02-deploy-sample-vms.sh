@@ -213,8 +213,8 @@ runcmd:
   - |
     authselect enable-feature with-nullok 2>/dev/null || \
     for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
-      [ -f "$f" ] && grep -q 'pam_unix.so' "$f" && ! grep -q 'nullok' "$f" && \
-        sed -i '/pam_unix\.so/s/pam_unix\.so/& nullok/' "$f"
+      [ -f "\$f" ] && grep -q 'pam_unix.so' "\$f" && ! grep -q 'nullok' "\$f" && \
+        sed -i '/pam_unix\.so/s/pam_unix\.so/& nullok/' "\$f"
     done
   - passwd -d cloud-user
   # SSH: allow both key and password auth (key for virtctl ssh, passwordless for console)
@@ -486,23 +486,29 @@ deploy_vm() {
     local cloudinit_content
     cloudinit_content=$(generate_cloudinit "${vm_profile}")
     
+    local tmp_secret
+    tmp_secret=$(mktemp)
     oc create secret generic "${secret_name}" \
         --from-literal=userdata="${cloudinit_content}" \
         -n "${NAMESPACE}" \
-        --dry-run=client -o yaml | oc apply -f -
+        --dry-run=client -o yaml > "${tmp_secret}"
+    oc apply -f "${tmp_secret}" -n "${NAMESPACE}"
+    rm -f "${tmp_secret}"
     
     # Deploy VM
     print_info "Creating VirtualMachine resource..."
     
-    cat <<EOF | oc apply -f -
+    local tmp_vm
+    tmp_vm=$(mktemp)
+    cat > "${tmp_vm}" <<'VMYAML'
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: ${vm_name}
-  namespace: ${NAMESPACE}
+  name: __VM_NAME__
+  namespace: __NAMESPACE__
   labels:
     app: rhacs-vm-scanning
-    profile: ${vm_profile}
+    profile: __VM_PROFILE__
     roxagent: enabled
 spec:
   runStrategy: Always
@@ -510,13 +516,13 @@ spec:
     metadata:
       labels:
         app: rhacs-vm-scanning
-        profile: ${vm_profile}
+        profile: __VM_PROFILE__
         roxagent: enabled
-        kubevirt.io/vm: ${vm_name}
+        kubevirt.io/vm: __VM_NAME__
     spec:
       domain:
         cpu:
-          cores: ${VM_CPUS}
+          cores: __VM_CPUS__
         devices:
           autoattachVSOCK: true
           disks:
@@ -531,19 +537,29 @@ spec:
             masquerade: {}
         resources:
           requests:
-            memory: ${VM_MEMORY}
+            memory: __VM_MEMORY__
       networks:
       - name: default
         pod: {}
       volumes:
       - name: containerdisk
         containerDisk:
-          image: ${RHEL_IMAGE}
+          image: __RHEL_IMAGE__
       - name: cloudinitdisk
         cloudInitNoCloud:
           secretRef:
-            name: ${secret_name}
-EOF
+            name: __SECRET_NAME__
+VMYAML
+    sed -e "s|__VM_NAME__|${vm_name}|g" \
+        -e "s|__NAMESPACE__|${NAMESPACE}|g" \
+        -e "s|__VM_PROFILE__|${vm_profile}|g" \
+        -e "s|__VM_CPUS__|${VM_CPUS}|g" \
+        -e "s|__VM_MEMORY__|${VM_MEMORY}|g" \
+        -e "s|__RHEL_IMAGE__|${RHEL_IMAGE}|g" \
+        -e "s|__SECRET_NAME__|${secret_name}|g" "${tmp_vm}" > "${tmp_vm}.subst"
+    mv "${tmp_vm}.subst" "${tmp_vm}"
+    oc apply -f "${tmp_vm}"
+    rm -f "${tmp_vm}"
     
     print_info "✓ VM '${vm_name}' deployed"
 }
