@@ -21,6 +21,7 @@ print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VM_TEMPLATE="${SCRIPT_DIR}/vm-templates/rhel-webserver-vm.yaml"
+VM_DEPLOY_TEMPLATE="${SCRIPT_DIR}/vm-templates/rhel-webserver-vm-deploy.yaml"
 VM_NAMESPACE="${VM_NAMESPACE:-default}"
 VM_NAME="${VM_NAME:-rhel-webserver}"
 SKIP_SUBSCRIPTION="${SKIP_SUBSCRIPTION:-false}"
@@ -69,8 +70,8 @@ if ! oc whoami &>/dev/null; then
     exit 1
 fi
 
-if [ ! -f "${VM_TEMPLATE}" ]; then
-    print_error "VM template not found: ${VM_TEMPLATE}"
+if [ ! -f "${VM_TEMPLATE}" ] || [ ! -f "${VM_DEPLOY_TEMPLATE}" ]; then
+    print_error "VM templates not found in ${SCRIPT_DIR}/vm-templates/"
     exit 1
 fi
 
@@ -109,91 +110,41 @@ if oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" &>/dev/null; then
     sleep 10
 fi
 
-# Prepare template with credential substitution
-print_step "Preparing VM template..."
-TEMP_VM=$(mktemp)
-trap "rm -f ${TEMP_VM}" EXIT
+# Extract cloud-init userData from VM template
+print_step "Preparing cloud-init..."
+CLOUD_INIT_CONTENT=$(awk '
+    /userData: \|-/ { in_block=1; next }
+    in_block && /^[ ]{0,12}[^ ]/ { exit }
+    in_block { gsub(/^              /, ""); print }
+' "${VM_TEMPLATE}")
 
+# Remove rh_subscription block if skipping
 if [ "${SKIP_SUBSCRIPTION}" = "true" ]; then
-    # Remove rh_subscription block entirely
-    sed -e '/^              rh_subscription:/,/^              [a-z]/{
-        /^              rh_subscription:/d
-        /^                username:/d
-        /^                password:/d
-        /^                #.*auto_attach/d
-    }' "${VM_TEMPLATE}" | grep -v '^[[:space:]]*$' | \
-    awk '
-        /rh_subscription:/ { skip=1; next }
-        skip && /^              [a-z]/ { skip=0 }
-        !skip { print }
-    ' > "${TEMP_VM}" 2>/dev/null || cp "${VM_TEMPLATE}" "${TEMP_VM}"
-    # Simpler: use sed to remove the rh_subscription block
-    sed -e '/rh_subscription:/,/^              [a-z_]*:/{
-        /rh_subscription:/d
-        /username:.*YOUR_REDHAT/d
-        /password:.*YOUR_REDHAT/d
-    }' "${VM_TEMPLATE}" > "${TEMP_VM}" 2>/dev/null || true
-    # More reliable: python or multiline sed
-    python3 -c "
-import re, sys
-content = open('${VM_TEMPLATE}').read()
-# Remove rh_subscription block (username, password, optional auto_attach)
-content = re.sub(r'\n              rh_subscription:.*?(?=\n              [a-z_]|\n              packages:|\Z)', '\n', content, flags=re.DOTALL)
-open('${TEMP_VM}', 'w').write(content)
-" 2>/dev/null || cp "${VM_TEMPLATE}" "${TEMP_VM}"
-else
-    cp "${VM_TEMPLATE}" "${TEMP_VM}"
+    CLOUD_INIT_CONTENT=$(echo "${CLOUD_INIT_CONTENT}" | sed '/^rh_subscription:/,/^packages:/{
+        /^rh_subscription:/d
+        /^  username:/d
+        /^  password:/d
+    }')
 fi
 
-# Substitute credentials (use @ as sed delimiter to avoid / in paths)
+# Substitute credentials
 if [ "${SKIP_SUBSCRIPTION}" != "true" ]; then
-    # Escape special chars for sed ( & \)
-    escape_sed() { printf '%s' "$1" | sed 's/[&\\]/\\&/g'; }
-    RH_USERNAME_ESC=$(escape_sed "${RH_USERNAME}")
-    RH_PASSWORD_ESC=$(escape_sed "${RH_PASSWORD}")
-    sed -i.bak "s@<YOUR_REDHAT_USERNAME>@${RH_USERNAME_ESC}@g" "${TEMP_VM}"
-    sed -i.bak "s@<YOUR_REDHAT_PASSWORD>@${RH_PASSWORD_ESC}@g" "${TEMP_VM}"
-    rm -f "${TEMP_VM}.bak"
+    CLOUD_INIT_CONTENT=$(echo "${CLOUD_INIT_CONTENT}" | \
+        sed "s|<YOUR_REDHAT_USERNAME>|${RH_USERNAME}|g" | \
+        sed "s|<YOUR_REDHAT_PASSWORD>|${RH_PASSWORD}|g")
 fi
 
-# Check if userData exceeds 2048 bytes - if so, use secret
-USERDATA_START=$(grep -n "userData: |-" "${TEMP_VM}" | head -1 | cut -d: -f1)
-if [ -n "${USERDATA_START}" ]; then
-    # Extract userData (from userData: |- to next top-level key at same indent)
-    USERDATA_SIZE=$(awk "NR>=${USERDATA_START}" "${TEMP_VM}" | head -200 | wc -c)
-    if [ "${USERDATA_SIZE}" -gt 2048 ]; then
-        print_info "Cloud-init exceeds 2048 bytes - using Secret..."
-        CLOUD_INIT_SECRET="${VM_NAME}-cloud-init"
-        # Extract userData content (lines after userData: |-)
-        USERDATA_CONTENT=$(awk "NR>${USERDATA_START} && /^            [^ ]/ {exit} NR>${USERDATA_START}" "${TEMP_VM}" | sed 's/^              //')
-        echo "${USERDATA_CONTENT}" | oc create secret generic "${CLOUD_INIT_SECRET}" -n "${VM_NAMESPACE}" \
-            --from-file=userdata=/dev/stdin --dry-run=client -o yaml | oc apply -f -
-        # Replace cloudInitNoCloud block with userDataSecretRef + networkData
-        # Use a Python one-liner to do the replacement in the YAML
-        python3 << PYEOF
-import yaml
-with open('${TEMP_VM}') as f:
-    vm = yaml.safe_load(f)
-# Find cloudInitNoCloud volume and replace
-for vol in vm.get('spec', {}).get('template', {}).get('spec', {}).get('volumes', []):
-    if 'cloudInitNoCloud' in vol:
-        vol['cloudInitNoCloud'] = {
-            'userDataSecretRef': {'name': '${CLOUD_INIT_SECRET}'},
-            'networkData': 'version: 2\\nethernets:\\n  enp1s0:\\n    dhcp4: true\\n'
-        }
-        break
-with open('${TEMP_VM}', 'w') as f:
-    yaml.dump(vm, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-PYEOF
-    fi
-fi
+# Create cloud-init secret
+CLOUD_INIT_SECRET="${VM_NAME}-cloud-init"
+print_step "Creating cloud-init secret ${CLOUD_INIT_SECRET}..."
+echo "${CLOUD_INIT_CONTENT}" | oc create secret generic "${CLOUD_INIT_SECRET}" -n "${VM_NAMESPACE}" \
+    --from-file=userdata=/dev/stdin --dry-run=client -o yaml | oc apply -f -
 
-# Apply namespace if template uses different one
-sed -i.bak "s/namespace: default/namespace: ${VM_NAMESPACE}/g" "${TEMP_VM}" 2>/dev/null || true
-rm -f "${TEMP_VM}.bak" 2>/dev/null || true
-
+# Apply VM with secret reference
 print_step "Creating VM ${VM_NAME}..."
-oc apply -f "${TEMP_VM}"
+sed -e "s/CLOUD_INIT_SECRET_NAME/${CLOUD_INIT_SECRET}/g" \
+    -e "s/namespace: default/namespace: ${VM_NAMESPACE}/g" \
+    "${VM_DEPLOY_TEMPLATE}" | oc apply -f -
 
 print_info "✓ VM ${VM_NAME} created and starting"
 echo ""
