@@ -52,19 +52,48 @@ get_version_from_deployment_label() {
     oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}' 2>/dev/null || echo ""
 }
 
-# Function to get installed RHACS version (from deployment label)
-get_installed_version() {
-    get_version_from_deployment_label
-}
-
-# Function to get current image tag from deployment
+# Function to get current image tag from deployment (e.g. 4.9.3 or 4.10.0)
 get_current_image_tag() {
     oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | grep -oP ':[^:]+$' | sed 's/^://'
 }
 
-# Function to get latest available RHACS version (from deployment label)
+# Function to get installed RHACS version.
+# Prefers deployment label; falls back to image tag (operator-managed installs often don't set the label).
+get_installed_version() {
+    local label_version
+    label_version=$(get_version_from_deployment_label)
+    if [ -n "${label_version}" ]; then
+        echo "${label_version}"
+        return
+    fi
+    # Fallback: image tag reflects actual running version (e.g. 4.10.0, 4.9.3, 4.10)
+    local image_tag
+    image_tag=$(get_current_image_tag)
+    if [ -n "${image_tag}" ] && [[ "${image_tag}" =~ ^[0-9]+\.[0-9]+ ]]; then
+        echo "${image_tag}"
+    else
+        echo ""
+    fi
+}
+
+# Function to get latest available RHACS version from operator (CSV).
+# Returns the version the operator can provide (e.g. from CSV metadata).
 get_latest_available_version() {
-    get_version_from_deployment_label
+    local csv_name
+    csv_name=$(get_rhacs_csv_name)
+    if [ -z "${csv_name}" ]; then
+        get_version_from_deployment_label
+        return
+    fi
+    local csv_ns
+    csv_ns=$(get_rhacs_csv_namespace)
+    # CSV name format: rhacs-operator.v4.10.0 or similar
+    if [[ "${csv_name}" =~ \.v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    else
+        # Try spec.version from CSV
+        oc get csv "${csv_name}" -n "${csv_ns}" -o jsonpath='{.spec.version}' 2>/dev/null || get_version_from_deployment_label
+    fi
 }
 
 
@@ -185,9 +214,27 @@ verify_route_encryption() {
     return 0
 }
 
-# Get the RHACS CSV name in RHACS_NAMESPACE (e.g. rhacs-operator.v4.9.3). Empty if not found.
+# Get the RHACS CSV name. Checks operator namespace first, then RHACS namespace.
+# Returns e.g. rhacs-operator.v4.9.3. Empty if not found.
 get_rhacs_csv_name() {
+    local csv
+    csv=$(oc get csv -n "${RHACS_OPERATOR_NAMESPACE}" -o name 2>/dev/null | grep rhacs-operator | head -1 | sed 's|.*/||')
+    if [ -n "${csv}" ]; then
+        echo "${csv}"
+        return
+    fi
     oc get csv -n "${RHACS_NAMESPACE}" -o name 2>/dev/null | grep rhacs-operator | head -1 | sed 's|.*/||' || echo ""
+}
+
+# Get the namespace where the RHACS CSV is installed (for patching).
+get_rhacs_csv_namespace() {
+    if oc get csv -n "${RHACS_OPERATOR_NAMESPACE}" -o name 2>/dev/null | grep -q rhacs-operator; then
+        echo "${RHACS_OPERATOR_NAMESPACE}"
+    elif oc get csv -n "${RHACS_NAMESPACE}" -o name 2>/dev/null | grep -q rhacs-operator; then
+        echo "${RHACS_NAMESPACE}"
+    else
+        echo "${RHACS_NAMESPACE}"
+    fi
 }
 
 # Ensure CSV deploy details are updated to target version (no subscriptions).
@@ -196,8 +243,10 @@ ensure_csv_deploy_version() {
     local target_version=$1
     local csv_name
     csv_name=$(get_rhacs_csv_name)
+    local csv_ns
+    csv_ns=$(get_rhacs_csv_namespace)
     if [ -z "${csv_name}" ]; then
-        print_warn "No RHACS CSV found in namespace ${RHACS_NAMESPACE}; skipping CSV deploy update"
+        print_warn "No RHACS CSV found; skipping CSV deploy update"
         return 0
     fi
     print_step "Updating CSV ${csv_name} deploy details to version ${target_version}..."
@@ -206,7 +255,7 @@ ensure_csv_deploy_version() {
         return 1
     fi
     local csv_json
-    csv_json=$(oc get csv "${csv_name}" -n "${RHACS_NAMESPACE}" -o json 2>/dev/null) || true
+    csv_json=$(oc get csv "${csv_name}" -n "${csv_ns}" -o json 2>/dev/null) || true
     if [ -z "${csv_json}" ]; then
         print_error "Failed to get CSV ${csv_name}"
         return 1
@@ -220,7 +269,7 @@ ensure_csv_deploy_version() {
             ))
         ))
     ')
-    if echo "${patched}" | oc apply -f - -n "${RHACS_NAMESPACE}" 2>/dev/null; then
+    if echo "${patched}" | oc apply -f - -n "${csv_ns}" 2>/dev/null; then
         print_info "CSV deploy details updated; waiting 45s for rollout..."
         sleep 45
         return 0
@@ -386,14 +435,37 @@ update_rhacs_version() {
                 return 1
             }
         else
-            # No image in spec: update via CSV deploy details or leave to operator
-            print_info "Central has no custom image; ensure_csv_deploy_version may have updated CSV to ${target_version}"
+            # No image in spec: operator manages rollout via subscription/CSV channel
+            print_info "Central has no custom image; operator will rollout from channel/CSV"
         fi
         
         print_info "Waiting for update to complete..."
-        oc wait --for=condition=ready --timeout=600s "central/${central_cr_name}" -n "${RHACS_NAMESPACE}" || {
-            print_warn "Update may still be in progress. Check: oc get central -n ${RHACS_NAMESPACE} && oc get pods -n ${RHACS_NAMESPACE}"
-        }
+        # Poll until deployment reaches target version and rollout completes
+        local target_major_minor="${target_version}"
+        [[ "${target_version}" =~ ^([0-9]+\.[0-9]+) ]] && target_major_minor="${BASH_REMATCH[1]}"
+        local max_wait=600
+        local elapsed=0
+        local current_ver=""
+        while [ $elapsed -lt $max_wait ]; do
+            current_ver=$(get_installed_version)
+            if [ -n "${current_ver}" ]; then
+                local current_major_minor="${current_ver}"
+                [[ "${current_ver}" =~ ^([0-9]+\.[0-9]+) ]] && current_major_minor="${BASH_REMATCH[1]}"
+                if [ "${current_major_minor}" = "${target_major_minor}" ]; then
+                    # Version matches; ensure rollout is complete
+                    if oc rollout status deployment/central -n "${RHACS_NAMESPACE}" --timeout=60s 2>/dev/null; then
+                        print_info "✓ Central at target version ${current_ver}, rollout complete"
+                        break
+                    fi
+                fi
+            fi
+            oc rollout status deployment/central -n "${RHACS_NAMESPACE}" --timeout=30s 2>/dev/null || true
+            sleep 15
+            ((elapsed+=15))
+        done
+        if [ $elapsed -ge $max_wait ]; then
+            print_warn "Timeout waiting for version ${target_version}. Current: $(get_installed_version). Check: oc get central -n ${RHACS_NAMESPACE} && oc get pods -n ${RHACS_NAMESPACE}"
+        fi
         
         print_info "✓ RHACS update initiated"
     else
