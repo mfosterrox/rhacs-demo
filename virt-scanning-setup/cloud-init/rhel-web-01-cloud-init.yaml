@@ -1,0 +1,65 @@
+#cloud-config
+
+# ───────────────────────────────────────────────
+# 1. Basic system setup
+# ───────────────────────────────────────────────
+hostname: rhel-web-01
+fqdn: rhel-web-01.example.local
+
+# ───────────────────────────────────────────────
+# 2. Create/adjust users + enable password auth
+# ───────────────────────────────────────────────
+
+# Keep default 'cloud-user' + give it a password + sudo
+users:
+  - default
+  - name: cloud-user
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    groups: wheel, systemd-journal
+    shell: /bin/bash
+
+chpasswd:
+  list: |
+    cloud-user:MySecurePass123!
+  expire: false
+
+# Critical: allow password authentication over SSH
+ssh_pwauth: true
+
+# ───────────────────────────────────────────────
+# 3. Install & configure basic web server (httpd)
+# ───────────────────────────────────────────────
+package_update: true
+package_upgrade: false
+
+packages:
+  - httpd
+  - firewalld
+
+runcmd:
+  # Basic firewall config - allow http + https + ssh
+  - firewall-cmd --permanent --add-service=http
+  - firewall-cmd --permanent --add-service=https
+  - firewall-cmd --permanent --add-service=ssh
+  - firewall-cmd --reload
+
+  # Make sure httpd starts and is enabled
+  - systemctl enable --now httpd
+
+  # Create a simple test page (hostname/IP filled at boot time)
+  - |
+    echo '<!DOCTYPE html>
+    <html><head><title>Hello from RHEL on OpenShift</title></head>
+    <body>
+      <h1>It works! (cloud-init built this)</h1>
+      <p>Hostname: '"$(hostname)"'</p>
+      <p>IP: '"$(hostname -I | awk "{print \$1}")"'</p>
+    </body></html>' > /var/www/html/index.html
+
+# ───────────────────────────────────────────────
+# 4. Logging (helps debugging cloud-init itself)
+# ───────────────────────────────────────────────
+output:
+  all: |-
+    tee -a /var/log/cloud-init-output.log
+final_message: "The system is finally up, after $UPTIME seconds"
