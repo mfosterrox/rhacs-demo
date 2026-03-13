@@ -20,7 +20,7 @@ users:
 
 chpasswd:
   list: |
-    cloud-user:MySecurePass123!
+    cloud-user:redhat
   expire: false
 
 # Critical: allow password authentication over SSH
@@ -36,7 +36,17 @@ packages:
   - httpd
   - firewalld
 
+# Force override cloud-init's default drop-in that disables SSH password auth
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-enable-passwords.conf
+    content: |
+      PasswordAuthentication yes
+    permissions: '0600'
+    owner: root:root
+
 runcmd:
+  # Restart sshd so password auth takes effect (RHEL cloud images disable it by default)
+  - systemctl restart sshd
   # Basic firewall config - allow http + https + ssh
   - firewall-cmd --permanent --add-service=http
   - firewall-cmd --permanent --add-service=https

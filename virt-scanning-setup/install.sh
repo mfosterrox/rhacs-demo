@@ -207,7 +207,7 @@ display_summary() {
     echo ""
     echo "  1. Wait ~5 minutes for VM to boot, then connect via console:"
     echo "     $ virtctl console rhel-webserver -n default"
-    echo "     (login: cloud-user / MySecurePass123!)"
+    echo "     (login: cloud-user / redhat)"
     echo ""
     echo "  2. Optional: register RHEL subscription for vulnerability scanning:"
     echo "     $ sudo subscription-manager register --username <user> --password <pass> --auto-attach"
