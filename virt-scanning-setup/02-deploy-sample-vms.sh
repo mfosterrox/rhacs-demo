@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script: 02-deploy-sample-vms.sh
-# Description: Deploy a simple webserver VM into OpenShift with SSH access
+# Description: Deploy a simple webserver VM into OpenShift
 
 set -euo pipefail
 
@@ -58,26 +58,6 @@ check_prerequisites() {
         return 1
     fi
 
-    # Ensure SSH key exists for virtctl ssh
-    local ssh_key_file=""
-    if [ -n "${VM_SSH_PUBKEY:-}" ]; then
-        ssh_key_file="(VM_SSH_PUBKEY)"
-    elif [ -n "${VM_SSH_KEY_PATH:-}" ] && [ -f "${VM_SSH_KEY_PATH}" ]; then
-        ssh_key_file="${VM_SSH_KEY_PATH}"
-    elif [ -f "${HOME}/.ssh/id_ed25519.pub" ]; then
-        ssh_key_file="${HOME}/.ssh/id_ed25519.pub"
-    elif [ -f "${HOME}/.ssh/id_rsa.pub" ]; then
-        ssh_key_file="${HOME}/.ssh/id_rsa.pub"
-    fi
-
-    if [ -z "${ssh_key_file}" ]; then
-        print_info "No SSH key found; generating ed25519 key for virtctl ssh..."
-        mkdir -p "${HOME}/.ssh"
-        chmod 700 "${HOME}/.ssh"
-        ssh-keygen -t ed25519 -f "${HOME}/.ssh/id_ed25519" -N "" -C "rhacs-vm"
-        print_info "Generated ${HOME}/.ssh/id_ed25519"
-    fi
-    print_info "SSH: user / redhat (or use virtctl ssh with your key)"
     print_info "✓ Prerequisites met"
 }
 
@@ -85,18 +65,6 @@ check_prerequisites() {
 # Generate cloud-init for webserver VM
 #================================================================
 generate_cloudinit() {
-    local ssh_key_file=""
-    if [ -n "${VM_SSH_PUBKEY:-}" ]; then
-        ssh_key_file="/tmp/vm_ssh_pubkey_$$"
-        echo "${VM_SSH_PUBKEY:-}" > "${ssh_key_file}"
-    elif [ -n "${VM_SSH_KEY_PATH:-}" ] && [ -f "${VM_SSH_KEY_PATH}" ]; then
-        ssh_key_file="${VM_SSH_KEY_PATH}"
-    elif [ -f "${HOME}/.ssh/id_ed25519.pub" ]; then
-        ssh_key_file="${HOME}/.ssh/id_ed25519.pub"
-    elif [ -f "${HOME}/.ssh/id_rsa.pub" ]; then
-        ssh_key_file="${HOME}/.ssh/id_rsa.pub"
-    fi
-
     cat <<EOF
 #cloud-config
 hostname: ${VM_NAME}
@@ -106,32 +74,11 @@ users:
   - name: user
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
-EOF
-
-    if [ -n "${ssh_key_file}" ] && [ -f "${ssh_key_file}" ]; then
-        echo "    ssh_authorized_keys:"
-        while read -r key; do
-            [ -n "${key}" ] && echo "      - ${key}"
-        done < "${ssh_key_file}"
-        [ "${ssh_key_file}" = "/tmp/vm_ssh_pubkey_$$" ] && rm -f "${ssh_key_file}"
-    fi
-
-    cat <<EOF
-
-chpasswd:
-  expire: false
-  list:
-    - user:redhat
+    passwd: '\$6\$rhel9\$m89er/tVO6eGZRrFxq/flsNZJGfaozve4SkHdEWCWQs1NAzqC0Xg2ed5vyNu7WY7RGt3gV/FMf6cwaq5g/wbg0'
 EOF
 
     cat <<EOF
 runcmd:
-  # SSH: enable key and password auth
-  - sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-  - grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config || echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
-  - grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-  - systemctl restart sshd
   # Wait for network
   - until ping -c 1 8.8.8.8 &> /dev/null; do sleep 2; done
   # roxagent for RHACS
@@ -175,7 +122,7 @@ EOF
 
     cat <<EOF
 
-final_message: "VM ${VM_NAME} is ready. SSH: virtctl ssh -i ~/.ssh/id_ed25519 user@vmi/${VM_NAME} -n ${NAMESPACE}"
+final_message: "VM ${VM_NAME} is ready. Console: virtctl console ${VM_NAME} -n ${NAMESPACE}"
 EOF
 }
 
@@ -330,12 +277,10 @@ parse_arguments() {
                 cat <<EOF
 Usage: $0 [OPTIONS]
 
-Deploy a simple webserver VM into OpenShift with SSH access.
+Deploy a simple webserver VM into OpenShift.
 
-SSH in after boot to register subscription and run: sudo /root/install-packages.sh
-
-SSH: virtctl ssh -i ~/.ssh/id_ed25519 user@vmi/${VM_NAME} -n ${NAMESPACE}
-Login: user / redhat
+Console: virtctl console ${VM_NAME} -n ${NAMESPACE} (user/redhat)
+Then: sudo subscription-manager register ... && sudo /root/install-packages.sh
 
 EOF
                 exit 0
@@ -382,14 +327,14 @@ main() {
     echo ""
     print_info "VM will be ready in ~3-5 minutes."
     echo ""
-    print_info "SSH in, then run:"
+    print_info "Console access, then run:"
     echo ""
-    echo "  virtctl ssh -i ~/.ssh/id_ed25519 user@vmi/${VM_NAME} -n ${NAMESPACE}"
+    echo "  virtctl console ${VM_NAME} -n ${NAMESPACE}"
+    echo "  (login: user / redhat)"
     echo ""
     echo "  sudo subscription-manager register --username <user> --password <pass> --auto-attach"
     echo "  sudo /root/install-packages.sh"
     echo ""
-    print_info "Console fallback: virtctl console ${VM_NAME} -n ${NAMESPACE} (user/redhat)"
     print_info "Status: oc get vmi -n ${NAMESPACE}"
     echo ""
 }
