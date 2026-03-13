@@ -40,9 +40,6 @@ if [ ! -f "${CLOUD_INIT_FILE}" ]; then
     exit 1
 fi
 
-# Read cloud-init content (escape for JSON/YAML embedding)
-CLOUD_INIT_CONTENT=$(cat "${CLOUD_INIT_FILE}")
-
 # Check prerequisites
 if ! oc whoami &>/dev/null; then
     print_error "Not connected to OpenShift cluster"
@@ -74,10 +71,16 @@ if oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" &>/dev/null; then
     sleep 10
 fi
 
+# Create Secret for cloud-init (userData exceeds 2048 byte inline limit)
+CLOUD_INIT_SECRET="${VM_NAME}-cloud-init"
+print_step "Creating cloud-init secret ${CLOUD_INIT_SECRET}..."
+oc create secret generic "${CLOUD_INIT_SECRET}" -n "${VM_NAMESPACE}" \
+    --from-file=userdata="${CLOUD_INIT_FILE}" \
+    --dry-run=client -o yaml | oc apply -f -
+
 print_step "Creating VM ${VM_NAME} with cloud-init..."
 
-# Create VM with embedded cloud-init
-# Note: userData must be literal cloud-init YAML; we use a here-doc to avoid escaping issues
+# Create VM with userDataSecretRef (required when cloud-init > 2048 bytes)
 oc apply -f - <<EOF
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -137,8 +140,8 @@ spec:
             name: ${VM_NAME}
           name: rootdisk
         - cloudInitNoCloud:
-            userData: |
-$(echo "${CLOUD_INIT_CONTENT}" | sed 's/^/              /')
+            userDataSecretRef:
+              name: ${CLOUD_INIT_SECRET}
           name: cloudinitdisk
 EOF
 
