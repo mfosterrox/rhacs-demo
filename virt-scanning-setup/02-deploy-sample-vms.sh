@@ -142,6 +142,11 @@ spec:
         - cloudInitNoCloud:
             userDataSecretRef:
               name: ${CLOUD_INIT_SECRET}
+            networkData: |
+              version: 2
+              ethernets:
+                enp1s0:
+                  dhcp4: true
           name: cloudinitdisk
 EOF
 
