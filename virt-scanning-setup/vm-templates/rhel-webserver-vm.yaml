@@ -95,7 +95,6 @@ spec:
                   owner: root:root
 
               runcmd:
-                - sed -i 's/- set_passwords/- [set_passwords, once-per-instance]/' /etc/cloud/cloud.cfg || true
                 - rm -f /etc/ssh/sshd_config.d/50-cloud-init.conf || true
                 - systemctl restart sshd
                 - firewall-cmd --permanent --add-service=ssh || true
