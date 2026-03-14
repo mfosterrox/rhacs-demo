@@ -4,7 +4,7 @@ metadata:
   name: rhel-webserver
   namespace: default
   annotations:
-    description: RHEL webserver VM with reliable cloud-init password + subscription + httpd
+    description: Basic RHEL VM with password access (reset template)
   labels:
     app: rhel-webserver
     os.template.kubevirt.io/rhel9: "true"
@@ -67,20 +67,11 @@ spec:
                   shell: /bin/bash
 
               chpasswd:
-                users:
-                  - name: cloud-user
-                    password: redhat
-                    type: text
+                list: |
+                  cloud-user:redhat
                 expire: false
 
               ssh_pwauth: true
-
-              packages:
-                - httpd
-                - firewalld
-                - curl
-                - vim
-                - git
 
               write_files:
                 - path: /etc/ssh/sshd_config.d/zz-enable-password.conf
@@ -90,28 +81,13 @@ spec:
                   owner: root:root
 
               runcmd:
-                # Aggressive cleanup of regenerating SSH drop-in
                 - rm -f /etc/ssh/sshd_config.d/50-cloud-init.conf || true
                 - systemctl restart sshd
-
-                # Firewall
-                - firewall-cmd --permanent --add-service=ssh --add-service=http --add-service=https || true
+                - firewall-cmd --permanent --add-service=ssh || true
                 - firewall-cmd --reload || true
-
-                # Start services
-                - systemctl enable --now httpd firewalld sshd
-
-                # Repo fallback
-                - subscription-manager repos --enable=rhel-*-for-x86_64-baseos-rpms --enable=rhel-*-for-x86_64-appstream-rpms || true
-
-                # Reliable test page (fixed quoting)
-                - echo '<!DOCTYPE html><html><head><title>RHEL Web Server</title></head><body><h1>It works!</h1><p>Hostname: '"'"'$(hostname)'"'"'</p><p>IP: '"'"'$(hostname -I | awk '"'"'{print $1}'"'"')'"'"'</p></body></html>' > /var/www/html/index.html
-
-                # Debug logs
-                - subscription-manager status > /var/log/subscription-status.log 2>&1 || true
-                - echo "Cloud-init done" >> /var/log/cloud-init-test.log
+                - echo "Cloud-init basic setup completed" >> /var/log/cloud-init-test.log
 
               output:
                 all: |-
                   tee -a /var/log/cloud-init-output.log
-              final_message: "System up after $UPTIME seconds"
+              final_message: "System is up after $UPTIME seconds"
