@@ -102,7 +102,7 @@ main() {
 
     local patch_file
     patch_file=$(mktemp)
-    trap 'rm -f "${patch_file}"' EXIT
+    trap "rm -f '${patch_file}'" EXIT
 
     if [ -z "${has_mcpserver}" ] || [ -z "${has_stackrox}" ]; then
         # Build merge patch
@@ -116,7 +116,8 @@ main() {
         mcp_servers=$(echo "${olsconfig_json}" | jq -c '.spec.mcpServers // []')
         if [ -z "${has_stackrox}" ]; then
             local mcp_entry
-            mcp_entry=$(jq -n --arg url "${MCP_URL}" '{"name":"stackrox-mcp","streamableHTTP":{"url":$url,"enableSSE":false,"headers":{"authorization":"stackrox-mcp-authorization-header"},"sseReadTimeout":30,"timeout":60}}')
+            # OLSConfig mcpServers: name + url at top level (some versions use streamableHTTP.url)
+            mcp_entry=$(jq -n --arg url "${MCP_URL}" '{"name":"stackrox-mcp","url":$url}')
             mcp_servers=$(echo "${mcp_servers}" | jq -c --argjson entry "${mcp_entry}" '. + [$entry]')
         fi
 
