@@ -47,6 +47,19 @@ main() {
         echo ""
         print_info "Conditions:"
         oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}' 2>/dev/null || echo "  (none)"
+        local diag
+        diag=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.diagnosticInfo}' 2>/dev/null || echo "")
+        if [ -n "${diag}" ] && [ "${diag}" != "null" ]; then
+            echo ""
+            print_info "Diagnostic info (from operator):"
+            echo "${diag}" | jq -r '.' 2>/dev/null || echo "  ${diag}"
+        fi
+        # Also show diagnosticCount if present
+        local diag_count
+        diag_count=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.diagnosticCount}' 2>/dev/null || echo "")
+        if [ -n "${diag_count}" ] && [ "${diag_count}" != "0" ]; then
+            print_warn "diagnosticCount: ${diag_count} (failing pods)"
+        fi
         local ready
         ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
         if [ "${ready}" = "False" ]; then
@@ -100,6 +113,17 @@ main() {
                 echo "    ${line}"
             done
             ((issues++))
+            # Show details for failing pods
+            local failing_pods
+            failing_pods=$(oc get pods -n "${LIGHTSPEED_NAMESPACE}" --no-headers 2>/dev/null | grep -v "Running\|Completed" | awk '{print $1}')
+            for pod in ${failing_pods}; do
+                echo ""
+                print_info "Details for failing pod: ${pod}"
+                oc describe pod "${pod}" -n "${LIGHTSPEED_NAMESPACE}" 2>/dev/null | tail -30 || true
+                echo ""
+                print_info "Recent logs from ${pod}:"
+                oc logs "${pod}" -n "${LIGHTSPEED_NAMESPACE}" --tail=20 2>/dev/null || oc logs "${pod}" -n "${LIGHTSPEED_NAMESPACE}" -c ols --tail=20 2>/dev/null || true
+            done
         fi
     fi
     echo ""

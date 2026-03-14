@@ -195,6 +195,24 @@ oc delete operatorgroup lightspeed-operator-group -n openshift-lightspeed --igno
 3. Manually enable: `./02-verify-console-integration.sh`
 4. Refresh the browser (hard refresh: Ctrl+Shift+R)
 
+### "deployment has failing pods" / Reconciler error
+
+The operator logs "deployment has failing pods, see status.diagnosticInfo for details". Run:
+
+```bash
+./lightspeed-setup/04-diagnose-olsconfig.sh
+```
+
+Then inspect the failing pod:
+
+```bash
+oc get pods -n openshift-lightspeed
+oc describe pod <failing-pod> -n openshift-lightspeed
+oc logs <failing-pod> -n openshift-lightspeed --tail=50
+```
+
+Common causes: image pull errors (check `oc describe pod` Events), OOMKilled, CrashLoopBackOff (often LLM connectivity or invalid API key).
+
 ### "Waiting for OpenShift Lightspeed service" / service not ready
 
 Run the diagnostic script:
@@ -209,6 +227,15 @@ It checks OLSConfig status, credentials secret, pods, and operator logs. Common 
 2. **Invalid or missing API key** – Re-run `./03-create-olsconfig.sh` with a valid token.
 3. **Wrong provider config** – For Azure: verify `deploymentName` and `apiVersion`. For Watsonx: verify `projectID`. For OpenAI: verify URL is `https://api.openai.com/v1`.
 4. **Network / egress** – Ensure the cluster can reach your LLM provider (OpenAI, Azure, etc.).
+
+### 429 / insufficient_quota (OpenAI)
+
+Logs show: `Error code: 429 - insufficient_quota` or "You exceeded your current quota". Your OpenAI API key has no remaining quota or billing is not set up.
+
+**Fix:**
+1. Check [OpenAI usage and billing](https://platform.openai.com/usage)
+2. Add payment method or upgrade plan at [platform.openai.com](https://platform.openai.com)
+3. Or switch to a different LLM provider (Azure OpenAI, Watsonx, OpenShift AI) via `./03-create-olsconfig.sh`
 
 ### Lightspeed chat not working
 
