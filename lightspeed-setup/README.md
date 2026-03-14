@@ -40,10 +40,12 @@ cd lightspeed-setup
 
 **What happens:**
 1. Installs the OpenShift Lightspeed Operator from OperatorHub
-2. Enables the Lightspeed console plugin in the OpenShift web console
+2. Enables the Lightspeed console plugin (after OLSConfig is created)
 3. Operator deploys to `openshift-lightspeed` namespace
 
-**Time:** ~5 minutes
+**Important:** The "Ask OpenShift Lightspeed" button only appears **after** you create OLSConfig with your LLM provider. The operator creates the ConsolePlugin when OLSConfig exists.
+
+**Time:** ~5 minutes for operator; add 2-3 min after OLSConfig for console integration
 
 ## Setup Scripts
 
@@ -52,12 +54,27 @@ cd lightspeed-setup
 | `install.sh` | Main orchestrator - runs all setup scripts |
 | `01-install-lightspeed-operator.sh` | Installs OpenShift Lightspeed Operator via OLM |
 | `02-verify-console-integration.sh` | Enables Lightspeed ConsolePlugin in OpenShift console |
+| `03-create-olsconfig.sh` | Creates OLSConfig + credentials secret (triggers ConsolePlugin) |
 
-## Configuring an LLM Provider
+## Configuring an LLM Provider (Required for Console Integration)
 
-The operator does **not** install an LLM provider. You must create an `OLSConfig` custom resource with your provider credentials.
+The operator does **not** install an LLM provider. You must create an `OLSConfig` custom resource. **This is required for the "Ask OpenShift Lightspeed" button to appear**—the ConsolePlugin is only created after OLSConfig exists.
 
-### 1. Create a credentials secret
+### Quick: Use the helper script (interactive)
+
+```bash
+# Prompts for API token, provider type, model, and URL
+./03-create-olsconfig.sh
+
+# Or non-interactive with env vars
+export OPENAI_API_KEY='sk-your-key-here'
+./03-create-olsconfig.sh
+
+# Wait 2-3 minutes, then enable console integration
+./02-verify-console-integration.sh
+```
+
+### Manual: Create a credentials secret
 
 ```bash
 # Example: OpenAI API token
@@ -77,14 +94,18 @@ metadata:
   name: cluster
   namespace: openshift-lightspeed
 spec:
-  llmProviders:
-    - name: openai
-      type: openai
-      url: https://api.openai.com/v1
-      credentialsSecretRef:
-        name: llm-credentials
-      models:
-        - name: gpt-4
+  llm:
+    providers:
+      - name: openai
+        type: openai
+        url: https://api.openai.com/v1
+        credentialsSecretRef:
+          name: llm-credentials
+        models:
+          - name: gpt-4o-mini
+  ols:
+    defaultProvider: openai
+    defaultModel: gpt-4o-mini
 ```
 
 Apply it:

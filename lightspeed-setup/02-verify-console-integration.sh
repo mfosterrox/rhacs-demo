@@ -1,6 +1,7 @@
 #!/bin/bash
 
-set -euo pipefail
+set -uo pipefail
+# Note: 'e' disabled - we handle failures gracefully; plugin may not exist until OLSConfig is created
 
 # Colors for output
 RED='\033[0;31m'
@@ -37,17 +38,15 @@ get_lightspeed_console_plugin_name() {
         fi
     done
     # Fallback: search by displayName
-    if command -v jq &>/dev/null && oc get consoleplugins -o json &>/dev/null; then
+    if command -v jq &>/dev/null; then
         oc get consoleplugins -o json 2>/dev/null | jq -r '
-            .items[] | select(
-                .metadata.name | test("lightspeed|ols"; "i") or
-                (.spec.displayName != null and (
-                    (.spec.displayName | ascii_downcase | test("lightspeed")) or
-                    (.spec.displayName | ascii_downcase | test("openshift lightspeed"))
-                ))
+            .items[]? | select(
+                (.metadata.name | test("lightspeed|ols"; "i")) or
+                (.spec.displayName != null and (.spec.displayName | test("lightspeed|ols"; "i")))
             ) | .metadata.name
         ' 2>/dev/null | head -1
     fi
+    return 0
 }
 
 # Function to ensure OpenShift Lightspeed Console plugin is enabled
@@ -63,8 +62,20 @@ ensure_lightspeed_console_plugin_enabled() {
     plugin_name=$(get_lightspeed_console_plugin_name)
     if [ -z "${plugin_name}" ]; then
         print_warn "OpenShift Lightspeed ConsolePlugin not found"
-        print_info "The operator may not have created the plugin yet (wait a few minutes after install)"
-        print_info "Or the operator may register it automatically when OLSConfig is created"
+        print_info ""
+        print_info "The ConsolePlugin is created only AFTER you create an OLSConfig with your LLM provider."
+        print_info "Without OLSConfig, the 'Ask OpenShift Lightspeed' button will not appear."
+        print_info ""
+        print_info "To fix:"
+        print_info "  1. Create a credentials secret and OLSConfig (see lightspeed-setup/README.md)"
+        print_info "  2. Wait 2-3 minutes for the operator to create the ConsolePlugin"
+        print_info "  3. Re-run: ./lightspeed-setup/02-verify-console-integration.sh"
+        print_info ""
+        if ! oc get olsconfig cluster -n openshift-lightspeed &>/dev/null; then
+            print_info "Current status: OLSConfig 'cluster' not found in openshift-lightspeed"
+        else
+            print_info "Current status: OLSConfig exists - plugin may still be deploying (wait and re-run)"
+        fi
         return 0
     fi
 

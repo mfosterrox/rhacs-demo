@@ -73,11 +73,13 @@ main() {
         exit 1
     fi
     print_info "Executing: 02-verify-console-integration.sh"
-    if ! bash "${SCRIPT_DIR}/02-verify-console-integration.sh"; then
-        print_error "Console integration setup failed"
-        exit 1
+    if bash "${SCRIPT_DIR}/02-verify-console-integration.sh"; then
+        print_info "✓ Console integration complete"
+    else
+        print_warn "Console integration skipped or incomplete"
+        print_info "The ConsolePlugin may appear after creating OLSConfig with your LLM provider"
+        print_info "Re-run: ./lightspeed-setup/02-verify-console-integration.sh"
     fi
-    print_info "✓ Console integration complete"
     echo ""
 
     # Summary
