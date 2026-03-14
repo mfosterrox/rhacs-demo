@@ -1,8 +1,7 @@
-# RHEL webserver VM - apply directly: oc apply -f vm-templates/rhel-webserver-vm.yaml
-# Requires: OpenShift Virtualization, registry.redhat.io pull secret (for image), RHACS (for VSOCK)
-# Start: virtctl start rhel-webserver -n default
+# RHEL webserver VM - apply via: ./02-deploy-sample-vms.sh (requires RH_USERNAME/RH_PASSWORD)
+# Or apply directly after substituting <YOUR_REDHAT_USERNAME> and <YOUR_REDHAT_PASSWORD>
+# Requires: OpenShift Virtualization, registry.redhat.io pull secret, RHACS (for VSOCK)
 # Console: virtctl console rhel-webserver -n default (login: cloud-user / redhat)
-# Note: Change image to rhel10/rhel-guest-image:latest if RHEL 10 is available
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
@@ -12,7 +11,7 @@ metadata:
     description: RHEL webserver VM with cloud-init password access + auto-subscription + basic httpd
   labels:
     app: rhel-webserver
-    os.template.kubevirt.io/rhel9: "true"  # update to rhel10 if using RHEL 10 image
+    os.template.kubevirt.io/rhel9: "true"
 spec:
   runStrategy: Always
   template:
@@ -31,7 +30,7 @@ spec:
           sockets: 1
           threads: 1
         devices:
-          autoattachVSOCK: true  # Required for roxagent vsock communication
+          autoattachVSOCK: true
           disks:
             - disk:
                 bus: virtio
@@ -55,7 +54,7 @@ spec:
       volumes:
         - name: rootdisk
           containerDisk:
-            image: registry.redhat.io/rhel9/rhel-guest-image:latest  # or :rhel10/... if available
+            image: registry.redhat.io/rhel9/rhel-guest-image:latest
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |-
@@ -77,19 +76,16 @@ spec:
 
               ssh_pwauth: true
 
-              # Auto-register with Red Hat Subscription Manager using username/password
               rh_subscription:
-                username: <YOUR_REDHAT_USERNAME>          # e.g., michael.foster@example.com
-                password: <YOUR_REDHAT_PASSWORD>          # Quote if special chars: 'P@ssw0rd!'
-                # auto_attach: true                       # Optional: auto-attach available subscriptions
+                username: <YOUR_REDHAT_USERNAME>
+                password: <YOUR_REDHAT_PASSWORD>
 
-              # Install basic web server packages
               packages:
-                - httpd               # Apache web server
-                - firewalld           # Firewall management
-                - curl                # For testing connectivity
-                - vim                 # Basic editor
-                - git                 # Version control (useful for web content)
+                - httpd
+                - firewalld
+                - curl
+                - vim
+                - git
 
               write_files:
                 - path: /etc/ssh/sshd_config.d/zz-enable-password.conf
@@ -98,44 +94,24 @@ spec:
                   permissions: '0600'
                   owner: root:root
 
-                # Simple welcome page to verify web server works
-                - path: /var/www/html/index.html
-                  content: |
-                    <!DOCTYPE html>
-                    <html lang="en">
-                    <head>
-                      <meta charset="UTF-8">
-                      <title>RHEL Web Server - Cloud-Init Deployed</title>
-                    </head>
-                    <body>
-                      <h1>It works!</h1>
-                      <p>This is a basic RHEL web server deployed via cloud-init on OpenShift Virtualization.</p>
-                      <p>Hostname: <strong>$(hostname)</strong></p>
-                      <p>IP: <strong>$(hostname -I | awk '{print $1}')</strong></p>
-                      <p>Generated at boot time.</p>
-                    </body>
-                    </html>
-                  permissions: '0644'
-                  owner: root:root
-
               runcmd:
-                # Clean up conflicting cloud-init SSH drop-in
+                - sed -i 's/- set_passwords/- [set_passwords, once-per-instance]/' /etc/cloud/cloud.cfg || true
                 - rm -f /etc/ssh/sshd_config.d/50-cloud-init.conf || true
                 - systemctl restart sshd
-
-                # Firewall configuration
                 - firewall-cmd --permanent --add-service=ssh || true
                 - firewall-cmd --permanent --add-service=http || true
                 - firewall-cmd --permanent --add-service=https || true
                 - firewall-cmd --reload || true
-
-                # Start and enable web server
                 - systemctl enable --now httpd
-
-                # Post-registration: ensure key repos are enabled
                 - subscription-manager repos --enable=rhel-*-for-x86_64-baseos-rpms --enable=rhel-*-for-x86_64-appstream-rpms || true
-
-                - echo "Cloud-init completed - web server should be running" >> /var/log/cloud-init-test.log
+                - |
+                  echo '<!DOCTYPE html>
+                  <html><head><title>RHEL Web Server</title></head><body>
+                  <h1>It works!</h1>
+                  <p>Hostname: '"$(hostname)"'</p>
+                  <p>IP: '"$(hostname -I | awk "{print \$1}")"'</p>
+                  </body></html>' > /var/www/html/index.html
+                - echo "Cloud-init completed - web server running" >> /var/log/cloud-init-test.log
 
               output:
                 all: |-
