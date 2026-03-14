@@ -143,6 +143,20 @@ Run scripts individually for testing or troubleshooting:
 
 ## Troubleshooting
 
+### "AllNamespaces InstallModeType not supported" error
+
+The OpenShift Lightspeed Operator does not support cluster-wide (AllNamespaces) installation. The install script uses `targetNamespaces: [openshift-lightspeed]` so the operator only watches its own namespace.
+
+If you previously had a failed install, clean up and re-run:
+
+```bash
+oc delete subscription lightspeed-operator -n openshift-lightspeed --ignore-not-found
+oc delete operatorgroup lightspeed-operator-group -n openshift-lightspeed --ignore-not-found
+# Wait for CSV to be removed, or delete the namespace for a clean slate:
+# oc delete namespace openshift-lightspeed
+./lightspeed-setup/install.sh
+```
+
 ### Operator not found in OperatorHub
 
 - **OpenShift version**: Lightspeed requires OpenShift 4.15+

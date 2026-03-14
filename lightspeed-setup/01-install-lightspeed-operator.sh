@@ -116,7 +116,7 @@ install_lightspeed_operator() {
     fi
     print_info "Using channel: ${channel}"
 
-    # Create OperatorGroup (target all namespaces for cluster-wide install)
+    # Create OperatorGroup (target openshift-lightspeed only - operator does not support AllNamespaces)
     print_info "Creating OperatorGroup..."
     if ! cat <<EOF | oc apply -f -
 apiVersion: operators.coreos.com/v1
@@ -125,7 +125,8 @@ metadata:
   name: lightspeed-operator-group
   namespace: ${LIGHTSPEED_NAMESPACE}
 spec:
-  targetNamespaces: []
+  targetNamespaces:
+    - ${LIGHTSPEED_NAMESPACE}
 EOF
     then
         print_error "Failed to create OperatorGroup"
