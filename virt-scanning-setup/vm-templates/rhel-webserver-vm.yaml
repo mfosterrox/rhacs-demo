@@ -1,14 +1,11 @@
-# RHEL webserver VM - apply via: ./02-deploy-sample-vms.sh (requires RH_USERNAME/RH_PASSWORD)
-# Or apply directly after substituting <YOUR_REDHAT_USERNAME> and <YOUR_REDHAT_PASSWORD>
-# Requires: OpenShift Virtualization, registry.redhat.io pull secret, RHACS (for VSOCK)
-# Console: virtctl console rhel-webserver -n default (login: cloud-user / redhat)
+# RHEL webserver VM - apply via: ./02-deploy-sample-vms.sh (substitute placeholders!)
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: rhel-webserver
   namespace: default
   annotations:
-    description: RHEL webserver VM with cloud-init password access + auto-subscription + basic httpd
+    description: RHEL webserver VM with reliable cloud-init password + subscription + httpd
   labels:
     app: rhel-webserver
     os.template.kubevirt.io/rhel9: "true"
@@ -68,10 +65,13 @@ spec:
                   lock_passwd: false
                   sudo: ALL=(ALL) NOPASSWD:ALL
                   groups: wheel
+                  shell: /bin/bash
 
               chpasswd:
-                list: |
-                  cloud-user:redhat
+                users:
+                  - name: cloud-user
+                    password: redhat
+                    type: text
                 expire: false
 
               ssh_pwauth: true
@@ -79,6 +79,7 @@ spec:
               rh_subscription:
                 username: <YOUR_REDHAT_USERNAME>
                 password: <YOUR_REDHAT_PASSWORD>
+                auto_attach: true
 
               packages:
                 - httpd
@@ -95,24 +96,28 @@ spec:
                   owner: root:root
 
               runcmd:
+                # Aggressive cleanup of regenerating SSH drop-in
                 - rm -f /etc/ssh/sshd_config.d/50-cloud-init.conf || true
                 - systemctl restart sshd
-                - firewall-cmd --permanent --add-service=ssh || true
-                - firewall-cmd --permanent --add-service=http || true
-                - firewall-cmd --permanent --add-service=https || true
+
+                # Firewall
+                - firewall-cmd --permanent --add-service=ssh --add-service=http --add-service=https || true
                 - firewall-cmd --reload || true
-                - systemctl enable --now httpd
+
+                # Start services
+                - systemctl enable --now httpd firewalld sshd
+
+                # Repo fallback
                 - subscription-manager repos --enable=rhel-*-for-x86_64-baseos-rpms --enable=rhel-*-for-x86_64-appstream-rpms || true
-                - |
-                  echo '<!DOCTYPE html>
-                  <html><head><title>RHEL Web Server</title></head><body>
-                  <h1>It works!</h1>
-                  <p>Hostname: '"$(hostname)"'</p>
-                  <p>IP: '"$(hostname -I | awk "{print \$1}")"'</p>
-                  </body></html>' > /var/www/html/index.html
-                - echo "Cloud-init completed - web server running" >> /var/log/cloud-init-test.log
+
+                # Reliable test page (fixed quoting)
+                - echo '<!DOCTYPE html><html><head><title>RHEL Web Server</title></head><body><h1>It works!</h1><p>Hostname: '"'"'$(hostname)'"'"'</p><p>IP: '"'"'$(hostname -I | awk '"'"'{print $1}'"'"')'"'"'</p></body></html>' > /var/www/html/index.html
+
+                # Debug logs
+                - subscription-manager status > /var/log/subscription-status.log 2>&1 || true
+                - echo "Cloud-init done" >> /var/log/cloud-init-test.log
 
               output:
                 all: |-
                   tee -a /var/log/cloud-init-output.log
-              final_message: "System is up after $UPTIME seconds"
+              final_message: "System up after $UPTIME seconds"
