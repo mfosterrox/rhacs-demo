@@ -55,6 +55,7 @@ cd lightspeed-setup
 | `01-install-lightspeed-operator.sh` | Installs OpenShift Lightspeed Operator via OLM |
 | `02-verify-console-integration.sh` | Enables Lightspeed ConsolePlugin in OpenShift console |
 | `03-create-olsconfig.sh` | Creates OLSConfig + credentials secret (triggers ConsolePlugin) |
+| `04-diagnose-olsconfig.sh` | Diagnose OLSConfig / "service not ready" issues |
 
 ## Configuring an LLM Provider (Required for Console Integration)
 
@@ -194,11 +195,27 @@ oc delete operatorgroup lightspeed-operator-group -n openshift-lightspeed --igno
 3. Manually enable: `./02-verify-console-integration.sh`
 4. Refresh the browser (hard refresh: Ctrl+Shift+R)
 
+### "Waiting for OpenShift Lightspeed service" / service not ready
+
+Run the diagnostic script:
+
+```bash
+./lightspeed-setup/04-diagnose-olsconfig.sh
+```
+
+It checks OLSConfig status, credentials secret, pods, and operator logs. Common causes:
+
+1. **Pods still starting** – Wait 2–5 minutes after creating OLSConfig. The service needs time to deploy.
+2. **Invalid or missing API key** – Re-run `./03-create-olsconfig.sh` with a valid token.
+3. **Wrong provider config** – For Azure: verify `deploymentName` and `apiVersion`. For Watsonx: verify `projectID`. For OpenAI: verify URL is `https://api.openai.com/v1`.
+4. **Network / egress** – Ensure the cluster can reach your LLM provider (OpenAI, Azure, etc.).
+
 ### Lightspeed chat not working
 
-- Verify OLSConfig is created and has no errors: `oc get olsconfig -A`
+- Run diagnostics: `./lightspeed-setup/04-diagnose-olsconfig.sh`
+- Verify OLSConfig: `oc get olsconfig -A` and `oc describe olsconfig cluster -n openshift-lightspeed`
 - Check operator logs: `oc logs -n openshift-lightspeed -l control-plane=controller-manager -f`
-- Ensure LLM provider credentials are valid
+- Ensure LLM provider credentials are valid and have quota
 
 ## References
 

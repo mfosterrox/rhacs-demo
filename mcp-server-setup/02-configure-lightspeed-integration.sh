@@ -102,7 +102,7 @@ main() {
 
     local patch_file
     patch_file=$(mktemp)
-    trap "rm -f '${patch_file}'" EXIT
+    trap 'rm -f "${patch_file}"' EXIT
 
     if [ -z "${has_mcpserver}" ] || [ -z "${has_stackrox}" ]; then
         # Build merge patch
@@ -116,28 +116,15 @@ main() {
         mcp_servers=$(echo "${olsconfig_json}" | jq -c '.spec.mcpServers // []')
         if [ -z "${has_stackrox}" ]; then
             local mcp_entry
-            mcp_entry=$(jq -n \
-                --arg url "${MCP_URL}" \
-                '{
-                    name: "stackrox-mcp",
-                    streamableHTTP: {
-                        url: $url,
-                        enableSSE: false,
-                        headers: { authorization: "stackrox-mcp-authorization-header" },
-                        sseReadTimeout: 30,
-                        timeout: 60
-                    }
-                }')
+            mcp_entry=$(jq -n --arg url "${MCP_URL}" '{"name":"stackrox-mcp","streamableHTTP":{"url":$url,"enableSSE":false,"headers":{"authorization":"stackrox-mcp-authorization-header"},"sseReadTimeout":30,"timeout":60}}')
             mcp_servers=$(echo "${mcp_servers}" | jq -c --argjson entry "${mcp_entry}" '. + [$entry]')
         fi
 
-        jq -n \
-            --argjson fg "${feature_gates}" \
-            --argjson mcp "${mcp_servers}" \
-            '{spec: {featureGates: $fg, mcpServers: $mcp}}' > "${patch_file}"
+        echo "{\"spec\":{\"featureGates\":${feature_gates},\"mcpServers\":${mcp_servers}}}" > "${patch_file}"
 
+        patch_content=$(cat "${patch_file}")
         oc patch olsconfig "${OLS_CONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
-            --type=merge -p "$(cat "${patch_file})"
+            --type=merge -p "${patch_content}"
         print_info "✓ OLSConfig patched with StackRox MCP server"
     else
         print_info "✓ OLSConfig already has StackRox MCP integration"
