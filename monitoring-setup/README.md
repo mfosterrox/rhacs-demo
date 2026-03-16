@@ -333,6 +333,22 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 
 ## Troubleshooting
 
+### Issue: Dashboard shows "No data"
+
+Run the debug script to test connectivity at each step (RHACS → Prometheus → Perses):
+
+```bash
+cd monitoring-setup
+export ROX_CENTRAL_URL="https://your-central-url"
+./debug-monitoring.sh
+```
+
+Key checks:
+- **Client cert auth**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/v1/auth/status`
+- **Metrics endpoint**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics | head -20`
+- **Prometheus targets**: `oc port-forward -n stackrox svc/sample-stackrox-monitoring-stack-prometheus 9090:9090` then open http://localhost:9090/targets
+- **Enable metrics**: Policy violations, image/node vulnerabilities are disabled by default. Enable in RHACS: **Platform Configuration → System Configuration → Prometheus metrics**
+
 ### Issue: Client certificate authentication fails with "credentials not found"
 
 **Symptoms:** `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/v1/auth/status` returns `{"code":16, "message":"credentials not found"}`
@@ -440,6 +456,7 @@ monitoring-setup/
 ├── 01-setup-certificates.sh            # Certificate generation
 ├── 02-install-monitoring.sh            # Monitoring stack installation
 ├── 03-configure-rhacs-auth.sh          # RHACS auth configuration
+├── debug-monitoring.sh                 # Debug "No data" on dashboard
 ├── troubleshoot-auth.sh                # Authentication troubleshooting
 ├── reset.sh                            # Cleanup script
 └── monitoring-examples/                # Configuration examples
