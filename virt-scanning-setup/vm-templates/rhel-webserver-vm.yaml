@@ -2,20 +2,13 @@ apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: rhel-webserver
-  namespace: default  # change if needed
-  annotations:
-    description: RHEL webserver VM with cloud-init password access
+  namespace: default
   labels:
     app: rhel-webserver
-    os.template.kubevirt.io/rhel10: 'true' 
 spec:
   runStrategy: Always  
   template:
     metadata:
-      annotations:
-        vm.kubevirt.io/flavor: small
-        vm.kubevirt.io/os: rhel10
-        vm.kubevirt.io/workload: server
       labels:
         kubevirt.io/domain: rhel-webserver
         kubevirt.io/size: small
@@ -26,8 +19,10 @@ spec:
           sockets: 1
           threads: 1
         devices:
+          autoattachVSOCK: true
           disks:
-            - disk:
+            - bootOrder: 1
+              disk:
                 bus: virtio
               name: rootdisk
             - disk:
@@ -37,50 +32,56 @@ spec:
             - masquerade: {}
               model: virtio
               name: default
-          networkInterfaceMultiqueue: true
           rng: {}
+        features:
+          acpi: {}
+          smm:
+            enabled: true
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: pc-q35-rhel9.6.0   # Matches RHEL 9/10 compat
         memory:
           guest: 2Gi
-      hostname: rhel-web-01
       networks:
         - name: default
           pod: {}
       terminationGracePeriodSeconds: 180
       volumes:
-        - name: rootdisk
-          containerDisk:
-            image: registry.redhat.io/rhel10/rhel-guest-image  # add :10.0 or :latest if pulls fail
-        - name: cloudinitdisk
-          cloudInitNoCloud:
+        - dataVolume:
+            name: rhel-webserver   # Will create/manage the PVC
+          name: rootdisk
+        - cloudInitNoCloud:
             userData: |-
-                  #cloud-config
-                  hostname: rhel-web-01
-                  fqdn: rhel-web-01.example.local
-            
-                  users:
-                    - default   # preserves cloud-user
-            
-                  chpasswd:
-                    list: |
-                      cloud-user: redhat
-                    expire: false
-            
-                  ssh_pwauth: true
-            
-                  # High-priority override for SSH (lex order: 05- beats 50-)
-                  write_files:
-                    - path: /etc/ssh/sshd_config.d/05-force-password.conf
-                      content: |
-                        PasswordAuthentication yes
-                      permissions: '0600'
-                      owner: root:root
-            
-                  runcmd:
-                    - systemctl restart sshd
-                    - firewall-cmd --permanent --add-service=ssh || true
-                    - firewall-cmd --reload || true
-                    - echo "Cloud-init ran - check /var/log/cloud-init.log" > /var/log/cloud-init-status.log
-                    - sshd -T | grep -i passwordauthentication >> /var/log/cloud-init-status.log  # debug SSH effective config
-                    - grep cloud-user /etc/shadow >> /var/log/cloud-init-status.log  # debug: show if password hash set
-            
-                  final_message: "cloud-init finished - try console/SSH as cloud-user:redhat"
+              #cloud-config
+              user: cloud-user
+              password: redhat
+              chpasswd: { expire: False }
+              runcmd:
+                - sudo subscription-manager register --username=$SUBSCRIPTION_USERNAME --password="$SUBSCRIPTION_PASSWORD"
+                - sudo subscription-manager release --set=9.4
+                - |
+                  sudo subscription-manager repos \
+                    --enable=rhel-9-for-x86_64-baseos-eus-rpms \
+                    --enable=rhel-9-for-x86_64-appstream-eus-rpms
+                - sudo dnf clean all
+                - sudo dnf update -y
+                - curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.9.0/bin/linux/roxagent
+                - chmod +x /tmp/roxagent
+                - sudo mv /tmp/roxagent /usr/local/bin/roxagent
+          name: cloudinitdisk
+  dataVolumeTemplates:
+    - apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      metadata:
+        name: rhel-webserver
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: rhel9
+          namespace: openshift-virtualization-os-images
+        storage:
+          resources:
+            requests:
+              storage: 30Gi

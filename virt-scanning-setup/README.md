@@ -195,6 +195,18 @@ DEPLOY_SAMPLE_VMS=false ./install.sh
 DEPLOY_BASE_VM=false DEPLOY_SAMPLE_VMS=false ./install.sh
 ```
 
+### Red Hat Subscription Credentials
+
+The VM deploy script prompts for Red Hat subscription credentials to entitle the VM for vulnerability scanning. Credentials are used only at deploy time and are **not stored in any file**.
+
+```bash
+# Interactive: you will be prompted for username and password
+./install.sh
+
+# Non-interactive: set env vars (e.g. for automation)
+SUBSCRIPTION_USERNAME="your-rh-username" SUBSCRIPTION_PASSWORD="your-rh-password" ./install.sh
+```
+
 ### Individual VM Deployment Options
 
 Customize VM deployment with environment variables:

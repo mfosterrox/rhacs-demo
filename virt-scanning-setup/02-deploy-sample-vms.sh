@@ -34,6 +34,21 @@ if [ ! -f "${VM_TEMPLATE}" ]; then
     exit 1
 fi
 
+# Prompt for Red Hat subscription credentials (for VM entitlement)
+if [ -z "${SUBSCRIPTION_USERNAME:-}" ]; then
+    echo ""
+    print_step "Red Hat subscription credentials (to entitle the VM for vulnerability scanning)"
+    print_info "Credentials are used only at deploy time and are not stored in any file."
+    read -r -p "Red Hat username: " SUBSCRIPTION_USERNAME
+    [ -z "${SUBSCRIPTION_USERNAME}" ] && { print_error "Username is required"; exit 1; }
+fi
+if [ -z "${SUBSCRIPTION_PASSWORD:-}" ]; then
+    read -r -s -p "Red Hat password: " SUBSCRIPTION_PASSWORD
+    echo ""
+    [ -z "${SUBSCRIPTION_PASSWORD}" ] && { print_error "Password is required"; exit 1; }
+fi
+export SUBSCRIPTION_USERNAME SUBSCRIPTION_PASSWORD
+
 print_info "VM: ${VM_NAME} in namespace ${VM_NAMESPACE}"
 echo ""
 
@@ -51,13 +66,13 @@ if oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" &>/dev/null; then
     sleep 10
 fi
 
-# Extract cloud-init userData from VM template
+# Extract cloud-init userData from VM template and substitute credentials
 print_step "Preparing cloud-init..."
 CLOUD_INIT_CONTENT=$(awk '
     /userData: \|-/ { in_block=1; next }
     in_block && /^[ ]{0,12}[^ ]/ { exit }
     in_block { gsub(/^              /, ""); print }
-' "${VM_TEMPLATE}")
+' "${VM_TEMPLATE}" | envsubst '$SUBSCRIPTION_USERNAME $SUBSCRIPTION_PASSWORD')
 
 # Create cloud-init secret (userData exceeds 2048 byte inline limit)
 CLOUD_INIT_SECRET="${VM_NAME}-cloud-init"

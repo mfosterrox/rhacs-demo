@@ -4,7 +4,12 @@
 # Description: Configure RHACS for virtual machine vulnerability management
 #
 # This script implements the official RHACS VM scanning requirements:
-# 1. Sets ROX_VIRTUAL_MACHINES=true on Central, Sensor, and Collector
+# 1. Sets ROX_VIRTUAL_MACHINES=true on:
+#    - Central container in the Central pod
+#    - Sensor container in the Sensor pod
+#    - Compliance container in the Collector pod
+#    Patches Central CR and SecuredCluster CR (operator-managed) for permanent changes.
+#    Falls back to deployment/daemonset patch if CRs not found (e.g. Helm install).
 # 2. Verifies OpenShift Virtualization operator is installed
 # 3. Enables VSOCK support via HyperConverged resource
 # 4. Provides VM configuration instructions
@@ -39,90 +44,185 @@ readonly RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 readonly CNV_NAMESPACE="openshift-cnv"
 
 #================================================================
-# Patch Central deployment
+# Get Central CR name (operator-managed)
+#================================================================
+get_central_cr_name() {
+    oc get central -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+}
+
+#================================================================
+# Patch Central via operator CR (permanent) or deployment (fallback)
 #================================================================
 patch_central_deployment() {
-    print_step "1. Patching Central deployment with ROX_VIRTUAL_MACHINES feature flag"
+    print_step "1. Setting ROX_VIRTUAL_MACHINES=true on Central"
     
-    # Check if already set
-    local current_value=$(oc get deployment central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+    local central_cr_name
+    central_cr_name=$(get_central_cr_name)
     
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Central already has ROX_VIRTUAL_MACHINES=true"
-        return 0
+    if [ -n "${central_cr_name}" ]; then
+        # Operator-managed: patch Central CR for permanent changes
+        local current_env
+        current_env=$(oc get central "${central_cr_name}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.deployment.customize.env}' 2>/dev/null || echo "[]")
+        
+        if echo "${current_env}" | grep -q "ROX_VIRTUAL_MACHINES"; then
+            print_info "✓ Central CR already has ROX_VIRTUAL_MACHINES in customize.env"
+        else
+            print_info "Patching Central CR (${central_cr_name}) with ROX_VIRTUAL_MACHINES=true..."
+            # Merge patch - adds/updates ROX_VIRTUAL_MACHINES in Central CR
+            oc patch central "${central_cr_name}" -n "${RHACS_NAMESPACE}" --type=merge -p '{
+              "spec": {
+                "central": {
+                  "deployment": {
+                    "customize": {
+                      "env": [
+                        {"name": "ROX_VIRTUAL_MACHINES", "value": "true"}
+                      ]
+                    }
+                  }
+                }
+              }
+            }'
+            print_info "✓ Central CR patched (operator will reconcile)"
+        fi
+    else
+        # Fallback: direct deployment patch (may be overwritten by operator)
+        local current_value
+        current_value=$(oc get deployment central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+        
+        if [ "${current_value}" = "true" ]; then
+            print_info "✓ Central deployment already has ROX_VIRTUAL_MACHINES=true"
+        else
+            print_warn "No Central CR found - patching deployment directly (changes may be overwritten by operator)"
+            oc set env deployment/central -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
+        fi
     fi
     
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Central deployment..."
-    
-    # Patch the deployment
-    oc set env deployment/central -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
-    
-    # Wait for rollout
-    print_info "Waiting for Central to restart..."
+    print_info "Waiting for Central to reconcile/restart..."
     oc rollout status deployment/central -n ${RHACS_NAMESPACE} --timeout=5m
     
-    print_info "✓ Central deployment patched successfully"
+    print_info "✓ Central configured with ROX_VIRTUAL_MACHINES=true"
 }
 
 #================================================================
-# Patch Sensor deployment
+# Get SecuredCluster resources (operator-managed)
+#================================================================
+get_secured_clusters() {
+    oc get securedcluster -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null || echo ""
+}
+
+#================================================================
+# Patch Sensor via SecuredCluster CR (permanent) or deployment (fallback)
 #================================================================
 patch_sensor_deployment() {
-    print_step "2. Patching Sensor deployment with ROX_VIRTUAL_MACHINES feature flag"
+    print_step "2. Setting ROX_VIRTUAL_MACHINES=true on Sensor"
     
-    # Check if already set
-    local current_value=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+    local sc_list
+    sc_list=$(get_secured_clusters)
     
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Sensor already has ROX_VIRTUAL_MACHINES=true"
-        return 0
+    if [ -n "${sc_list}" ]; then
+        # Operator-managed: patch each SecuredCluster CR
+        while IFS=/ read -r sc_namespace sc_name; do
+            [ -z "${sc_name}" ] && continue
+            local current_env
+            current_env=$(oc get securedcluster "${sc_name}" -n "${sc_namespace}" -o jsonpath='{.spec.customize.env}' 2>/dev/null || echo "[]")
+            
+            if echo "${current_env}" | grep -q "ROX_VIRTUAL_MACHINES"; then
+                print_info "✓ SecuredCluster ${sc_name} (${sc_namespace}) already has ROX_VIRTUAL_MACHINES=true"
+            else
+                print_info "Patching SecuredCluster ${sc_name} (${sc_namespace}) with ROX_VIRTUAL_MACHINES=true..."
+                oc patch securedcluster "${sc_name}" -n "${sc_namespace}" --type=merge -p '{
+                  "spec": {
+                    "customize": {
+                      "env": [
+                        {"name": "ROX_VIRTUAL_MACHINES", "value": "true"}
+                      ]
+                    }
+                  }
+                }'
+                print_info "✓ SecuredCluster ${sc_name} patched (operator will reconcile)"
+            fi
+        done <<< "${sc_list}"
+    else
+        # Fallback: direct deployment patch (may be overwritten by operator)
+        local current_value
+        current_value=$(oc get deployment sensor -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+        
+        if [ "${current_value}" = "true" ]; then
+            print_info "✓ Sensor deployment already has ROX_VIRTUAL_MACHINES=true"
+        else
+            print_warn "No SecuredCluster CR found - patching deployment directly (changes may be overwritten by operator)"
+            oc set env deployment/sensor -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
+        fi
     fi
     
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Sensor deployment..."
-    
-    # Patch the deployment
-    oc set env deployment/sensor -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
-    
-    # Wait for rollout
-    print_info "Waiting for Sensor to restart..."
+    print_info "Waiting for Sensor to reconcile/restart..."
     oc rollout status deployment/sensor -n ${RHACS_NAMESPACE} --timeout=5m
     
-    print_info "✓ Sensor deployment patched successfully"
+    print_info "✓ Sensor configured with ROX_VIRTUAL_MACHINES=true"
 }
 
 #================================================================
-# Patch Collector daemonset compliance container
+# Patch Collector via SecuredCluster CR (permanent) or daemonset (fallback)
 #================================================================
 patch_collector_daemonset() {
-    print_step "3. Patching Collector daemonset compliance container"
+    print_step "3. Setting ROX_VIRTUAL_MACHINES=true on Collector (compliance container)"
     
-    # Check if compliance container exists
-    local has_compliance=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].name}' 2>/dev/null || echo "")
+    local sc_list
+    sc_list=$(get_secured_clusters)
     
-    if [ -z "${has_compliance}" ]; then
-        print_warn "⚠ Collector daemonset has no 'compliance' container"
-        print_info "  This might be expected depending on your RHACS version"
-        return 0
+    if [ -n "${sc_list}" ]; then
+        # Operator-managed: patch each SecuredCluster CR - collector env is under perNode.collector.customize
+        while IFS=/ read -r sc_namespace sc_name; do
+            [ -z "${sc_name}" ] && continue
+            local current_env
+            current_env=$(oc get securedcluster "${sc_name}" -n "${sc_namespace}" -o jsonpath='{.spec.perNode.collector.customize.env}' 2>/dev/null || echo "[]")
+            
+            if echo "${current_env}" | grep -q "ROX_VIRTUAL_MACHINES"; then
+                print_info "✓ SecuredCluster ${sc_name} collector already has ROX_VIRTUAL_MACHINES=true"
+            else
+                print_info "Patching SecuredCluster ${sc_name} (${sc_namespace}) collector with ROX_VIRTUAL_MACHINES=true..."
+                oc patch securedcluster "${sc_name}" -n "${sc_namespace}" --type=merge -p '{
+                  "spec": {
+                    "perNode": {
+                      "collector": {
+                        "customize": {
+                          "env": [
+                            {"name": "ROX_VIRTUAL_MACHINES", "value": "true"}
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }'
+                print_info "✓ SecuredCluster ${sc_name} collector patched (operator will reconcile)"
+            fi
+        done <<< "${sc_list}"
+    else
+        # Fallback: direct daemonset patch (may be overwritten by operator)
+        local has_compliance
+        has_compliance=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].name}' 2>/dev/null || echo "")
+        
+        if [ -z "${has_compliance}" ]; then
+            print_warn "⚠ Collector daemonset has no 'compliance' container"
+            print_info "  This might be expected depending on your RHACS version"
+            return 0
+        fi
+        
+        local current_value
+        current_value=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+        
+        if [ "${current_value}" = "true" ]; then
+            print_info "✓ Collector compliance container already has ROX_VIRTUAL_MACHINES=true"
+        else
+            print_warn "No SecuredCluster CR found - patching daemonset directly (changes may be overwritten by operator)"
+            oc set env daemonset/collector -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true -c compliance
+        fi
     fi
     
-    # Check if already set
-    local current_value=$(oc get daemonset collector -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
-    
-    if [ "${current_value}" = "true" ]; then
-        print_info "✓ Collector compliance container already has ROX_VIRTUAL_MACHINES=true"
-        return 0
-    fi
-    
-    print_info "Adding ROX_VIRTUAL_MACHINES=true to Collector compliance container..."
-    
-    # Patch the daemonset - target the compliance container specifically
-    oc set env daemonset/collector -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true -c compliance
-    
-    # Wait for rollout
-    print_info "Waiting for Collector to restart..."
+    print_info "Waiting for Collector to reconcile/restart..."
     oc rollout status daemonset/collector -n ${RHACS_NAMESPACE} --timeout=5m
     
-    print_info "✓ Collector daemonset patched successfully"
+    print_info "✓ Collector configured with ROX_VIRTUAL_MACHINES=true"
 }
 
 #================================================================
