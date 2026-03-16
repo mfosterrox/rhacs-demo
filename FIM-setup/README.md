@@ -44,13 +44,17 @@ chroot /host
 # 4. Paste and run the contents of fim-trigger-loop.sh
 ```
 
+## Note on Policy-as-Code
+
+FIM (File Integrity Monitoring) policies use `eventSource: NODE_EVENT`, which is **not supported** by the SecurityPolicy CRD. The SecurityPolicy CR only supports `NOT_APPLICABLE`, `DEPLOYMENT_EVENT`, and `AUDIT_LOG_EVENT`. Therefore, FIM policies must be submitted via the RHACS API.
+
 ## Files
 
 | File | Description |
 |------|-------------|
-| `fim-policy-basic.json` | FIM policy definition (monitors /etc/passwd, /etc/sudoers, /etc/sudoers.test) |
+| `fim-policy-basic.json` | FIM policy definition (submitted via API) |
 | `fim-trigger-loop.sh` | Loop script that creates /etc/sudoers.test every 60s |
-| `install-fim.sh` | Main script – submits policy and starts trigger loop |
+| `install-fim.sh` | Main script – submits policy via API and starts trigger loop |
 
 ## View Violations
 

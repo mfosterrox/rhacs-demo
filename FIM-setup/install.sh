@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Script: install-fim.sh
-# Description: Submit FIM policy to ACS and run the FIM trigger loop on a worker node
-# Requires: ROX_CENTRAL_URL, ROX_API_TOKEN, oc logged in
+# Description: Submit FIM policy to ACS via API and run the FIM trigger loop on a worker node
+# Requires: ROX_CENTRAL_URL (or auto-detect), ROX_API_TOKEN, oc logged in, jq
 
 set -euo pipefail
 
@@ -53,26 +53,27 @@ if [ ! -f "${FIM_TRIGGER_SCRIPT}" ]; then
     exit 1
 fi
 
-CENTRAL_URL=$(get_central_url) || {
-    print_error "Could not determine ROX_CENTRAL_URL. Set it or ensure RHACS route exists."
-    exit 1
-}
-
 if [ -z "${ROX_API_TOKEN:-}" ]; then
     print_error "ROX_API_TOKEN is required. Set it: export ROX_API_TOKEN='your-token'"
     exit 1
 fi
 
-API_BASE="${CENTRAL_URL}/v1"
-
-#================================================================
-# Step 1: Submit FIM policy to ACS
-#================================================================
-print_step "1. Submitting FIM policy to ACS..."
 if ! command -v jq &>/dev/null; then
     print_error "jq is required. Install: dnf install jq / brew install jq"
     exit 1
 fi
+
+CENTRAL_URL=$(get_central_url) || {
+    print_error "Could not determine ROX_CENTRAL_URL. Set it or ensure RHACS route exists."
+    exit 1
+}
+
+API_BASE="${CENTRAL_URL}/v1"
+
+#================================================================
+# Step 1: Submit FIM policy to ACS via API
+#================================================================
+print_step "1. Submitting FIM policy to ACS via API..."
 
 # Extract first policy, remove id for create (server will assign)
 POLICY_JSON=$(jq '.policies[0] | del(.id, .lastUpdated)' "${FIM_POLICY}")
