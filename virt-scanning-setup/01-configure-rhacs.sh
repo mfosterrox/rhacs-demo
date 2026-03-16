@@ -60,29 +60,42 @@ patch_central_deployment() {
     central_cr_name=$(get_central_cr_name)
     
     if [ -n "${central_cr_name}" ]; then
-        # Operator-managed: patch Central CR for permanent changes
+        # Operator-managed: try to patch Central CR (path varies by RHACS version)
         local current_env
-        current_env=$(oc get central "${central_cr_name}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.deployment.customize.env}' 2>/dev/null || echo "[]")
+        current_env=$(oc get central "${central_cr_name}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.deployment.customize.env}' 2>/dev/null || oc get central "${central_cr_name}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.central.customize.env}' 2>/dev/null || echo "[]")
         
         if echo "${current_env}" | grep -q "ROX_VIRTUAL_MACHINES"; then
-            print_info "✓ Central CR already has ROX_VIRTUAL_MACHINES in customize.env"
+            print_info "✓ Central CR already has ROX_VIRTUAL_MACHINES=true"
         else
             print_info "Patching Central CR (${central_cr_name}) with ROX_VIRTUAL_MACHINES=true..."
-            # Merge patch - adds/updates ROX_VIRTUAL_MACHINES in Central CR
-            oc patch central "${central_cr_name}" -n "${RHACS_NAMESPACE}" --type=merge -p '{
+            # Try spec.central.customize.env first (some RHACS versions use this)
+            local patch_output
+            patch_output=$(oc patch central "${central_cr_name}" -n "${RHACS_NAMESPACE}" --type=merge -p '{
               "spec": {
                 "central": {
-                  "deployment": {
-                    "customize": {
-                      "env": [
-                        {"name": "ROX_VIRTUAL_MACHINES", "value": "true"}
-                      ]
-                    }
+                  "customize": {
+                    "env": [
+                      {"name": "ROX_VIRTUAL_MACHINES", "value": "true"}
+                    ]
                   }
                 }
               }
-            }'
-            print_info "✓ Central CR patched (operator will reconcile)"
+            }' 2>&1) || true
+            
+            if echo "${patch_output}" | grep -q "unknown field"; then
+                # spec.central.customize not supported - fall back to deployment patch
+                print_warn "Central CR does not support customize.env in this RHACS version"
+                print_info "Patching deployment directly (operator may overwrite on upgrade)..."
+                local deploy_value
+                deploy_value=$(oc get deployment central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+                if [ "${deploy_value}" != "true" ]; then
+                    oc set env deployment/central -n ${RHACS_NAMESPACE} ROX_VIRTUAL_MACHINES=true
+                else
+                    print_info "✓ Central deployment already has ROX_VIRTUAL_MACHINES=true"
+                fi
+            else
+                print_info "✓ Central CR patched (operator will reconcile)"
+            fi
         fi
     else
         # Fallback: direct deployment patch (may be overwritten by operator)
@@ -285,7 +298,7 @@ patch_hyperconverged_vsock() {
         fi
     fi
     
-    print_info "  Note: VMs must be configured with autoattachVSOCK: true"
+    print_info "  Note: rhel-webserver-vm template already includes autoattachVSOCK: true"
 }
 
 #================================================================
@@ -295,44 +308,11 @@ display_vm_instructions() {
     print_step "5. Virtual Machine Configuration"
     echo ""
     
-    print_info "To enable vulnerability scanning on VMs, update each VM spec:"
-    echo ""
-    print_info "Example VM patch:"
-    cat <<'EOF'
-
-    oc patch vm <vm-name> -n <namespace> --type=merge -p '
-    {
-      "spec": {
-        "template": {
-          "spec": {
-            "domain": {
-              "devices": {
-                "autoattachVSOCK": true
-              }
-            }
-          }
-        }
-      }
-    }'
-
-EOF
-    echo ""
-    print_info "Or add to VM YAML:"
-    cat <<'EOF'
-
-    spec:
-      template:
-        spec:
-          domain:
-            devices:
-              autoattachVSOCK: true
-
-EOF
-    echo ""
-    print_info "Additional VM requirements:"
+    print_info "VM requirements for vulnerability scanning:"
     print_info "  • Must run Red Hat Enterprise Linux (RHEL)"
     print_info "  • RHEL must have valid subscription"
     print_info "  • Network access for CPE mappings"
+    print_info "  • autoattachVSOCK: true (included in rhel-webserver-vm template)"
     echo ""
 }
 
