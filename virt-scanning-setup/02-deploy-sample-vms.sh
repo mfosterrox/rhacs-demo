@@ -55,12 +55,3 @@ echo ""
 print_info "Connect: virtctl console rhel-webserver -n default"
 print_info "Login: cloud-user / redhat"
 echo ""
-
-
-[cloud-user@rhel-webserver ~]$ systemctl status roxagent
-● roxagent.service - RHACS roxagent for VM vulnerability scanning
-     Loaded: loaded (/etc/systemd/system/roxagent.service; enabled; preset: dis>
-     Active: activating (auto-restart) (Result: exit-code) since Mon 2026-03-16>
-    Process: 16797 ExecStart=/usr/local/bin/roxagent --daemon (code=exited, sta>
-   Main PID: 16797 (code=exited, status=203/EXEC)
-        CPU: 1ms
