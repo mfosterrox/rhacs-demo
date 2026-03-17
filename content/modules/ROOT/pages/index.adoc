@@ -8,7 +8,16 @@ Run the setup steps in order. Each step depends on the previous ones.
 
 === Step 1: RHACS Basic Setup
 
-To ensure your RHACS environment is up to date, and has all of the necessary components, run the following command in the *Bastion* tab.
+To ensure your RHACS environment is up to date and all necessary components are installed, follow these steps in the *Bastion* tab:
+
+- Ensure you are connected to the Bastion node or terminal provided in your environment.
+- This setup process will:
+  * Download the latest RHACS demo code and configuration scripts from the official repository.
+  * Update your local environment with any new features, components, or bug fixes required for the demo.
+  * Install and configure any missing dependencies or prerequisites for the RHACS environment.
+  * Set up initial access credentials, such as the RHACS admin password and access URLs.
+  * Trigger a compliance scan to ensure the environment is compliant.
+- After completing, you will be ready to proceed with additional monitoring and security integrations.
 
 *Procedure*
 
@@ -51,6 +60,13 @@ source ~/.bashrc
 ----
 
 === Step 2: RHACS Monitoring Setup
+
+The `monitoring-setup/install.sh` script sets up secure monitoring integration for RHACS by:
+- Deploying a sample Prometheus monitoring stack
+- Configuring RHACS authentication/permissions for metrics access
+- Verifying the setup and providing troubleshooting guidance if needed
+- Integrating with the Perses UI plugin (OpenShift Console) to create a dashboard for monitoring RHACS metrics.
+
 
 Run the following in the *Bastion* tab. 
 
