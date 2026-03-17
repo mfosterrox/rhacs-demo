@@ -72,9 +72,8 @@ The installation is broken into three modular scripts:
 
 2. **`02-install-monitoring.sh`** - Monitoring Stack Installation
    - Disables OpenShift monitoring on Central (per docs 15.2.1)
-   - Installs Cluster Observability Operator subscription
-   - Deploys MonitoringStack (Prometheus + Alertmanager)
-   - Configures ScrapeConfig for RHACS metrics (scheme HTTPS, metrics_path /metrics)
+   - Installs Cluster Observability Operator (MonitoringStack, ScrapeConfig)
+   - Applies Prometheus Operator resources if CRD exists (prometheus-operator/)
    - Installs Perses UI plugin, datasource, and dashboard
 
 3. **`03-configure-rhacs-auth.sh`** - RHACS Authentication Configuration
@@ -333,7 +332,11 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 
 ## Troubleshooting
 
-### Issue: Dashboard shows "No data" (endpoints work locally but Prometheus not scraping)
+### Issue: Dashboard shows "No data"
+
+**If using Prometheus Operator** (monitoring.coreos.com): The install script applies `prometheus-operator/` when the Prometheus Operator CRD exists. Simply applying those files may be enough to get data into the OpenShift console.
+
+**If using Cluster Observability Operator** (endpoints work locally but Prometheus not scraping):
 
 If `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics` works but the dashboard shows no data, Prometheus may be failing TLS verification when scraping Central. The ScrapeConfig includes `insecureSkipVerify: true` to bypass server cert verification. Re-apply the scrape config:
 

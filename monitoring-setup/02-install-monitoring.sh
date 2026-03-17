@@ -80,6 +80,15 @@ oc apply -f monitoring-examples/cluster-observability-operator/scrape-config.yam
 log "✓ ScrapeConfig created"
 
 echo ""
+log "Installing Prometheus Operator resources (for clusters with Prometheus Operator)..."
+if oc get crd prometheuses.monitoring.coreos.com &>/dev/null; then
+  oc apply -f monitoring-examples/prometheus-operator/
+  log "✓ Prometheus Operator resources applied"
+else
+  log "Prometheus Operator CRD not found - skipping"
+fi
+
+echo ""
 log "Installing Perses and configuring the RHACS dashboard..."
 oc apply -f monitoring-examples/perses/ui-plugin.yaml
 log "✓ Perses UI Plugin created"

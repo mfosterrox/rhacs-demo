@@ -58,6 +58,22 @@ spec:
               user: cloud-user
               password: redhat
               chpasswd: { expire: False }
+              write_files:
+                - path: /etc/systemd/system/roxagent.service
+                  content: |
+                    [Unit]
+                    Description=RHACS roxagent for VM vulnerability scanning
+                    After=network-online.target
+                    Wants=network-online.target
+                    [Service]
+                    Type=simple
+                    ExecStart=/usr/local/bin/roxagent --daemon
+                    Restart=always
+                    RestartSec=10
+                    [Install]
+                    WantedBy=multi-user.target
+                  permissions: '0644'
+                  owner: root:root
               runcmd:
                 - sudo subscription-manager register --username=$SUBSCRIPTION_USERNAME --password="$SUBSCRIPTION_PASSWORD"
                 - sudo subscription-manager release --set=9.4
@@ -67,9 +83,12 @@ spec:
                     --enable=rhel-9-for-x86_64-appstream-eus-rpms
                 - sudo dnf clean all
                 - sudo dnf update -y
-                - curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.9.0/bin/linux/roxagent
+                - curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.10.0/bin/linux/roxagent
                 - chmod +x /tmp/roxagent
                 - sudo mv /tmp/roxagent /usr/local/bin/roxagent
+                - sudo systemctl daemon-reload
+                - sudo systemctl enable roxagent
+                - sudo systemctl start roxagent
           name: cloudinitdisk
   dataVolumeTemplates:
     - apiVersion: cdi.kubevirt.io/v1beta1

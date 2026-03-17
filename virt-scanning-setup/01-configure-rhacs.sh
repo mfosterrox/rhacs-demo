@@ -84,7 +84,6 @@ patch_central_deployment() {
             
             if echo "${patch_output}" | grep -q "unknown field"; then
                 # spec.central.customize not supported - fall back to deployment patch
-                print_warn "Central CR does not support customize.env in this RHACS version"
                 print_info "Patching deployment directly (operator may overwrite on upgrade)..."
                 local deploy_value
                 deploy_value=$(oc get deployment central -n ${RHACS_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
