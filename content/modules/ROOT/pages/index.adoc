@@ -190,7 +190,7 @@ git pull && ./install.sh
 . Create OLSConfig with your LLM provider for the "Ask OpenShift Lightspeed" button to appear in the YAML Editor.
 * Full documentation: `~/rhacs-demo/lightspeed-setup/README.md`
 
-=== Step 5: StackRox MCP Server (Optional)
+=== Step 5: StackRox MCP Server
 
 Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. Requires basic-setup (Step 1).
 

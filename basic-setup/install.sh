@@ -626,7 +626,6 @@ main() {
     
     if [ -n "${ROX_PASSWORD:-}" ]; then
         print_info "Admin Password: ${ROX_PASSWORD}"
-        print_info ""
         print_info "=================================="    
     else
         # Try to fetch it if not already loaded from multiple possible locations

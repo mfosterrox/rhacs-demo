@@ -42,6 +42,39 @@ prompt_for_input() {
     fi
 }
 
+# Show a numbered menu and return the selected value (or "custom" key for custom input)
+# Usage: select_from_menu "Prompt" "opt1:Display 1" "opt2:Display 2" "custom:Enter custom URL"
+# Returns the key (e.g. opt1, opt2, or prompts for input if custom)
+select_from_menu() {
+    local prompt="$1"
+    shift
+    local -a options=("$@")
+    local -a keys=()
+    local -a labels=()
+    local i=1
+    local choice
+
+    for opt in "${options[@]}"; do
+        local key="${opt%%:*}"
+        local label="${opt#*:}"
+        keys+=("$key")
+        labels+=("$label")
+        echo "  $i) $label" >&2
+        ((i++))
+    done
+
+    echo "" >&2
+    while true; do
+        read -r -p "${prompt}" choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#keys[@]}" ]; then
+            local idx=$((choice - 1))
+            echo "${keys[$idx]}"
+            return
+        fi
+        print_warn "Enter a number 1-${#keys[@]}" >&2
+    done
+}
+
 main() {
     print_step "OpenShift Lightspeed OLSConfig Setup"
     echo "=========================================="
@@ -69,36 +102,105 @@ main() {
     # Prompt for config if not set (needed for OLSConfig in all cases)
     if [ -z "${provider}" ]; then
         echo ""
-        echo "LLM provider options: openai, azure_openai, watsonx, openshift_ai, rhel_ai"
-        provider=$(prompt_for_input "Provider type [openai]: " "openai")
+        print_step "Select LLM provider"
+        provider=$(select_from_menu "Provider [1-5]: " \
+            "openai:OpenAI (api.openai.com)" \
+            "azure_openai:Azure OpenAI" \
+            "watsonx:IBM Watsonx" \
+            "openshift_ai:OpenShift AI (in-cluster)" \
+            "rhel_ai:RHEL AI")
+        echo ""
     fi
+
     if [ -z "${model}" ]; then
-        model=$(prompt_for_input "Model name [gpt-4o-mini]: " "gpt-4o-mini")
+        echo ""
+        case "${provider}" in
+            openai|azure_openai)
+                print_step "Select model"
+                model=$(select_from_menu "Model [1-5]: " \
+                    "gpt-4o-mini:gpt-4o-mini (recommended)" \
+                    "gpt-4o:gpt-4o" \
+                    "gpt-4-turbo:gpt-4-turbo" \
+                    "gpt-3.5-turbo:gpt-3.5-turbo" \
+                    "custom:Enter custom model name")
+                [ "$model" = "custom" ] && model=$(prompt_for_input "Model name: " "gpt-4o-mini")
+                ;;
+            watsonx)
+                print_step "Select model"
+                model=$(select_from_menu "Model [1-4]: " \
+                    "granitenano:granitenano" \
+                    "granitenano-2:granitenano-2" \
+                    "meta-llama/llama-3-1-70b-instruct:meta-llama/llama-3-1-70b-instruct" \
+                    "custom:Enter custom model name")
+                [ "$model" = "custom" ] && model=$(prompt_for_input "Model name: " "granitenano")
+                ;;
+            *)
+                model=$(prompt_for_input "Model name [gpt-4o-mini]: " "gpt-4o-mini")
+                ;;
+        esac
+        echo ""
     fi
 
     case "${provider}" in
         openai)
             if [ -z "${url}" ]; then
-                url=$(prompt_for_input "API URL [https://api.openai.com/v1]: " "https://api.openai.com/v1")
+                echo ""
+                print_step "Select OpenAI API endpoint"
+                local url_choice
+                url_choice=$(select_from_menu "API URL [1-2]: " \
+                    "https://api.openai.com/v1:OpenAI (api.openai.com)" \
+                    "custom:Enter custom URL")
+                [ "$url_choice" = "custom" ] && url=$(prompt_for_input "API URL: " "https://api.openai.com/v1")
+                [ "$url_choice" != "custom" ] && url="$url_choice"
+                echo ""
             fi
             ;;
         azure_openai)
             if [ -z "${url}" ]; then
-                url=$(prompt_for_input "Azure OpenAI endpoint URL (e.g. https://myresource.openai.azure.com): " "")
+                echo ""
+                print_step "Azure OpenAI configuration"
+                print_info "Enter your Azure OpenAI resource endpoint (e.g. https://myresource.openai.azure.com)"
+                url=$(prompt_for_input "Azure endpoint URL: " "")
             fi
             if [ -z "${azure_deployment}" ]; then
                 azure_deployment=$(prompt_for_input "Deployment name: " "")
             fi
             if [ -z "${azure_api_version}" ]; then
-                azure_api_version=$(prompt_for_input "API version [2024-02-15-preview]: " "2024-02-15-preview")
+                echo ""
+                azure_api_version=$(select_from_menu "API version [1-3]: " \
+                    "2024-02-15-preview:2024-02-15-preview (recommended)" \
+                    "2024-08-01-preview:2024-08-01-preview" \
+                    "custom:Enter custom version")
+                [ "$azure_api_version" = "custom" ] && azure_api_version=$(prompt_for_input "API version: " "2024-02-15-preview")
+                echo ""
             fi
             ;;
         watsonx)
             if [ -z "${url}" ]; then
-                url=$(prompt_for_input "Watsonx URL (e.g. https://us-south.ml.cloud.ibm.com): " "")
+                echo ""
+                print_step "Select Watsonx region"
+                local url_choice
+                url_choice=$(select_from_menu "Region [1-7]: " \
+                    "https://us-south.ml.cloud.ibm.com:Dallas (us-south)" \
+                    "https://eu-de.ml.cloud.ibm.com:Frankfurt (eu-de)" \
+                    "https://eu-gb.ml.cloud.ibm.com:London (eu-gb)" \
+                    "https://jp-tok.ml.cloud.ibm.com:Tokyo (jp-tok)" \
+                    "https://ca-tor.ml.cloud.ibm.com:Toronto (ca-tor)" \
+                    "https://au-syd.ml.cloud.ibm.com:Sydney (au-syd)" \
+                    "custom:Enter custom Watsonx URL")
+                [ "$url_choice" = "custom" ] && url=$(prompt_for_input "Watsonx URL: " "https://us-south.ml.cloud.ibm.com")
+                [ "$url_choice" != "custom" ] && url="$url_choice"
+                echo ""
             fi
             if [ -z "${watsonx_project}" ]; then
                 watsonx_project=$(prompt_for_input "Watsonx project ID: " "")
+            fi
+            ;;
+        openshift_ai|rhel_ai)
+            if [ -z "${url}" ]; then
+                echo ""
+                print_info "OpenShift AI / RHEL AI typically use in-cluster endpoints."
+                url=$(prompt_for_input "API URL (or leave blank for default): " "")
             fi
             ;;
         *)
