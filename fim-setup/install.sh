@@ -18,7 +18,10 @@ print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIM_POLICY="${SCRIPT_DIR}/fim-policy-basic.json"
+FIM_POLICIES=(
+    "${SCRIPT_DIR}/fim-policy-basic.json"
+    "${SCRIPT_DIR}/fim-basic-deploy-monitoring.json"
+)
 FIM_TRIGGER_SCRIPT="${SCRIPT_DIR}/fim-trigger-loop.sh"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 
@@ -43,10 +46,12 @@ if ! oc whoami &>/dev/null; then
     exit 1
 fi
 
-if [ ! -f "${FIM_POLICY}" ]; then
-    print_error "FIM policy not found: ${FIM_POLICY}"
-    exit 1
-fi
+for policy_file in "${FIM_POLICIES[@]}"; do
+    if [ ! -f "${policy_file}" ]; then
+        print_error "FIM policy not found: ${policy_file}"
+        exit 1
+    fi
+done
 
 if [ ! -f "${FIM_TRIGGER_SCRIPT}" ]; then
     print_error "FIM trigger script not found: ${FIM_TRIGGER_SCRIPT}"
@@ -100,43 +105,42 @@ print_info "✓ File activity monitoring enabled (verified)"
 echo ""
 
 #================================================================
-# Step 2: Submit FIM policy to ACS via API
+# Step 2: Submit FIM policies to ACS via API
 #================================================================
-print_step "2. Submitting FIM policy to ACS via API..."
+print_step "2. Submitting FIM policies to ACS via API..."
 
-# Extract first policy, remove id for create (server will assign)
-POLICY_JSON=$(jq '.policies[0] | del(.id, .lastUpdated)' "${FIM_POLICY}")
+for policy_file in "${FIM_POLICIES[@]}"; do
+    policy_name=$(jq -r '.policies[0].name' "${policy_file}")
+    POLICY_JSON=$(jq '.policies[0] | del(.id, .lastUpdated)' "${policy_file}")
 
-# Check if policy already exists
-existing_id=$(curl -k -s -H "Authorization: Bearer ${ROX_API_TOKEN}" "${API_BASE}/policies" | jq -r '.policies[] | select(.name=="FIM-basic-monitoring") | .id' 2>/dev/null || echo "")
+    existing_id=$(curl -k -s -H "Authorization: Bearer ${ROX_API_TOKEN}" "${API_BASE}/policies" | jq -r --arg name "${policy_name}" '.policies[] | select(.name==$name) | .id' 2>/dev/null || echo "")
 
-if [ -n "${existing_id}" ]; then
-    print_info "Policy 'FIM-basic-monitoring' already exists (id: ${existing_id})"
-    print_info "Updating existing policy..."
-    response=$(curl -k -s -w "\n%{http_code}" -X PUT \
-        -H "Authorization: Bearer ${ROX_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "$(echo "${POLICY_JSON}" | jq --arg id "${existing_id}" '. + {id: $id}')" \
-        "${API_BASE}/policies/${existing_id}" 2>&1)
-else
-    print_info "Creating new policy..."
-    response=$(curl -k -s -w "\n%{http_code}" -X POST \
-        -H "Authorization: Bearer ${ROX_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "${POLICY_JSON}" \
-        "${API_BASE}/policies" 2>&1)
-fi
+    if [ -n "${existing_id}" ]; then
+        print_info "Policy '${policy_name}' already exists (id: ${existing_id}), updating..."
+        response=$(curl -k -s -w "\n%{http_code}" -X PUT \
+            -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(echo "${POLICY_JSON}" | jq --arg id "${existing_id}" '. + {id: $id}')" \
+            "${API_BASE}/policies/${existing_id}" 2>&1)
+    else
+        print_info "Creating policy '${policy_name}'..."
+        response=$(curl -k -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${POLICY_JSON}" \
+            "${API_BASE}/policies" 2>&1)
+    fi
 
-http_code=$(echo "${response}" | tail -n1)
-body=$(echo "${response}" | sed '$d')
+    http_code=$(echo "${response}" | tail -n1)
+    body=$(echo "${response}" | sed '$d')
 
-if [ "${http_code}" != "200" ] && [ "${http_code}" != "201" ]; then
-    print_error "Failed to submit policy (HTTP ${http_code})"
-    print_error "Response: ${body:0:300}"
-    exit 1
-fi
-
-print_info "✓ FIM policy submitted to ACS"
+    if [ "${http_code}" != "200" ] && [ "${http_code}" != "201" ]; then
+        print_error "Failed to submit policy '${policy_name}' (HTTP ${http_code})"
+        print_error "Response: ${body:0:300}"
+        exit 1
+    fi
+    print_info "✓ ${policy_name} submitted"
+done
 echo ""
 
 #================================================================
