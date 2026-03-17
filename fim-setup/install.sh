@@ -152,6 +152,6 @@ echo "     oc debug node/${WORKER_NODE}" -- chroot /host touch /etc/passwd
 echo "  2. Inside the debug pod, run:"
 echo "     chroot /host"
 echo "     touch /etc/passwd    # Triggers FIM-basic-monitoring"
-echo ""
-print_info "View violations in RHACS UI: Violations → filter by policy FIM-basic-monitoring"
+echo "  3. View violations in RHACS UI: Violations → filter by policy FIM-basic-monitoring"
+echo "  4. type "exit" twice to exit the debug pod"
 echo ""
