@@ -196,22 +196,30 @@ if [ -n "$GROUPS_LIST" ]; then
   if echo "$AUTH_TEST" | grep -q '"userId"'; then
     log "✓ Client certificate authentication successful!"
     
-    # Also test metrics endpoint
+    # Also test metrics endpoint (Prometheus format: lines starting with # or rox_)
     echo ""
     log "Testing metrics endpoint access..."
-    METRICS_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_URL/metrics" 2>&1 | head -10)
+    METRICS_RESP=$(curl -k -s -w "\n%{http_code}" --cert client.crt --key client.key "$ROX_CENTRAL_URL/metrics" 2>&1)
+    METRICS_HTTP=$(echo "$METRICS_RESP" | tail -1)
+    METRICS_BODY=$(echo "$METRICS_RESP" | sed '$d' | head -20)
     
-    if echo "$METRICS_TEST" | grep -q "access for this user is not authorized"; then
+    if echo "$METRICS_BODY" | grep -q "access for this user is not authorized"; then
       error "✗ Metrics endpoint access denied: no valid role"
       echo ""
       error "The group mapping exists but the role assignment is incorrect."
       error "Run the troubleshooting script to fix:"
       echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
-    elif echo "$METRICS_TEST" | grep -q "^#"; then
-      log "✓ Metrics endpoint access successful!"
+    elif [ "$METRICS_HTTP" = "200" ] && echo "$METRICS_BODY" | grep -qE "rox_|^#|go_"; then
+      log "✓ Metrics endpoint access successful! (HTTP $METRICS_HTTP, Prometheus format)"
+    elif [ "$METRICS_HTTP" = "200" ] && [ -n "$(echo "$METRICS_BODY" | tr -d '[:space:]')" ]; then
+      log "✓ Metrics endpoint returned HTTP 200 (auth OK; enable metrics in RHACS: Platform Configuration → System Configuration → Prometheus metrics)"
+    elif [ -z "$(echo "$METRICS_BODY" | tr -d '[:space:]')" ]; then
+      warn "Metrics endpoint returned empty (auth may still be propagating)"
+      warn "Wait 20-30 seconds and test manually: curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/metrics | head -20"
     else
-      warn "Metrics endpoint returned unexpected response (first 10 lines):"
-      echo "$METRICS_TEST"
+      warn "Metrics endpoint returned HTTP ${METRICS_HTTP:-?} (first 5 lines):"
+      echo "$METRICS_BODY" | head -5 | sed 's/^/  /'
+      warn "If dashboard works, you can ignore this. Otherwise: cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
     fi
   elif echo "$AUTH_TEST" | grep -q "credentials not found"; then
     warn "Authentication failed: credentials not found"

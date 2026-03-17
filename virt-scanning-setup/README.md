@@ -266,14 +266,26 @@ curl -k "https://$(oc get route rhel-webserver -n default -o jsonpath='{.spec.ho
 - Instructions for checking RHACS vulnerability data
 - Confirmation that the web server is running and accessible
 
+### Verify ROX_VIRTUAL_MACHINES configuration
+```bash
+# Central (should output: true)
+oc get deployment central -n stackrox -o jsonpath='{.spec.template.spec.containers[?(@.name=="central")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' | grep -i true || echo "Not set or not true in Central"
+
+# Sensor (should output: true)
+oc get deployment sensor -n stackrox -o jsonpath='{.spec.template.spec.containers[?(@.name=="sensor")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' | grep -i true || echo "Not set or not true in Sensor"
+
+# Collector compliance container (should output: true)
+oc get ds collector -n stackrox -o jsonpath='{.spec.template.spec.containers[?(@.name=="compliance")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' | grep -i true || echo "Not set or not true in compliance container"
+```
+
 ### Verify vsock configuration
 ```bash
 # Check VM has vsock enabled
-oc get vm rhel-roxagent-vm -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
+oc get vm rhel-webserver -n default -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}'
 # Should return: true
 
 # Check VSOCK CID assigned
-oc get vmi rhel-roxagent-vm -n default -o jsonpath='{.status.VSOCKCID}'
+oc get vmi rhel-webserver -n default -o jsonpath='{.status.VSOCKCID}'
 # Should return a number like: 123
 ```
 
@@ -440,7 +452,7 @@ sudo firewall-cmd --reload
 1. Verify feature flags on RHACS components:
    ```bash
    oc get deployment central -n stackrox \
-     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}'
+     -o jsonpath='{.spec.template.spec.containers[?(@.name=="central")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}'
    ```
 
 2. Check Collector logs:

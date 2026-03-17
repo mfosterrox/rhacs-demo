@@ -425,7 +425,7 @@ configure_rhacs_vm_scanning() {
         fi
     else
         local deploy_val
-        deploy_val=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+        deploy_val=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[?(@.name=="central")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
         if [ "${deploy_val}" != "true" ]; then
             oc set env deployment/central -n "${RHACS_NAMESPACE}" ROX_VIRTUAL_MACHINES=true 2>/dev/null || true
         fi
@@ -488,7 +488,7 @@ configure_rhacs_vm_scanning() {
     else
         # No SecuredCluster: patch Sensor and Collector daemonset directly
         local sensor_val
-        sensor_val=$(oc get deployment sensor -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
+        sensor_val=$(oc get deployment sensor -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[?(@.name=="sensor")].env[?(@.name=="ROX_VIRTUAL_MACHINES")].value}' 2>/dev/null || echo "")
         if [ "${sensor_val}" != "true" ]; then
             oc set env deployment/sensor -n "${RHACS_NAMESPACE}" ROX_VIRTUAL_MACHINES=true 2>/dev/null || true
         fi

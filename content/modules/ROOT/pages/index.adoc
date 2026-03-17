@@ -66,8 +66,7 @@ Run the following in the *Bastion* tab.
 +
 [source,sh,subs="attributes",role=execute]
 ----
-cd ~/rhacs-demo/monitoring-setup
-git pull && ./install.sh
+cd ~/rhacs-demo/monitoring-setup && ./install.sh
 ----
 
 . Verify the deployment completed successfully
