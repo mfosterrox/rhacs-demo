@@ -57,34 +57,40 @@ oc apply -f monitoring-examples/rhacs/declarative-configuration-configmap.yaml
 log "✓ Declarative configuration ConfigMap created"
 
 echo ""
-log "Enabling declarative configuration on Central..."
-
-# Check if Central is managed by operator or deployed directly
-if oc get central stackrox-central-services -n stackrox &>/dev/null; then
-  log "Using RHACS Operator to enable declarative configuration..."
-  oc patch central stackrox-central-services -n stackrox --type=merge -p='
+log "Checking if declarative configuration is enabled on Central..."
+if oc get deployment central -n stackrox -o yaml | grep -q "declarative-config"; then
+  log "✓ Declarative configuration is already enabled"
+else
+  warn "Declarative configuration mount not found on Central deployment"
+  log "Enabling declarative configuration on Central..."
+  
+  # Check if Central is managed by operator or deployed directly
+  if oc get central stackrox-central-services -n stackrox &>/dev/null; then
+    log "Using RHACS Operator to enable declarative configuration..."
+    oc patch central stackrox-central-services -n stackrox --type=merge -p='
 spec:
   central:
     declarativeConfiguration:
       configMaps:
       - name: sample-stackrox-prometheus-declarative-configuration
 '
-  log "Waiting for Central to update..."
-  sleep 10
-else
-  log "Directly patching Central deployment..."
-  # For non-operator deployments, manually add volume and mount
-  oc set volume deployment/central -n stackrox \
-    --add --name=declarative-config \
-    --type=configmap \
-    --configmap-name=sample-stackrox-prometheus-declarative-configuration \
-    --mount-path=/run/secrets/stackrox.io/declarative-config \
-    --read-only=true
+    log "Waiting for Central to update..."
+    sleep 10
+  else
+    log "Directly patching Central deployment..."
+    # For non-operator deployments, manually add volume and mount
+    oc set volume deployment/central -n stackrox \
+      --add --name=declarative-config \
+      --type=configmap \
+      --configmap-name=sample-stackrox-prometheus-declarative-configuration \
+      --mount-path=/run/secrets/stackrox.io/declarative-config \
+      --read-only=true
+  fi
+  
+  log "Waiting for Central to restart..."
+  oc rollout status deployment/central -n stackrox --timeout=300s
+  log "✓ Declarative configuration enabled"
 fi
-
-log "Waiting for Central to restart..."
-oc rollout status deployment/central -n stackrox --timeout=300s
-log "✓ Declarative configuration enabled"
 
 # Give Central time to process declarative config (roles) after startup
 log "Waiting for declarative config to be processed (15s)..."
@@ -115,19 +121,17 @@ fi
 
 echo ""
 log "Creating User-Certificate auth provider..."
-AUTH_PROVIDER_FULL=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
+AUTH_PROVIDER_RESPONSE=$(curl -k -s -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
   -H "Authorization: Bearer $ROX_API_TOKEN" \
   -H "Content-Type: application/json" \
   --data-raw "$(envsubst < monitoring-examples/rhacs/auth-provider.json.tpl)")
-AUTH_HTTP_CODE=$(echo "$AUTH_PROVIDER_FULL" | tail -1)
-AUTH_PROVIDER_RESPONSE=$(echo "$AUTH_PROVIDER_FULL" | head -n -1)
 
 # Extract the auth provider ID from the response (try multiple patterns)
 export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"id"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' 2>/dev/null) || true
 
-# If grep/sed didn't work, try jq if available (support both .id and .authProvider.id)
+# If grep/sed didn't work, try jq if available
 if [ -z "$AUTH_PROVIDER_ID" ] && command -v jq &>/dev/null; then
-  export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | jq -r '.id // .authProvider.id // empty' 2>/dev/null)
+  export AUTH_PROVIDER_ID=$(echo "$AUTH_PROVIDER_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
 fi
 
 if [ -n "$AUTH_PROVIDER_ID" ]; then
@@ -220,7 +224,7 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
     fi
   fi
 else
-  error "Failed to create auth provider (HTTP $AUTH_HTTP_CODE)"
+  error "Failed to extract auth provider ID from API response"
   error "API response: $AUTH_PROVIDER_RESPONSE"
   error "You may need to configure the group manually"
   exit 1

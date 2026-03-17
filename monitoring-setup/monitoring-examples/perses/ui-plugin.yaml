@@ -1,4 +1,4 @@
-apiVersion: observability.openshift.io/v1alpha1
+apiVersion: observability.openshift.io/v1alpha2
 kind: UIPlugin
 metadata:
   annotations:
@@ -9,4 +9,3 @@ spec:
     perses:
       enabled: true
   type: Monitoring
-

@@ -332,6 +332,20 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 
 ## Troubleshooting
 
+### Issue: Metrics work in Prometheus but not in OpenShift console
+
+**Important:** The OpenShift **Observe → Metrics** page uses the platform Prometheus (openshift-monitoring), not the COO Prometheus in stackrox. RHACS metrics from the COO stack appear in **Perses dashboards**, not the default Metrics page.
+
+**Where to find RHACS metrics in the console:**
+1. Go to **Observe → Dashboards** (or **Observe → Monitoring** depending on OCP version)
+2. Select the **RHACS Prometheus Datasource** from the datasource dropdown
+3. Open the **Advanced Cluster Security / Overview** dashboard
+
+**If the Perses dashboard section is missing or shows no data:**
+- Ensure the COO namespace has the cluster-monitoring label: `oc label namespace openshift-cluster-observability-operator openshift.io/cluster-monitoring=true --overwrite`
+- Verify Prometheus has data (COO uses StatefulSet): `oc exec -n stackrox statefulset/sample-stackrox-monitoring-stack-prometheus -- wget -qO- 'http://localhost:9090/api/v1/query?query=sum(rox_central_policy_violation_namespace_severity)' 2>/dev/null` — or port-forward and open http://localhost:9090/graph
+- Check that the UIPlugin has `spec.monitoring.perses.enabled: true`
+
 ### Issue: Dashboard shows "No data"
 
 **If using Prometheus Operator** (monitoring.coreos.com): The install script applies `prometheus-operator/` when the Prometheus Operator CRD exists. Simply applying those files may be enough to get data into the OpenShift console.
