@@ -171,45 +171,7 @@ In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*,
 * Webserver VM route: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
 * Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
 
-=== Step 4: OpenShift Lightspeed (Optional)
-
-Installs the OpenShift Lightspeed Operator and enables AI assistance in the OpenShift web console. Requires OpenShift 4.15+ and an LLM provider (OpenShift AI, Azure OpenAI, etc.).
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/lightspeed-setup
-git pull && ./install.sh
-----
-
-. Create OLSConfig with your LLM provider for the "Ask OpenShift Lightspeed" button to appear in the YAML Editor.
-* Full documentation: `~/rhacs-demo/lightspeed-setup/README.md`
-
-=== Step 5: StackRox MCP Server
-
-Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. Requires basic-setup (Step 1).
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/mcp-server-setup
-git pull && ./install.sh
-----
-
-. Connect Cursor or other MCP clients using the Route URL and RHACS API token.
-* Full documentation: `~/rhacs-demo/mcp-server-setup/README.md`
-
-=== Step 6: FIM Demo (Optional)
+=== Step 4: FIM Demo
 
 Deploys a File Integrity Monitoring policy and triggers violations for demonstration. Requires basic-setup (Step 1) for `ROX_API_TOKEN`. Requires `jq`.
 
@@ -228,6 +190,44 @@ git pull && ./install.sh
 
 . View violations in RHACS UI: *Violations* → filter by policy *FIM-basic-monitoring*.
 * Full documentation: `~/rhacs-demo/fim-setup/README.md`
+
+=== Step 5: OpenShift Lightspeed (Optional)
+
+Installs the OpenShift Lightspeed Operator and enables AI assistance in the OpenShift web console. Requires OpenShift 4.15+ and an LLM provider (OpenShift AI, Azure OpenAI, etc.).
+
+*Procedure*
+
+[start=1]
+. Switch to the *Bastion* tab.
+. Run the following
++
+[source,sh,subs="attributes",role=execute]
+----
+cd ~/rhacs-demo/lightspeed-setup
+git pull && ./install.sh
+----
+
+. Create OLSConfig with your LLM provider for the "Ask OpenShift Lightspeed" button to appear in the YAML Editor.
+* Full documentation: `~/rhacs-demo/lightspeed-setup/README.md`
+
+=== Step 6: StackRox MCP Server (Optional)
+
+Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. Requires basic-setup (Step 1).
+
+*Procedure*
+
+[start=1]
+. Switch to the *Bastion* tab.
+. Run the following
++
+[source,sh,subs="attributes",role=execute]
+----
+cd ~/rhacs-demo/mcp-server-setup
+git pull && ./install.sh
+----
+
+. Connect Cursor or other MCP clients using the Route URL and RHACS API token.
+* Full documentation: `~/rhacs-demo/mcp-server-setup/README.md`
 
 == Accessing the Consoles
 
