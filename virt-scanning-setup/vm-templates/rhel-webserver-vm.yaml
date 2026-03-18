@@ -6,7 +6,7 @@ metadata:
   labels:
     app: rhel-webserver
 spec:
-  runStrategy: Always  
+  runStrategy: Always
   template:
     metadata:
       labels:
@@ -52,12 +52,13 @@ spec:
         - dataVolume:
             name: rhel-webserver   # Will create/manage the PVC
           name: rootdisk
-        - cloudInitNoCloud:
+        - name: cloudinitdisk
+          cloudInitNoCloud:
             userData: |-
               #cloud-config
               user: cloud-user
               password: redhat
-              chpasswd: { expire: False }
+              chpasswd: { expire: false }
               runcmd:
                 - sudo subscription-manager register --username=$SUBSCRIPTION_USERNAME --password="$SUBSCRIPTION_PASSWORD"
                 - sudo subscription-manager release --set=9.4
@@ -67,7 +68,31 @@ spec:
                     --enable=rhel-9-for-x86_64-appstream-eus-rpms
                 - sudo dnf clean all
                 - sudo dnf update -y
-          name: cloudinitdisk
+                # Download the latest roxagent binary
+                - curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.10.0/bin/linux/roxagent
+                - chmod +x /tmp/roxagent
+                - sudo mv /tmp/roxagent /usr/local/bin/roxagent
+                - sudo restorecon -v /usr/local/bin/roxagent
+                # Create a systemd service for roxagent as a background daemon
+                - |
+                  cat <<EOF | sudo tee /etc/systemd/system/roxagent.service > /dev/null
+                  [Unit]
+                  Description=RHACS roxagent Daemon
+                  After=network.target
+
+                  [Service]
+                  Type=simple
+                  ExecStart=/usr/local/bin/roxagent --daemon
+                  Restart=always
+                  RestartSec=5
+
+                  [Install]
+                  WantedBy=multi-user.target
+                  EOF
+                # Reload systemd, enable, and start roxagent as a background service
+                - sudo systemctl daemon-reload
+                - sudo systemctl enable roxagent
+                - sudo systemctl start roxagent
   dataVolumeTemplates:
     - apiVersion: cdi.kubevirt.io/v1beta1
       kind: DataVolume
