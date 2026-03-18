@@ -29,16 +29,7 @@
                     "sectionName": "passwd and sudoers protection",
                     "policyGroups": [
                         {
-                            "fieldName": "Actual Path",
-                            "negate": false,
-                            "values": [
-                                {
-                                    "value": "/etc/passwd"
-                                }
-                            ]
-                        },
-                        {
-                            "fieldName": "Effective Path",
+                            "fieldName": "File Path",
                             "negate": false,
                             "values": [
                                 {

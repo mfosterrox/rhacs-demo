@@ -29,7 +29,7 @@
                     "sectionName": "Rule 1",
                     "policyGroups": [
                         {
-                            "fieldName": "Effective Path",
+                            "fieldName": "File Path",
                             "booleanOperator": "OR",
                             "negate": false,
                             "values": [
@@ -44,7 +44,7 @@
                     "sectionName": "Rule 2",
                     "policyGroups": [
                         {
-                            "fieldName": "Actual Path",
+                            "fieldName": "File Path",
                             "booleanOperator": "OR",
                             "negate": false,
                             "values": [

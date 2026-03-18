@@ -114,9 +114,9 @@ cd ~/rhacs-demo/monitoring-setup && source ~/.bashrc && curl --cert client.crt -
 .**OUTPUT**
 [source,sh,subs="attributes"]
 ----
-rox_central_policy_violation_namespace_severity{...} 2
-rox_central_policy_violation_namespace_severity{...} 50
-...
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="HIGH_SEVERITY"} 117
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="LOW_SEVERITY"} 24
+rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="MEDIUM_SEVERITY"} 13
 ----
 
 === Step 3: RHACS VM Vulnerability Scanning
@@ -126,7 +126,12 @@ Run the following in the *Bastion* tab to set up RHACS virtual machine vulnerabi
 *Requirements*
 
 - Requires basic-setup (Step 1) to have been run successfully.
-- You must have valid Red Hat subscription credentials. (Username/Password)
+- *You must have valid Red Hat subscription credentials. (Username/Password)*
+
+[IMPORTANT]
+====
+You must have valid Red Hat subscription credentials for the VM to be scanned. (Username/Password)
+====
 
 *Procedure*
 
@@ -183,13 +188,20 @@ rhel-webserver    12m   Running   10.128.2.45   worker-0
 In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
 
 *Additional information*
-* VM access: `virtctl console rhel-webserver -n default` (login: cloud-user, password: redhat). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
-* Webserver VM route: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
-* Full documentation: `~/rhacs-demo/virt-scanning-setup/README.md`
+
+-VM access: `virtctl console rhel-webserver -n default` (login: cloud-user, password: redhat). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
+- Webserver VM route: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
+- Full documentation: `nano ~/rhacs-demo/virt-scanning-setup/README.md`
 
 === Step 4: FIM Demo
 
-Deploys a File Integrity Monitoring policy and triggers violations for demonstration. Requires basic-setup (Step 1) for `ROX_API_TOKEN`. Requires `jq`.
+Deploys a File Integrity Monitoring policy and triggers violations for demonstration. 
+
+[.requirements]
+====
+* Requires basic-setup (Step 1) to provide `ROX_API_TOKEN`
+* Requires `jq`
+====
 
 *Procedure*
 
@@ -205,8 +217,24 @@ git pull && ./install.sh
 ----
 
 . To trigger FIM violations for demonstration, run the commands printed at the end of the install (or: `oc debug node/<worker>` → `chroot /host` → `touch /etc/passwd`).
-. View violations in RHACS UI: *Violations* → filter by policy *FIM-basic-monitoring*.
-* Full documentation: `~/rhacs-demo/fim-setup/README.md`
+
+[source,sh,subs="attributes",role=execute]
+----
+oc get nodes -l node-role.kubernetes.io/worker
+----
+
+[source,sh,subs="attributes",role=execute]
+----
+oc debug node/<worker-node-name>
+----
+
+[source,sh,subs="attributes",role=execute]
+----
+chroot /host
+touch /etc/passwd
+----
+
+. run ctrl+] twice to exit the pod
 
 === Step 5: OpenShift Lightspeed (Optional)
 
