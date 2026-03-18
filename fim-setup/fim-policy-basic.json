@@ -13,7 +13,7 @@
             "lifecycleStages": [
                 "RUNTIME"
             ],
-            "eventSource": "NODE_EVENT",
+            "eventSource": "DEPLOYMENT_EVENT",
             "exclusions": [],
             "scope": [],
             "severity": "HIGH_SEVERITY",
@@ -25,6 +25,20 @@
             "SORTEnforcement": false,
             "policyVersion": "1.1",
             "policySections": [
+                {
+                    "sectionName": "Process criterion (required for runtime policy)",
+                    "policyGroups": [
+                        {
+                            "fieldName": "Process Name",
+                            "negate": false,
+                            "values": [
+                                {
+                                    "value": ".*"
+                                }
+                            ]
+                        }
+                    ]
+                },
                 {
                     "sectionName": "passwd and sudoers protection",
                     "policyGroups": [

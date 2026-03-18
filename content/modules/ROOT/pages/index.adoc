@@ -234,7 +234,7 @@ chroot /host
 touch /etc/passwd
 ----
 
-. run ctrl+] twice to exit the pod
+. Type "exit" twice to exit the pod
 
 === Step 5: OpenShift Lightspeed (Optional)
 

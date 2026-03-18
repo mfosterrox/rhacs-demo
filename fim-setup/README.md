@@ -40,7 +40,7 @@ touch /etc/passwd    # Triggers FIM-basic-monitoring
 
 ## Note on Policy-as-Code
 
-FIM (File Integrity Monitoring) policies use `eventSource: NODE_EVENT`, which is **not supported** by the SecurityPolicy CRD. The SecurityPolicy CR only supports `NOT_APPLICABLE`, `DEPLOYMENT_EVENT`, and `AUDIT_LOG_EVENT`. Therefore, FIM policies must be submitted via the RHACS API.
+FIM (File Integrity Monitoring) policies use `eventSource: DEPLOYMENT_EVENT` (runtime policies require at least one process/network/audit/k8s criterion; `NODE_EVENT`-only policies are not supported in current RHACS versions). The SecurityPolicy CR only supports `NOT_APPLICABLE`, `DEPLOYMENT_EVENT`, and `AUDIT_LOG_EVENT`. Therefore, FIM policies must be submitted via the RHACS API.
 
 ## Files
 

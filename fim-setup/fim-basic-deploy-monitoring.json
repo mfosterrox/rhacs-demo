@@ -1,7 +1,6 @@
 {
     "policies": [
         {
-            "id": "c21f81d8-97b6-46d9-a599-cb3c10ea1155",
             "name": "fim-basic-deploy-monitoring",
             "description": "Monitors deployments for changes to critical files such as /etc/passwd. Detects modifications at deployment time which may indicate image tampering or unauthorized changes to base images.",
             "rationale": "Modifications to system files like /etc/passwd during deployment can indicate that an image was tampered with or that there is a security misconfiguration. Monitoring for such occurrences reduces the risk of privilege escalation and persistent threats entering production.",
@@ -19,29 +18,28 @@
             "severity": "LOW_SEVERITY",
             "enforcementActions": [],
             "notifiers": [],
-            "lastUpdated": "2026-03-17T17:18:57.684370499Z",
             "SORTName": "",
             "SORTLifecycleStage": "",
             "SORTEnforcement": false,
             "policyVersion": "1.1",
             "policySections": [
                 {
-                    "sectionName": "Rule 1",
+                    "sectionName": "Process criterion (required for runtime policy)",
                     "policyGroups": [
                         {
-                            "fieldName": "File Path",
+                            "fieldName": "Process Name",
                             "booleanOperator": "OR",
                             "negate": false,
                             "values": [
                                 {
-                                    "value": "/etc/passwd"
+                                    "value": ".*"
                                 }
                             ]
                         }
                     ]
                 },
                 {
-                    "sectionName": "Rule 2",
+                    "sectionName": "File path monitoring",
                     "policyGroups": [
                         {
                             "fieldName": "File Path",
