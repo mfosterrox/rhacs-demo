@@ -257,7 +257,9 @@ git pull && ./install.sh
 
 === Step 6: StackRox MCP Server (Optional)
 
-Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. Requires basic-setup (Step 1).
+Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. 
+
+Requires basic-setup (Step 1) && lightspeed-setup (Step 5) to have been run successfully.
 
 *Procedure*
 
@@ -271,14 +273,11 @@ cd ~/rhacs-demo/mcp-server-setup
 git pull && ./install.sh
 ----
 
-. Connect Cursor or other MCP clients using the Route URL and RHACS API token.
-* Full documentation: `~/rhacs-demo/mcp-server-setup/README.md`
-
 == Accessing the Consoles
 
 === OpenShift Console
 
-IMPORTANT: You will need to into the OpenShift console in another tab before the showroom instance works.
+IMPORTANT: Access the consoles in other tabs for demonstration purposes.
 
 Access the OpenShift Console from the *OpenShift Console* tab in the right panel, or open it directly: {openshift_cluster_console_url}[window=blank]
 

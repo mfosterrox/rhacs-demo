@@ -20,4 +20,4 @@ spec:
         proxy:
           kind: HTTPProxy
           spec:
-            url: 'http://sample-stackrox-monitoring-stack-prometheus.stackrox.svc.cluster.local:9090'
+            url: 'http://sample-stackrox-monitoring-stack-prometheus.stackrox.svc.cluster.local:9091'
