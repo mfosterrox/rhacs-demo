@@ -68,6 +68,12 @@ spec:
                     --enable=rhel-9-for-x86_64-appstream-eus-rpms
                 - sudo dnf clean all
                 - sudo dnf update -y
+                # Install additional packages for security demo (commonly flagged in vulnerability scans)
+                - |
+                  sudo dnf install -y \
+                    httpd curl wget openssl openssl-libs zlib libxml2 \
+                    ghostscript perl nginx tar gzip bzip2 zip unzip \
+                    freetype libjpeg-turbo libtiff libpng gnutls 2>/dev/null || true
                 # Download the latest roxagent binary
                 - curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.10.0/bin/linux/roxagent
                 - chmod +x /tmp/roxagent
