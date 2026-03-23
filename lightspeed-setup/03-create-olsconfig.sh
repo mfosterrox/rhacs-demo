@@ -43,7 +43,8 @@ prompt_for_input() {
 }
 
 # Show a numbered menu and return the selected value (or "custom" key for custom input)
-# Usage: select_from_menu "Prompt" "opt1:Display 1" "opt2:Display 2" "custom:Enter custom URL"
+# Options use key|label (pipe). Do not use ':' — URLs contain ':' after the scheme (https://).
+# Usage: select_from_menu "Prompt" "opt1|Display 1" "opt2|Display 2" "custom|Enter custom URL"
 # Returns the key (e.g. opt1, opt2, or prompts for input if custom)
 select_from_menu() {
     local prompt="$1"
@@ -55,8 +56,8 @@ select_from_menu() {
     local choice
 
     for opt in "${options[@]}"; do
-        local key="${opt%%:*}"
-        local label="${opt#*:}"
+        local key="${opt%%|*}"
+        local label="${opt#*|}"
         keys+=("$key")
         labels+=("$label")
         echo "  $i) $label" >&2
@@ -104,11 +105,11 @@ main() {
         echo ""
         print_step "Select LLM provider"
         provider=$(select_from_menu "Provider [1-5]: " \
-            "openai:OpenAI (api.openai.com)" \
-            "azure_openai:Azure OpenAI" \
-            "watsonx:IBM Watsonx" \
-            "openshift_ai:OpenShift AI (in-cluster)" \
-            "rhel_ai:RHEL AI")
+            "openai|OpenAI (api.openai.com)" \
+            "azure_openai|Azure OpenAI" \
+            "watsonx|IBM Watsonx" \
+            "openshift_ai|OpenShift AI (in-cluster)" \
+            "rhel_ai|RHEL AI")
         echo ""
     fi
 
@@ -118,20 +119,20 @@ main() {
             openai|azure_openai)
                 print_step "Select model"
                 model=$(select_from_menu "Model [1-5]: " \
-                    "gpt-4o-mini:gpt-4o-mini (recommended)" \
-                    "gpt-4o:gpt-4o" \
-                    "gpt-4-turbo:gpt-4-turbo" \
-                    "gpt-3.5-turbo:gpt-3.5-turbo" \
-                    "custom:Enter custom model name")
+                    "gpt-4o-mini|gpt-4o-mini (recommended)" \
+                    "gpt-4o|gpt-4o" \
+                    "gpt-4-turbo|gpt-4-turbo" \
+                    "gpt-3.5-turbo|gpt-3.5-turbo" \
+                    "custom|Enter custom model name")
                 [ "$model" = "custom" ] && model=$(prompt_for_input "Model name: " "gpt-4o-mini")
                 ;;
             watsonx)
                 print_step "Select model"
                 model=$(select_from_menu "Model [1-4]: " \
-                    "granitenano:granitenano" \
-                    "granitenano-2:granitenano-2" \
-                    "meta-llama/llama-3-1-70b-instruct:meta-llama/llama-3-1-70b-instruct" \
-                    "custom:Enter custom model name")
+                    "granitenano|granitenano" \
+                    "granitenano-2|granitenano-2" \
+                    "meta-llama/llama-3-1-70b-instruct|meta-llama/llama-3-1-70b-instruct" \
+                    "custom|Enter custom model name")
                 [ "$model" = "custom" ] && model=$(prompt_for_input "Model name: " "granitenano")
                 ;;
             *)
@@ -148,8 +149,8 @@ main() {
                 print_step "Select OpenAI API endpoint"
                 local url_choice
                 url_choice=$(select_from_menu "API URL [1-2]: " \
-                    "https://api.openai.com/v1:OpenAI (api.openai.com)" \
-                    "custom:Enter custom URL")
+                    "https://api.openai.com/v1|OpenAI (api.openai.com)" \
+                    "custom|Enter custom URL")
                 [ "$url_choice" = "custom" ] && url=$(prompt_for_input "API URL: " "https://api.openai.com/v1")
                 [ "$url_choice" != "custom" ] && url="$url_choice"
                 echo ""
@@ -168,9 +169,9 @@ main() {
             if [ -z "${azure_api_version}" ]; then
                 echo ""
                 azure_api_version=$(select_from_menu "API version [1-3]: " \
-                    "2024-02-15-preview:2024-02-15-preview (recommended)" \
-                    "2024-08-01-preview:2024-08-01-preview" \
-                    "custom:Enter custom version")
+                    "2024-02-15-preview|2024-02-15-preview (recommended)" \
+                    "2024-08-01-preview|2024-08-01-preview" \
+                    "custom|Enter custom version")
                 [ "$azure_api_version" = "custom" ] && azure_api_version=$(prompt_for_input "API version: " "2024-02-15-preview")
                 echo ""
             fi
@@ -181,13 +182,13 @@ main() {
                 print_step "Select Watsonx region"
                 local url_choice
                 url_choice=$(select_from_menu "Region [1-7]: " \
-                    "https://us-south.ml.cloud.ibm.com:Dallas (us-south)" \
-                    "https://eu-de.ml.cloud.ibm.com:Frankfurt (eu-de)" \
-                    "https://eu-gb.ml.cloud.ibm.com:London (eu-gb)" \
-                    "https://jp-tok.ml.cloud.ibm.com:Tokyo (jp-tok)" \
-                    "https://ca-tor.ml.cloud.ibm.com:Toronto (ca-tor)" \
-                    "https://au-syd.ml.cloud.ibm.com:Sydney (au-syd)" \
-                    "custom:Enter custom Watsonx URL")
+                    "https://us-south.ml.cloud.ibm.com|Dallas (us-south)" \
+                    "https://eu-de.ml.cloud.ibm.com|Frankfurt (eu-de)" \
+                    "https://eu-gb.ml.cloud.ibm.com|London (eu-gb)" \
+                    "https://jp-tok.ml.cloud.ibm.com|Tokyo (jp-tok)" \
+                    "https://ca-tor.ml.cloud.ibm.com|Toronto (ca-tor)" \
+                    "https://au-syd.ml.cloud.ibm.com|Sydney (au-syd)" \
+                    "custom|Enter custom Watsonx URL")
                 [ "$url_choice" = "custom" ] && url=$(prompt_for_input "Watsonx URL: " "https://us-south.ml.cloud.ibm.com")
                 [ "$url_choice" != "custom" ] && url="$url_choice"
                 echo ""
@@ -210,6 +211,12 @@ main() {
             ;;
     esac
     url="${url:-https://api.openai.com/v1}"
+
+    if [[ ! "${url}" =~ ^https?:// ]]; then
+        print_error "Invalid LLM URL (must match ^https?://...): ${url}"
+        print_error "If you used the menu, re-run with the fixed script; or set LLM_URL to a full endpoint URL."
+        exit 1
+    fi
 
     if [ "${OLS_CONFIG_ONLY:-0}" != "1" ]; then
         if [ -z "${api_key}" ]; then
@@ -272,7 +279,7 @@ main() {
 
     # Create OLSConfig
     print_step "Creating OLSConfig..."
-    cat <<EOF | oc apply -f -
+    if ! cat <<EOF | oc apply -f -
 apiVersion: ols.openshift.io/v1alpha1
 kind: OLSConfig
 metadata:
@@ -285,6 +292,10 @@ spec:
     defaultProvider: ${provider}
     defaultModel: ${model}
 EOF
+    then
+        print_error "Failed to apply OLSConfig (see messages above)."
+        exit 1
+    fi
 
     print_info "✓ OLSConfig created"
     echo ""
