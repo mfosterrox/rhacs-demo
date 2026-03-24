@@ -4,274 +4,98 @@
 
 == Setup Instructions
 
-Run the setup steps in order. Each step depends on the previous ones.
+Use the single orchestration script `install-all-setup.sh` at the root of the demo repository. It runs *basic-setup* first (so RHACS Central stays stable while APIs are configured), then runs the other demo stacks in parallel: Lightspeed, FIM, monitoring, MCP, and VM vulnerability scanning.
 
-=== Step 1: RHACS Basic Setup
+=== Requirements
 
-To ensure your RHACS environment is up to date and all necessary components are installed, follow these steps in the *Bastion* tab:
+Before you start, on the *Bastion* host collect the following information if you want to use the optional features:
 
-- Ensure you are connected to the Bastion node or terminal provided in your environment.
-- This setup process will:
-  * Download the latest RHACS demo code and configuration scripts from the official repository.
-  * Update your local environment with any new features, components, or bug fixes required for the demo.
-  * Install and configure any missing dependencies or prerequisites for the RHACS environment.
-  * Set up initial access credentials, such as the RHACS admin password and access URLs.
-  * Trigger a compliance scan to ensure the environment is compliant.
-- After completing, you will be ready to proceed with additional monitoring and security integrations.
+* *Optional — Red Hat subscription* — username and password to entitle the demo Virtual Machine (`virt-scanning-setup`).
+* *Optional — OpenShift Lightspeed OLSConfig* — an OpenAI-compatible API key (and optional model/URL) if you want the "Ask OpenShift Lightspeed" flow.
 
-*Procedure*
+=== Procedure
 
 [start=1]
-. Switch to the *Bastion* tab, located on the right side of the screen.
-. Run the following
+. Open the *Bastion* tab.
+. Clone or update the repository and run the installer:
 +
 [source,sh,subs="attributes",role=execute]
 ----
 cd ~/
 git clone https://github.com/mfosterrox/rhacs-demo.git 2>/dev/null || true
-cd rhacs-demo && git pull
-./basic-setup/install.sh {acs_portal_password}
+cd ~/rhacs-demo && git pull
+chmod +x install-all-setup.sh verify-all-setup.sh
+./install-all-setup.sh -p {acs_portal_password}
 ----
 
-. Verify the deployment completed successfully
+. Follow the prompts:
 +
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-[INFO] ======================================
-[INFO] RHACS Demo Environment Setup Complete!
-[INFO] ======================================
-[INFO] 
-[INFO] RHACS Central Access Information:
-[INFO] ==================================
-[INFO] Central URL: {acs_route}
-[INFO] Username: admin
-[INFO] Admin Password: {acs_portal_password}
-[INFO] RHACS Version: 4.10.0
-[INFO] 
-[INFO] 
-----
+* *Red Hat subscription* — enter credentials for VM scanning, or press Enter to skip `virt-scanning-setup`.
+* *Lightspeed OLS* — answer `y` and provide an API key (and defaults for model/URL if prompted), or `N` to skip creating `OLSConfig` while still installing the operator.
 
-. Source the environment (ROX_CENTRAL_URL, ROX_API_TOKEN) for subsequent steps:
+. Wait until the script finishes. You should see *Phase 1* (basic-setup) complete, then *Phase 2* parallel jobs start and *Waiting for N parallel job(s)* complete without errors.
+
+. Source your shell profile so `ROX_CENTRAL_URL`, `ROX_API_TOKEN`, and related variables are available in new shells:
 +
 [source,sh,subs="attributes",role=execute]
 ----
 source ~/.bashrc
 ----
 
-=== Step 2: RHACS Monitoring Setup
+=== Verify success
 
-The `monitoring-setup/install.sh` script sets up secure monitoring integration for RHACS by:
-- Deploying a sample Prometheus monitoring stack
-- Configuring RHACS authentication/permissions for metrics access
-- Verifying the setup and providing troubleshooting guidance if needed
-- Integrating with the Perses UI plugin (OpenShift Console) to create a dashboard for monitoring RHACS metrics.
+Run the verification script from the repo root. It checks cluster state and (when `ROX_API_TOKEN` is set) RHACS API expectations for each stack:
 
-
-Run the following in the *Bastion* tab. 
-
-*Requirements*
-
-- Requires basic-setup (Step 1) to have been run successfully.
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
-+
 [source,sh,subs="attributes",role=execute]
 ----
-cd ~/rhacs-demo/monitoring-setup && ./install.sh
+cd ~/rhacs-demo
+source ~/.bashrc
+./verify-all-setup.sh
 ----
 
-. Verify the deployment completed successfully
-+
-.**OUTPUT**
+* Exit code *0* — no failed checks (warnings may appear for optional items such as OLS not configured).
+* Exit code *1* — at least one check failed; inspect the printed messages.
+
+=== Expected success output (install)
+
+When `install-all-setup.sh` completes, you should see *All setup phases completed successfully.* RHACS Central access matches your environment, for example:
+
 [source,sh,subs="attributes"]
 ----
-============================================
-Installation Complete!
-============================================
-
-Certificates created in: /home/lab-user/rhacs-demo/monitoring-setup/
-  - ca.crt / ca.key          (CA certificate - configured in auth provider)
-  - client.crt / client.key  (Client certificate - use for API calls)
-
-Test authentication:
-  cd /home/lab-user/rhacs-demo/monitoring-setup && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
-
-Note: Auth changes may take 10-30 seconds to propagate.
+[INFO] Central URL: {acs_route}
+[INFO] Username: admin
+[INFO] Admin Password: {acs_portal_password}
 ----
-+
-. Verify the authentication worked
+
+Those values are also shown at the end of `basic-setup` in `basic-setup.log` if you need to confirm.
+
+=== FIM demo (after install)
+
+To trigger File Integrity Monitoring violations for demonstration, use the worker node commands printed at the end of `fim-setup` in the parallel logs, or:
+
+. Get the first worker node and start a debug session:
 +
 [source,sh,subs="attributes",role=execute]
 ----
-cd ~/rhacs-demo/monitoring-setup && source ~/.bashrc && curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics
+worker_nodes=$(oc get nodes -l node-role.kubernetes.io/worker --no-headers -o custom-columns=":metadata.name")
+oc debug node/$(echo "$worker_nodes" | head -n1)
 ----
 
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="HIGH_SEVERITY"} 117
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="LOW_SEVERITY"} 24
-rox_central_policy_violation_namespace_severity{Action="UNSET_ENFORCEMENT",Cluster="production",IsPlatformComponent="true",Namespace="stackrox",Severity="MEDIUM_SEVERITY"} 13
-----
-
-=== Step 3: RHACS VM Vulnerability Scanning
-
-Run the following in the *Bastion* tab to set up RHACS virtual machine vulnerability scanning with OpenShift Virtualization. The script configures RHACS for VM scanning, enables VSOCK, and deploys a RHEL webserver VM with roxagent. When you provide Red Hat subscription credentials, packages install automatically and vulnerability data appears in RHACS within about 10 minutes.
-
-*Requirements*
-
-- Requires basic-setup (Step 1) to have been run successfully.
-- *You must have valid Red Hat subscription credentials. (Username/Password)*
-
-[IMPORTANT]
-====
-You must have valid Red Hat subscription credentials for the VM to be scanned. (Username/Password)
-====
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
+. Inside the debug shell, chroot to the host:
 +
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/virt-scanning-setup && ./install.sh
-----
-
-. When prompted, enter your Red Hat subscription credentials (username/password). With credentials, the VM registers and installs packages via cloud-init; vulnerability data will appear in RHACS automatically.
-. Verify the deployment completed successfully
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-════════════════════════════════════════════════════════════
-                    Setup Complete! ✓
-════════════════════════════════════════════════════════════
-
-What was configured:
-
-  ✓ virtctl CLI tool installed
-  ✓ RHACS Central, Sensor, Collector (ROX_VIRTUAL_MACHINES=true)
-  ✓ OpenShift Virtualization VSOCK feature gate enabled
-  ✓ Collector hostNetwork=false (pod network)
-  ✓ Webserver VM deployed (cloud-init):
-    • rhel-webserver
-
-⏱️  Deployment Timeline:
-
-  Now      VM deploying
-  +3 min   VM booting, cloud-init running
-  +5 min   VM ready, roxagent scanning
-  +10 min  ✓ Vulnerability data visible in RHACS!
-----
-+
-. (Optional) Verify VM is running
-+
-[source,sh,subs="attributes",role=execute]
-----
-oc get vmi -n default
-----
-+
-.**OUTPUT**
-[source,sh,subs="attributes"]
-----
-NAME              AGE   PHASE     IP            NODENAME
-rhel-webserver    12m   Running   10.128.2.45   worker-0
-----
-+
-In the RHACS UI: *Platform Configuration* → *Clusters* → *Virtual Machines*, and *Vulnerability Management* → *Workload CVEs*.
-
-*Additional information*
-
--VM access: `virtctl console rhel-webserver -n default` (login: cloud-user, password: redhat). Wait 5–10 minutes after the VM is Running for cloud-init to complete.
-- Webserver VM route: `oc get route rhel-webserver -n default -o jsonpath='https://{.spec.host}{"\n"}'`
-- Full documentation: `nano ~/rhacs-demo/virt-scanning-setup/README.md`
-
-=== Step 4: FIM Demo
-
-Deploys a File Integrity Monitoring policy and triggers violations for demonstration. 
-
-[.requirements]
-====
-* Requires basic-setup (Step 1) to provide `ROX_API_TOKEN`
-* Requires `jq`
-====
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Ensure `ROX_API_TOKEN` is set (from basic-setup `~/.bashrc`).
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/fim-setup
-git pull && ./install.sh
-----
-
-. To trigger FIM violations for demonstration, run the commands printed at the end of the install (or: `oc debug node/<worker>` → `chroot /host` → `touch /etc/passwd`).
-
-[source,sh,subs="attributes",role=execute]
-----
-oc get nodes -l node-role.kubernetes.io/worker
-----
-
-[source,sh,subs="attributes",role=execute]
-----
-oc debug node/<worker-node-name>
-----
-
-[source,sh,subs="attributes",role=execute]
+[source,sh]
 ----
 chroot /host
+----
+
+. Trigger a monitored path change (simulating a FIM violation):
++
+[source,sh]
+----
 touch /etc/passwd
 ----
 
-. Type "exit" twice to exit the pod
-
-=== Step 5: OpenShift Lightspeed (Optional)
-
-Installs the OpenShift Lightspeed Operator and enables AI assistance in the OpenShift web console. Requires OpenShift 4.15+ and an LLM provider (OpenShift AI, Azure OpenAI, etc.).
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/lightspeed-setup
-git pull && ./install.sh
-----
-
-. Create OLSConfig with your LLM provider for the "Ask OpenShift Lightspeed" button to appear in the YAML Editor.
-* Full documentation: `~/rhacs-demo/lightspeed-setup/README.md`
-
-=== Step 6: StackRox MCP Server (Optional)
-
-Deploys the StackRox MCP server so AI assistants (Cursor, Claude Code) can access RHACS via the Model Context Protocol. 
-
-Requires basic-setup (Step 1) && lightspeed-setup (Step 5) to have been run successfully.
-
-*Procedure*
-
-[start=1]
-. Switch to the *Bastion* tab.
-. Run the following
-+
-[source,sh,subs="attributes",role=execute]
-----
-cd ~/rhacs-demo/mcp-server-setup
-git pull && ./install.sh
-----
+. Type `exit` twice to leave the debug shell (once for chroot, once to exit the debug pod).
 
 == Accessing the Consoles
 
