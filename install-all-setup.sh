@@ -4,6 +4,7 @@
 #
 # Typical usage:
 #   ./install-all-setup.sh -p '<rhacs-admin-password>'
+#   ./install-all-setup.sh '<rhacs-admin-password>'    # same (first positional arg = password)
 #
 # You are then prompted for:
 #   - Red Hat subscription (for virt-scanning VM) — press Enter to skip that setup
@@ -13,6 +14,7 @@
 #
 # Options:
 #   -p <password>   RHACS admin password (sets ROX_PASSWORD; used to generate ROX_API_TOKEN)
+#   <password>       If the only argument and it does not start with -, treated as ROX_PASSWORD
 #   -h, --help      Show this help
 #
 # If ROX_API_TOKEN is already exported, -p is optional.
@@ -188,18 +190,6 @@ ensure_rox_api_token() {
     print_info "ROX_API_TOKEN generated (${#token} chars)"
 }
 
-run_parallel_job() {
-    local name="$1"
-    local script_path="$2"
-    shift 2
-    local log="${LOG_DIR}/${name}.log"
-    (
-        cd "${REPO_ROOT}"
-        exec bash "${script_path}" "$@"
-    ) >"${log}" 2>&1 &
-    printf '%s\n' "$!"
-}
-
 wait_for_pid() {
     local name="$1"
     local pid="$2"
@@ -260,9 +250,17 @@ main() {
                 usage
                 exit 0
                 ;;
-            *)
+            -*)
                 print_error "Unknown option: $1 (use -h for help)"
                 exit 1
+                ;;
+            *)
+                if [ -n "${ROX_PASSWORD:-}" ]; then
+                    print_error "Unexpected argument: $1 (password already set via -p or environment)"
+                    exit 1
+                fi
+                export ROX_PASSWORD="$1"
+                shift
                 ;;
         esac
     done
@@ -366,13 +364,18 @@ main() {
     declare -a jobs_pids=()
     declare -a jobs_logs=()
 
+    # Background jobs MUST start in this shell — do not use pid=$(...) around the launcher
+    # or the child is not waitable (command substitution runs in a subshell).
     add_job() {
         local n="$1"
         local script="$2"
         shift 2
         local lg="${LOG_DIR}/${n}.log"
-        local pid
-        pid=$(run_parallel_job "${n}" "${script}" "$@")
+        (
+            cd "${REPO_ROOT}"
+            exec bash "${script}" "$@"
+        ) >"${lg}" 2>&1 &
+        local pid=$!
         jobs_names+=("${n}")
         jobs_pids+=("${pid}")
         jobs_logs+=("${lg}")
