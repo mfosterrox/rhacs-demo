@@ -371,6 +371,23 @@ save_password_to_bashrc() {
     return 0
 }
 
+# Persist ROX_API_TOKEN to ~/.bashrc so parallel installs (mcp, fim, etc.) and new shells see it.
+# Call whenever ROX_API_TOKEN is set (generated or pre-exported).
+save_rox_api_token_to_bashrc() {
+    local token="${ROX_API_TOKEN:-}"
+    if [ -z "${token}" ] || [ "${token}" = "null" ] || [ ${#token} -lt 20 ]; then
+        return 1
+    fi
+    touch ~/.bashrc
+    if [ -f ~/.bashrc ]; then
+        grep -vE '^(export[[:space:]]+)?ROX_API_TOKEN=' ~/.bashrc > ~/.bashrc.tmp 2>/dev/null || true
+        mv ~/.bashrc.tmp ~/.bashrc
+    fi
+    echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
+    print_info "✓ ROX_API_TOKEN saved to ~/.bashrc (length: ${#token} chars)"
+    return 0
+}
+
 # Main installation function
 main() {
     # Accept password as command-line argument
@@ -513,20 +530,8 @@ main() {
                 exit 1
             else
                 export ROX_API_TOKEN="${token}"
-                
-                # Save to ~/.bashrc - clean up any old entries first
-                if [ -f ~/.bashrc ]; then
-                    # Remove all old ROX_API_TOKEN lines
-                    grep -v "^export ROX_API_TOKEN=" ~/.bashrc > ~/.bashrc.tmp 2>/dev/null || true
-                    mv ~/.bashrc.tmp ~/.bashrc
-                else
-                    touch ~/.bashrc
-                fi
-                
-                # Add new token (only the token, nothing else)
-                echo "export ROX_API_TOKEN=\"${token}\"" >> ~/.bashrc
-                
-                print_info "✓ API token generated and saved to ~/.bashrc (length: ${#token} chars)"
+                save_rox_api_token_to_bashrc
+                print_info "✓ API token generated for this session"
             fi
         else
             print_error "Failed to generate API token"
@@ -553,6 +558,7 @@ main() {
         print_info ""
     else
         print_info "✓ ROX_API_TOKEN already set in environment"
+        save_rox_api_token_to_bashrc || print_warn "ROX_API_TOKEN is set but could not be written to ~/.bashrc (invalid length?)"
         print_info ""
     fi
     
