@@ -18,6 +18,48 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
 step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
+# True if RHACS rejected the group because the declarative role is not loaded yet (wording varies by version)
+is_role_not_ready_error() {
+  echo "$1" | grep -qiE 'role.*(does not exist|not found)|unknown role|invalid role|no role named|could not find role|cannot find role|invalid.*roleName|roleName.*(invalid|unknown)'
+}
+
+# Poll until GET /v1/roles includes "Prometheus Server" (declarative config processed)
+wait_for_prometheus_server_role() {
+  local max_s="${1:-600}"
+  local slept=0
+  local interval=15
+  log "Waiting for declarative role 'Prometheus Server' in RHACS API (GET /v1/roles, up to ${max_s}s)..."
+  while [ "$slept" -lt "$max_s" ]; do
+    local roles_json http_code
+    roles_json=$(curl -k -s -w "\n%{http_code}" --max-time 30 \
+      -H "Authorization: Bearer $ROX_API_TOKEN" \
+      "$ROX_CENTRAL_URL/v1/roles" 2>/dev/null) || true
+    http_code=$(echo "$roles_json" | tail -n1)
+    roles_json=$(echo "$roles_json" | sed '$d')
+    if ! echo "$http_code" | grep -qE '^2'; then
+      warn "  /v1/roles HTTP ${http_code} — retrying..."
+    elif command -v jq &>/dev/null; then
+      if echo "$roles_json" | jq -e '.roles[]? | select(.name == "Prometheus Server")' &>/dev/null; then
+        log "✓ Role 'Prometheus Server' is available"
+        return 0
+      fi
+    elif echo "$roles_json" | grep -q '"name"[[:space:]]*:[[:space:]]*"Prometheus Server"'; then
+      log "✓ Role 'Prometheus Server' is available (grep fallback)"
+      return 0
+    fi
+    log "  Declarative role not visible yet... (${slept}s / ${max_s}s)"
+    sleep "$interval"
+    slept=$((slept + interval))
+  done
+  warn "Timed out waiting for 'Prometheus Server' role — proceeding with group POST retries only"
+  return 1
+}
+
+# Strip last line (curl http_code); portable (no GNU head -n -1)
+strip_curl_http_line() {
+  sed '$d'
+}
+
 # Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -142,7 +184,7 @@ for auth_attempt in $(seq 1 $max_auth_retries); do
     --data-raw "$(envsubst < monitoring-examples/rhacs/auth-provider.json.tpl)")
 
   HTTP_CODE=$(echo "$AUTH_PROVIDER_RESPONSE" | tail -1)
-  AUTH_RESPONSE_BODY=$(echo "$AUTH_PROVIDER_RESPONSE" | head -n -1)
+  AUTH_RESPONSE_BODY=$(echo "$AUTH_PROVIDER_RESPONSE" | strip_curl_http_line)
 
   # Extract the auth provider ID from the response (try multiple patterns)
   AUTH_PROVIDER_ID=$(echo "$AUTH_RESPONSE_BODY" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"id"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' 2>/dev/null) || true
@@ -171,14 +213,17 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
   
   # Wait a moment for auth provider to fully initialize
   sleep 2
+
+  # Declarative roles can take minutes to appear after Central rollout; poll API before POST /groups
+  wait_for_prometheus_server_role 600 || true
   
   # Create group mapping with Prometheus Server role (retry if role not yet available)
   log "Creating 'Prometheus Server' role group mapping..."
   GROUP_PAYLOAD=$(envsubst < monitoring-examples/rhacs/admin-group.json.tpl)
   log "Group payload: $GROUP_PAYLOAD"
   
-  max_retries=6
-  retry_delay=15
+  max_retries=15
+  retry_delay=20
   group_created=false
   
   for attempt in $(seq 1 $max_retries); do
@@ -188,7 +233,7 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
       --data-raw "$GROUP_PAYLOAD")
     
     HTTP_CODE=$(echo "$GROUP_RESPONSE" | tail -1)
-    RESPONSE_BODY=$(echo "$GROUP_RESPONSE" | head -n -1)
+    RESPONSE_BODY=$(echo "$GROUP_RESPONSE" | strip_curl_http_line)
     
     if [ "$HTTP_CODE" = "200" ]; then
       if echo "$RESPONSE_BODY" | grep -q '"props"'; then
@@ -204,13 +249,22 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
       log "✓ Group already exists for Monitoring auth provider"
       group_created=true
       break
-    elif echo "$RESPONSE_BODY" | grep -q 'role name.*does not exist'; then
-      if [ $attempt -lt $max_retries ]; then
-        warn "Role 'Prometheus Server' not yet available (declarative config may still be processing)"
-        log "  Retrying in ${retry_delay}s (attempt $attempt/$max_retries)..."
-        sleep $retry_delay
+    elif echo "$HTTP_CODE" | grep -qE '^(502|503|504)$'; then
+      if [ "$attempt" -lt "$max_retries" ]; then
+        warn "Transient HTTP $HTTP_CODE from Central — retrying in ${retry_delay}s ($attempt/$max_retries)..."
+        sleep "$retry_delay"
       else
-        error "Group creation failed (HTTP $HTTP_CODE)"
+        error "Group creation failed after retries (HTTP $HTTP_CODE)"
+        error "Response: $RESPONSE_BODY"
+        break
+      fi
+    elif is_role_not_ready_error "$RESPONSE_BODY"; then
+      if [ "$attempt" -lt "$max_retries" ]; then
+        warn "Role 'Prometheus Server' not yet accepted by API (declarative config still syncing)"
+        log "  Retrying in ${retry_delay}s (attempt $attempt/$max_retries)..."
+        sleep "$retry_delay"
+      else
+        error "Group creation failed (HTTP $HTTP_CODE) after $max_retries attempts"
         error "Response: $RESPONSE_BODY"
         break
       fi
