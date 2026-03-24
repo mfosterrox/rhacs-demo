@@ -45,7 +45,8 @@ export_bashrc_vars() {
     [ ! -f ~/.bashrc ] && return 0
     for var in ROX_CENTRAL_URL ROX_API_TOKEN RHACS_NAMESPACE; do
         local line
-        line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1)
+        # grep exits 1 when no match; with pipefail that would kill the script under set -e
+        line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1) || true
         if [ -z "$line" ]; then
             continue
         fi
