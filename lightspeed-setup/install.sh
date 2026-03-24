@@ -84,7 +84,22 @@ main() {
 
     # Step 3: Offer to create OLSConfig (credentials secret + OLSConfig)
     if [ -f "${SCRIPT_DIR}/03-create-olsconfig.sh" ]; then
-        if [ -t 0 ] && [ -t 1 ]; then
+        if [ "${LIGHTSPEED_SKIP_OLSCONFIG:-0}" = "1" ]; then
+            print_info "LIGHTSPEED_SKIP_OLSCONFIG=1 — skipping OLSConfig (run 03-create-olsconfig.sh later if needed)"
+        elif [ "${LIGHTSPEED_AUTO_OLSCONFIG:-0}" = "1" ]; then
+            if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${LLM_API_KEY:-}" ]; then
+                print_error "LIGHTSPEED_AUTO_OLSCONFIG=1 requires OPENAI_API_KEY or LLM_API_KEY"
+                exit 1
+            fi
+            print_info "Executing: 03-create-olsconfig.sh (non-interactive; LLM env from environment)"
+            if bash "${SCRIPT_DIR}/03-create-olsconfig.sh"; then
+                print_info "✓ OLSConfig created"
+                print_info "Wait 2-3 minutes, then run: ./lightspeed-setup/02-verify-console-integration.sh"
+            else
+                print_error "03-create-olsconfig.sh failed"
+                exit 1
+            fi
+        elif [ -t 0 ] && [ -t 1 ]; then
             echo ""
             read -r -p "Configure LLM provider now? (will prompt for API token and details) [y/N]: " configure_llm
             if [[ "${configure_llm,,}" =~ ^(y|yes)$ ]]; then

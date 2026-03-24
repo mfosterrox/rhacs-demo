@@ -1,0 +1,426 @@
+#!/usr/bin/env bash
+#
+# Install all *-setup stacks in parallel after validating credentials.
+#
+# Typical usage:
+#   ./install-all-setup.sh -p '<rhacs-admin-password>'
+#
+# You are then prompted for:
+#   - Red Hat subscription (for virt-scanning VM) — press Enter to skip that setup
+#   - OpenShift Lightspeed OLS / LLM (OpenAI) — answer N or Enter to skip OLSConfig only
+#
+# Prerequisites: oc (logged in), jq
+#
+# Options:
+#   -p <password>   RHACS admin password (sets ROX_PASSWORD; used to generate ROX_API_TOKEN)
+#   -h, --help      Show this help
+#
+# If ROX_API_TOKEN is already exported, -p is optional.
+#
+# Skips (when details not provided at prompt or via env):
+#   - No subscription → virt-scanning-setup is not run
+#   - No LLM / OpenAI details → lightspeed OLSConfig step is skipped (operator install still runs)
+#
+# Non-interactive / CI: INSTALL_ALL_NONINTERACTIVE=1 and set env vars; missing subscription
+# or LLM vars imply the same skips as above.
+# --- end help ---
+
+set -euo pipefail
+
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+print_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
+print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="${LOG_DIR:-${REPO_ROOT}/.setup-parallel-logs}"
+mkdir -p "${LOG_DIR}"
+
+NONINTERACTIVE="${INSTALL_ALL_NONINTERACTIVE:-0}"
+
+usage() {
+    sed -n '2,/^# --- end help ---$/p' "$0" | sed 's/^# \{0,1\}//' | sed '/^--- end help ---$/d'
+}
+
+prompt_if_missing() {
+    local vn="$1"
+    local prompt_text="$2"
+    local is_secret="${3:-false}"
+    if [ -n "${!vn:-}" ]; then
+        return 0
+    fi
+    if [ "${NONINTERACTIVE}" = "1" ]; then
+        print_error "${vn} is required (set ${vn} or unset INSTALL_ALL_NONINTERACTIVE)"
+        return 1
+    fi
+    local val=""
+    if [ "${is_secret}" = true ]; then
+        read -r -s -p "${prompt_text}" val
+        echo "" >&2
+    else
+        read -r -p "${prompt_text}" val
+    fi
+    if [ -z "${val}" ]; then
+        print_error "${vn} cannot be empty"
+        return 1
+    fi
+    printf -v "${vn}" '%s' "${val}"
+    export "${vn}"
+}
+
+# Prompt for RHEL subscription; empty username → skip virt-scanning
+prompt_subscription_or_skip() {
+    echo ""
+    print_step "Red Hat subscription (virt-scanning)"
+    print_info "The VM scanning demo needs a subscription to entitle the sample VM."
+    print_info "Press Enter without typing a username to skip virt-scanning-setup."
+    echo ""
+    local u=""
+    read -r -p "Red Hat subscription username: " u || true
+    if [ -z "${u}" ]; then
+        SKIP_VIRT_SCANNING=1
+        unset SUBSCRIPTION_USERNAME SUBSCRIPTION_PASSWORD 2>/dev/null || true
+        print_info "Skipping virt-scanning-setup."
+        return 0
+    fi
+    export SUBSCRIPTION_USERNAME="${u}"
+    local p=""
+    read -r -s -p "Red Hat subscription password: " p
+    echo "" >&2
+    if [ -z "${p}" ]; then
+        print_warn "Empty password — skipping virt-scanning-setup."
+        SKIP_VIRT_SCANNING=1
+        unset SUBSCRIPTION_USERNAME SUBSCRIPTION_PASSWORD 2>/dev/null || true
+        return 0
+    fi
+    export SUBSCRIPTION_PASSWORD="${p}"
+}
+
+# Prompt for Lightspeed OLS (OpenAI); decline or empty key → skip OLSConfig only
+prompt_lightspeed_ols_or_skip() {
+    echo ""
+    print_step "OpenShift Lightspeed (OLSConfig / LLM)"
+    print_info "To create OLSConfig with an OpenAI-compatible API, provide an API key."
+    print_info "Answer N or press Enter to skip OLSConfig (Lightspeed operator still installs)."
+    echo ""
+    local ans=""
+    read -r -p "Configure OLS with OpenAI now? [y/N]: " ans || true
+    if [[ ! "${ans,,}" =~ ^(y|yes)$ ]]; then
+        LIGHTSPEED_SKIP_OLSCONFIG=1
+        LIGHTSPEED_AUTO_OLSCONFIG=0
+        print_info "Skipping OLSConfig; run lightspeed-setup/03-create-olsconfig.sh later if needed."
+        return 0
+    fi
+    local key=""
+    read -r -s -p "OpenAI API key: " key
+    echo "" >&2
+    if [ -z "${key}" ]; then
+        print_warn "No API key entered — skipping OLSConfig."
+        LIGHTSPEED_SKIP_OLSCONFIG=1
+        LIGHTSPEED_AUTO_OLSCONFIG=0
+        return 0
+    fi
+    export OPENAI_API_KEY="${key}"
+    export LLM_PROVIDER="${LLM_PROVIDER:-openai}"
+    local model url
+    read -r -p "Model [gpt-4o-mini]: " model || true
+    export LLM_MODEL="${model:-gpt-4o-mini}"
+    read -r -p "API URL [https://api.openai.com/v1]: " url || true
+    export LLM_URL="${url:-https://api.openai.com/v1}"
+    LIGHTSPEED_SKIP_OLSCONFIG=0
+    LIGHTSPEED_AUTO_OLSCONFIG=1
+    print_info "OLSConfig will be applied non-interactively (OpenAI)."
+}
+
+generate_rox_api_token() {
+    local central_url="${ROX_CENTRAL_URL:-}"
+    local password="${ROX_PASSWORD:-}"
+    if [ -z "${central_url}" ] || [ -z "${password}" ]; then
+        return 1
+    fi
+    local api_host="${central_url#https://}"
+    api_host="${api_host#http://}"
+    local response
+    response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -X POST \
+        -u "admin:${password}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/apitokens/generate" \
+        -d '{"name":"install-all-setup-'$(date +%s)'","roles":["Admin"]}' 2>/dev/null)
+    local http_code
+    http_code=$(echo "${response}" | tail -n1)
+    local body
+    body=$(echo "${response}" | sed '$d')
+    if [ "${http_code}" != "200" ]; then
+        return 1
+    fi
+    local token
+    token=$(echo "${body}" | jq -r '.token' 2>/dev/null)
+    if [ -z "${token}" ] || [ "${token}" = "null" ] || [ ${#token} -lt 20 ]; then
+        return 1
+    fi
+    printf '%s' "${token}"
+}
+
+ensure_rox_api_token() {
+    if [ -n "${ROX_API_TOKEN:-}" ]; then
+        print_info "ROX_API_TOKEN is already set"
+        export ROX_API_TOKEN
+        return 0
+    fi
+    if [ -z "${ROX_PASSWORD:-}" ] || [ -z "${ROX_CENTRAL_URL:-}" ]; then
+        print_error "ROX_API_TOKEN is not set, and ROX_CENTRAL_URL/ROX_PASSWORD are missing for token generation."
+        return 1
+    fi
+    print_step "Generating ROX_API_TOKEN from RHACS Central..."
+    local token
+    token=$(generate_rox_api_token) || {
+        print_error "Failed to generate ROX_API_TOKEN. Check ROX_PASSWORD and ROX_CENTRAL_URL."
+        return 1
+    }
+    export ROX_API_TOKEN="${token}"
+    print_info "ROX_API_TOKEN generated (${#token} chars)"
+}
+
+run_parallel_job() {
+    local name="$1"
+    local script_path="$2"
+    shift 2
+    local log="${LOG_DIR}/${name}.log"
+    (
+        cd "${REPO_ROOT}"
+        exec bash "${script_path}" "$@"
+    ) >"${log}" 2>&1 &
+    printf '%s\n' "$!"
+}
+
+wait_for_pid() {
+    local name="$1"
+    local pid="$2"
+    local log="$3"
+    if wait "${pid}"; then
+        print_info "✓ ${name} finished (log: ${log})"
+        return 0
+    else
+        local ec=$?
+        print_error "✗ ${name} failed (exit ${ec}); see ${log}"
+        return "${ec}"
+    fi
+}
+
+apply_noninteractive_skips() {
+    # Subscription: no username → skip virt
+    if [ "${SKIP_VIRT_SCANNING:-0}" != "1" ] && [ -z "${SUBSCRIPTION_USERNAME:-}" ]; then
+        SKIP_VIRT_SCANNING=1
+        print_info "No SUBSCRIPTION_USERNAME — skipping virt-scanning-setup"
+    fi
+
+    # Lightspeed OLS: need API key + provider fields for auto OLS
+    LIGHTSPEED_SKIP_OLSCONFIG="${LIGHTSPEED_SKIP_OLSCONFIG:-0}"
+    if [ "${LIGHTSPEED_SKIP_OLSCONFIG}" = "1" ]; then
+        LIGHTSPEED_AUTO_OLSCONFIG=0
+        print_info "LIGHTSPEED_SKIP_OLSCONFIG=1 — OLSConfig step will not run"
+        return 0
+    fi
+    if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ]; then
+        if [ -z "${LLM_PROVIDER:-}" ]; then export LLM_PROVIDER=openai; fi
+        if [ -z "${LLM_MODEL:-}" ]; then export LLM_MODEL=gpt-4o-mini; fi
+        if [ -z "${LLM_URL:-}" ]; then export LLM_URL=https://api.openai.com/v1; fi
+        LIGHTSPEED_AUTO_OLSCONFIG=1
+        print_info "LLM env present — OLSConfig will run non-interactively"
+    else
+        LIGHTSPEED_SKIP_OLSCONFIG=1
+        LIGHTSPEED_AUTO_OLSCONFIG=0
+        print_info "No OPENAI_API_KEY/LLM_API_KEY — skipping OLSConfig (operator install still runs if lightspeed-setup is enabled)"
+    fi
+}
+
+main() {
+    SKIP_VIRT_SCANNING="${SKIP_VIRT_SCANNING:-0}"
+    LIGHTSPEED_SKIP_OLSCONFIG="${LIGHTSPEED_SKIP_OLSCONFIG:-0}"
+    LIGHTSPEED_AUTO_OLSCONFIG=0
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -p)
+                if [ -z "${2:-}" ]; then
+                    print_error "-p requires a password argument"
+                    exit 1
+                fi
+                export ROX_PASSWORD="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1 (use -h for help)"
+                exit 1
+                ;;
+        esac
+    done
+
+    print_step "RHACS demo — parallel *-setup install"
+    echo ""
+
+    if ! command -v oc &>/dev/null; then
+        print_error "oc CLI not found"
+        exit 1
+    fi
+    if ! oc whoami &>/dev/null; then
+        print_error "Not logged into a cluster. Run: oc login"
+        exit 1
+    fi
+    if ! command -v jq &>/dev/null; then
+        print_error "jq is required (for API token generation). Install jq and retry."
+        exit 1
+    fi
+
+    RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
+    export RHACS_NAMESPACE
+
+    # ---- Core RHACS ----
+    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
+        if [ "${NONINTERACTIVE}" = "1" ]; then
+            print_error "ROX_CENTRAL_URL is required when INSTALL_ALL_NONINTERACTIVE=1"
+            exit 1
+        fi
+        print_info "ROX_CENTRAL_URL not set; attempting discovery from cluster..."
+        ROX_CENTRAL_URL=$(oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
+        export ROX_CENTRAL_URL
+    fi
+    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
+        prompt_if_missing ROX_CENTRAL_URL "RHACS Central URL (https://…): " || exit 1
+    fi
+
+    case "${ROX_CENTRAL_URL}" in
+        http://*|https://*) ;;
+        *) print_warn "ROX_CENTRAL_URL should usually start with https://" ;;
+    esac
+
+    if [ -z "${ROX_API_TOKEN:-}" ] && [ -z "${ROX_PASSWORD:-}" ]; then
+        if [ "${NONINTERACTIVE}" = "1" ]; then
+            print_error "Set ROX_API_TOKEN or ROX_PASSWORD (or use -p <password>)"
+            exit 1
+        fi
+        prompt_if_missing ROX_PASSWORD "RHACS admin password (or set ROX_API_TOKEN to skip): " true || exit 1
+    fi
+
+    ensure_rox_api_token || exit 1
+
+    # ---- Subscription + Lightspeed prompts (interactive) or env (noninteractive) ----
+    if [ "${NONINTERACTIVE}" = "1" ]; then
+        apply_noninteractive_skips
+    elif [ -t 0 ] && [ -t 1 ]; then
+        if [ "${SKIP_VIRT_SCANNING:-0}" != "1" ] && [ -z "${SUBSCRIPTION_USERNAME:-}" ]; then
+            prompt_subscription_or_skip
+        elif [ -n "${SUBSCRIPTION_USERNAME:-}" ]; then
+            if [ -z "${SUBSCRIPTION_PASSWORD:-}" ]; then
+                read -r -s -p "Red Hat subscription password: " SUBSCRIPTION_PASSWORD
+                echo "" >&2
+                export SUBSCRIPTION_PASSWORD
+            fi
+            print_info "Using subscription username from environment."
+        fi
+
+        if [ "${SKIP_LIGHTSPEED_SETUP:-0}" != "1" ]; then
+            if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ]; then
+                if [ -z "${LLM_PROVIDER:-}" ]; then export LLM_PROVIDER=openai; fi
+                if [ -z "${LLM_MODEL:-}" ]; then export LLM_MODEL=gpt-4o-mini; fi
+                if [ -z "${LLM_URL:-}" ]; then export LLM_URL=https://api.openai.com/v1; fi
+                LIGHTSPEED_AUTO_OLSCONFIG=1
+                LIGHTSPEED_SKIP_OLSCONFIG=0
+                print_info "Using LLM credentials from environment for OLSConfig."
+            elif [ "${LIGHTSPEED_SKIP_OLSCONFIG:-0}" != "1" ]; then
+                prompt_lightspeed_ols_or_skip
+            fi
+        fi
+    else
+        apply_noninteractive_skips
+    fi
+
+    export SKIP_VIRT_SCANNING
+    export LIGHTSPEED_SKIP_OLSCONFIG LIGHTSPEED_AUTO_OLSCONFIG
+
+    export GRPC_ENFORCE_ALPN_ENABLED="${GRPC_ENFORCE_ALPN_ENABLED:-false}"
+
+    export ROX_CENTRAL_URL ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME \
+        OPENAI_API_KEY LLM_API_KEY LLM_PROVIDER LLM_MODEL LLM_URL \
+        AZURE_DEPLOYMENT AZURE_API_VERSION WATSONX_PROJECT_ID \
+        SUBSCRIPTION_USERNAME SUBSCRIPTION_PASSWORD DEPLOY_SAMPLE_VMS MCP_NAMESPACE \
+        OLS_CONFIG_ONLY LLM_SECRET_NAME LIGHTSPEED_NAMESPACE \
+        LIGHTSPEED_SKIP_OLSCONFIG LIGHTSPEED_AUTO_OLSCONFIG
+
+    echo ""
+    print_step "Launching setup jobs (logs under ${LOG_DIR})..."
+    echo ""
+
+    declare -a jobs_names=()
+    declare -a jobs_pids=()
+    declare -a jobs_logs=()
+
+    add_job() {
+        local n="$1"
+        local script="$2"
+        shift 2
+        local lg="${LOG_DIR}/${n}.log"
+        local pid
+        pid=$(run_parallel_job "${n}" "${script}" "$@")
+        jobs_names+=("${n}")
+        jobs_pids+=("${pid}")
+        jobs_logs+=("${lg}")
+        print_info "Started ${n} (pid ${pid}) → ${lg}"
+    }
+
+    if [ "${SKIP_BASIC_SETUP:-0}" != "1" ]; then
+        add_job basic-setup "${REPO_ROOT}/basic-setup/install.sh"
+    fi
+    if [ "${SKIP_LIGHTSPEED_SETUP:-0}" != "1" ]; then
+        add_job lightspeed-setup "${REPO_ROOT}/lightspeed-setup/install.sh"
+    fi
+    if [ "${SKIP_FIM_SETUP:-0}" != "1" ]; then
+        add_job fim-setup "${REPO_ROOT}/fim-setup/install.sh"
+    fi
+    if [ "${SKIP_MONITORING_SETUP:-0}" != "1" ]; then
+        add_job monitoring-setup "${REPO_ROOT}/monitoring-setup/install.sh"
+    fi
+    if [ "${SKIP_MCP_SETUP:-0}" != "1" ]; then
+        add_job mcp-server-setup "${REPO_ROOT}/mcp-server-setup/install.sh"
+    fi
+    if [ "${SKIP_VIRT_SCANNING:-0}" != "1" ]; then
+        add_job virt-scanning-setup "${REPO_ROOT}/virt-scanning-setup/install.sh"
+    fi
+
+    if [ ${#jobs_pids[@]} -eq 0 ]; then
+        print_error "No jobs enabled — all SKIP_* flags set?"
+        exit 1
+    fi
+
+    echo ""
+    print_step "Waiting for ${#jobs_pids[@]} job(s)..."
+    echo ""
+
+    failed=0
+    for i in "${!jobs_pids[@]}"; do
+        if ! wait_for_pid "${jobs_names[$i]}" "${jobs_pids[$i]}" "${jobs_logs[$i]}"; then
+            failed=1
+        fi
+    done
+
+    echo ""
+    if [ "${failed}" -eq 0 ]; then
+        print_info "All setup jobs completed successfully."
+        exit 0
+    fi
+    print_error "One or more setup jobs failed. Review logs in ${LOG_DIR}"
+    exit 1
+}
+
+main "$@"
