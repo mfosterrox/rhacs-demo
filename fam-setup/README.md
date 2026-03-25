@@ -1,6 +1,6 @@
 # FAM (File Activity Monitoring) Setup
 
-This setup enables file activity monitoring on the SecuredCluster, submits FAM policies to RHACS via the API, and documents how to trigger violations for demonstration.
+This setup enables file activity monitoring on the SecuredCluster, submits FAM policies to RHACS via the API, applies an **exec CronJob** aimed at the payment-processor workload, and documents how to trigger violations manually.
 
 ## Prerequisites
 
@@ -8,6 +8,7 @@ This setup enables file activity monitoring on the SecuredCluster, submits FAM p
 - `oc` logged in
 - `ROX_API_TOKEN` set (from basic-setup or RHACS UI → Platform Configuration → Integrations → API Token)
 - `jq` installed
+- Namespace/project for the demo app (default **`payments`**) and deployment **`mastercard-processor`** if you want the automated CronJob and one-shot exec to succeed
 
 ## Quick Start
 
@@ -20,11 +21,14 @@ export ROX_API_TOKEN='your-api-token'
 ./install.sh
 ```
 
-After policies and the default-namespace CronJob, **`install.sh` step 4** runs **`oc exec`** into **`deployment/mastercard-processor`** in namespace **`payments`** (if that object exists) and runs **`touch /etc/passwd`** so **fam-basic-deploy-monitoring** can fire without manual exec.
+**`install.sh`** rewrites **`fam-cron-exec-target.yaml`** on the fly to match **`FAM_EXEC_NAMESPACE`**, **`FAM_EXEC_WORKLOAD`**, and **`TARGET_NAMESPACE`** inside the CronJob, then **`oc apply`**. It also runs a **one-shot** **`oc exec`** when the workload exists (step 4).
 
-- Skip that step: `FAM_SKIP_WORKLOAD_EXEC=1 ./install.sh`
-- Point at another workload: `FAM_EXEC_NAMESPACE=myproject FAM_EXEC_WORKLOAD=deployment/myapp ./install.sh`
+- Skip applying the CronJob: `FAM_SKIP_CRONJOB=1 ./install.sh`
+- Skip the one-shot exec only: `FAM_SKIP_WORKLOAD_EXEC=1 ./install.sh`
+- Other workload/NS: `FAM_EXEC_NAMESPACE=myproject FAM_EXEC_WORKLOAD=deployment/myapp ./install.sh`
 - Multi-container pods: `FAM_EXEC_CONTAINER=app ./install.sh`
+
+For **`verify-all-setup.sh`**, the CronJob is expected in **`payments`** by default; override with **`FAM_CRON_NAMESPACE`**.
 
 ## What It Does
 
@@ -32,22 +36,12 @@ After policies and the default-namespace CronJob, **`install.sh` step 4** runs *
 2. **Submits FAM policies** – Creates or updates:
    - `fam-basic-node-monitoring` – monitors `/etc/passwd` for node-level modifications (NODE_EVENT)
    - `fam-basic-deploy-monitoring` – monitors deployments for changes to `/etc/passwd`
-3. **Applies a demo CronJob** – `fam-cron-alert.yaml` creates `rhacs-fam-trigger`, which periodically runs commands that touch/read `/etc/passwd` inside a **CronJob pod** in `default` (good for quick checks; RHACS may attribute this differently than your app).
-
-4. **Optional one-shot `oc exec`** – If **`deployment/mastercard-processor`** exists in **`payments`**, runs `touch /etc/passwd` in that pod for a **deploy**-scoped FAM demo (overridable / skippable via env; see Quick Start).
-
-### CronJob that execs into your app (DEPLOYMENT_EVENT demos)
-
-For alerts like **fam-basic-deploy-monitoring** on a real workload (for example `deployment/mastercard-processor` in project `payments`), apply **`fam-cron-exec-target.yaml`** after editing namespaces and env to match your cluster:
-
-```bash
-# Edit all `namespace: payments` fields and CronJob env (TARGET_*) if needed, then:
-oc apply -f fam-cron-exec-target.yaml
-```
-
-That CronJob runs `oc exec` into the target workload and runs `touch /etc/passwd` **inside that container** every 10 minutes (requires pulls for `registry.redhat.io/openshift4/ose-cli-rhel9`).
+3. **Applies the exec CronJob** – **`fam-cron-exec-target.yaml`**: ServiceAccount, Role, RoleBinding, and **`rhacs-fam-exec-trigger`**, which every **10 minutes** runs **`oc exec`** into **`deployment/mastercard-processor`** (defaults) and **`touch /etc/passwd`** inside that container (better alignment with **fam-basic-deploy-monitoring** than a standalone pod touching its own rootfs).
+4. **One-shot `oc exec`** – Same target as above, once at install time, if the deployment exists.
 
 ## Trigger violations (run after install)
+
+**Node-level** FAM:
 
 ```bash
 # 1. Start a debug session on a worker node
@@ -68,14 +62,17 @@ These policies use `eventSource: NODE_EVENT` (node-level) or `DEPLOYMENT_EVENT` 
 |------|-------------|
 | `fam-basic-node-monitoring.json` | FAM policy for node events (submitted via API) |
 | `fam-basic-deploy-monitoring.json` | FAM policy for deployment events (submitted via API) |
-| `fam-cron-alert.yaml` | CronJob `rhacs-fam-trigger` – periodic trigger inside a dedicated pod (`install.sh`) |
-| `fam-cron-exec-target.yaml` | SA + Role + CronJob `rhacs-fam-exec-trigger` – `oc exec` into a chosen deployment/pod (`oc apply` manually after editing NS/target) |
-| `install.sh` | Main script – enables file activity monitoring, submits policies, applies `fam-cron-alert.yaml`, prints manual trigger steps |
+| `fam-cron-exec-target.yaml` | Template for SA + RBAC + CronJob **`rhacs-fam-exec-trigger`** (applied by **`install.sh`**, with NS/workload substituted from **`FAM_EXEC_*`**) |
+| `install.sh` | Main script – SecuredCluster patch, policies, exec CronJob, optional one-shot exec |
 
 ## View violations
 
-In RHACS UI: **Violations** → filter by policy **fam-basic-node-monitoring**
+In RHACS UI: **Violations** → filter by **fam-basic-deploy-monitoring** or **fam-basic-node-monitoring**
 
 ### Renaming from older demos
 
 If you previously installed policies named `fim-basic-*`, those remain in Central until removed. This repo now ships **`fam-basic-*`** policy names and files; run `install.sh` to create or update the new policies.
+
+If you still have **`CronJob/rhacs-fam-trigger`** in **`default`** from an older **`fam-cron-alert`** flow, remove it when you no longer need it:
+
+`oc delete cronjob rhacs-fam-trigger -n default --ignore-not-found`

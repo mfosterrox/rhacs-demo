@@ -2,13 +2,14 @@
 
 # Script: install.sh (fam-setup)
 # Description: Enable file activity monitoring on SecuredCluster, submit FAM policies to ACS via API,
-#              apply the demo CronJob (fam-cron-alert.yaml), and optionally oc exec into a target workload
-#              to touch /etc/passwd (DEPLOYMENT_EVENT demo — defaults to payment processor).
+#              apply fam-cron-exec-target.yaml (CronJob that oc exec’s into the payment processor and
+#              touch /etc/passwd every 10 minutes), and optionally run a one-shot oc exec for an immediate demo.
 # Requires: ROX_CENTRAL_URL (or auto-detect), ROX_API_TOKEN, oc logged in, jq
 #
 # Optional env:
-#   FAM_SKIP_WORKLOAD_EXEC=1  — do not run oc exec into the demo workload
-#   FAM_EXEC_NAMESPACE        — default payments
+#   FAM_SKIP_CRONJOB=1        — do not apply the exec CronJob manifest
+#   FAM_SKIP_WORKLOAD_EXEC=1  — do not run one-shot oc exec into the demo workload
+#   FAM_EXEC_NAMESPACE        — default payments (also rewrites the CronJob manifest on apply)
 #   FAM_EXEC_WORKLOAD         — default deployment/mastercard-processor
 #   FAM_EXEC_CONTAINER        — optional -c name for multi-container pods
 
@@ -30,7 +31,7 @@ FAM_POLICIES=(
     "${SCRIPT_DIR}/fam-basic-node-monitoring.json"
     "${SCRIPT_DIR}/fam-basic-deploy-monitoring.json"
 )
-FAM_CRON_MANIFEST="${SCRIPT_DIR}/fam-cron-alert.yaml"
+FAM_CRON_MANIFEST="${SCRIPT_DIR}/fam-cron-exec-target.yaml"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 FAM_EXEC_NAMESPACE="${FAM_EXEC_NAMESPACE:-payments}"
 FAM_EXEC_WORKLOAD="${FAM_EXEC_WORKLOAD:-deployment/mastercard-processor}"
@@ -155,15 +156,32 @@ done
 echo ""
 
 #================================================================
-# Step 3: Demo CronJob (periodic touch/read of /etc/passwd in a pod)
+# Step 3: CronJob — periodic oc exec into target workload → touch /etc/passwd
 #================================================================
-print_step "3. Applying FAM demo CronJob (${FAM_CRON_MANIFEST##*/})..."
+print_step "3. Applying FAM exec CronJob (${FAM_CRON_MANIFEST##*/})..."
 
-if ! oc apply -f "${FAM_CRON_MANIFEST}"; then
-    print_error "Failed to apply CronJob manifest"
-    exit 1
+if [ "${FAM_SKIP_CRONJOB:-0}" = "1" ]; then
+    print_info "Skipping (FAM_SKIP_CRONJOB=1)"
+else
+    # Rewrite placeholders in the checked-in manifest to match FAM_EXEC_* (defaults: payments / mastercard-processor)
+    if ! sed \
+        -e "s/namespace: payments/namespace: ${FAM_EXEC_NAMESPACE}/g" \
+        -e "s#value: \"deployment/mastercard-processor\"#value: \"${FAM_EXEC_WORKLOAD}\"#g" \
+        -e "s#value: \"payments\"#value: \"${FAM_EXEC_NAMESPACE}\"#g" \
+        "${FAM_CRON_MANIFEST}" | oc apply -f -; then
+        print_error "Failed to apply FAM exec CronJob (is namespace ${FAM_EXEC_NAMESPACE} present? image pull ok?)"
+        exit 1
+    fi
+    if [ -n "${FAM_EXEC_CONTAINER}" ]; then
+        if oc set env cronjob/rhacs-fam-exec-trigger -n "${FAM_EXEC_NAMESPACE}" \
+            "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" --overwrite &>/dev/null; then
+            print_info "✓ CronJob env TARGET_CONTAINER=${FAM_EXEC_CONTAINER}"
+        else
+            print_warn "Could not patch CronJob TARGET_CONTAINER (cronjob missing yet?) — set manually if needed"
+        fi
+    fi
+    print_info "✓ CronJob rhacs-fam-exec-trigger in ${FAM_EXEC_NAMESPACE} (every 10m → oc exec ${FAM_EXEC_WORKLOAD} -- touch /etc/passwd)"
 fi
-print_info "✓ CronJob rhacs-fam-trigger applied (see manifest for namespace and schedule)"
 echo ""
 
 #================================================================
@@ -201,8 +219,8 @@ WORKER_NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.item
 
 print_step "File activity monitoring (FAM) setup complete"
 echo ""
-print_info "A CronJob (rhacs-fam-trigger) also runs on a schedule in default namespace."
-print_info "Step 4 targets ${FAM_EXEC_WORKLOAD} in ${FAM_EXEC_NAMESPACE} when that workload exists (override with FAM_EXEC_* env)."
+print_info "CronJob rhacs-fam-exec-trigger (unless skipped) runs every 10 minutes with oc exec into ${FAM_EXEC_WORKLOAD} (${FAM_EXEC_NAMESPACE})."
+print_info "Step 4 runs one immediate oc exec when that workload exists (override with FAM_EXEC_* env)."
 print_info "To trigger node-level FAM manually, run these commands:"
 echo ""
 echo "  1. Debug a worker node (detected: ${WORKER_NODE}):"

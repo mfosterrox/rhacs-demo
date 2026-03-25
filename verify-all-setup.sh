@@ -37,7 +37,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 LIGHTSPEED_NAMESPACE="${LIGHTSPEED_NAMESPACE:-openshift-lightspeed}"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
-FAM_CRON_NAMESPACE="${FAM_CRON_NAMESPACE:-default}"
+# CronJob rhacs-fam-exec-trigger is created in the app namespace (install.sh default: payments)
+FAM_CRON_NAMESPACE="${FAM_CRON_NAMESPACE:-payments}"
 
 FAILURES=0
 WARNINGS=0
@@ -171,10 +172,10 @@ verify_fam() {
         failed=1
     fi
 
-    if oc get cronjob rhacs-fam-trigger -n "${FAM_CRON_NAMESPACE}" &>/dev/null; then
-        print_ok "CronJob rhacs-fam-trigger in ${FAM_CRON_NAMESPACE}"
+    if oc get cronjob rhacs-fam-exec-trigger -n "${FAM_CRON_NAMESPACE}" &>/dev/null; then
+        print_ok "CronJob rhacs-fam-exec-trigger in ${FAM_CRON_NAMESPACE}"
     else
-        print_fail "CronJob rhacs-fam-trigger not found in ${FAM_CRON_NAMESPACE}"
+        print_fail "CronJob rhacs-fam-exec-trigger not found in ${FAM_CRON_NAMESPACE}"
         failed=1
     fi
 
