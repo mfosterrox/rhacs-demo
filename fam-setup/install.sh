@@ -2,8 +2,15 @@
 
 # Script: install.sh (fam-setup)
 # Description: Enable file activity monitoring on SecuredCluster, submit FAM policies to ACS via API,
-#              and apply the demo CronJob (fam-cron-alert.yaml).
+#              apply the demo CronJob (fam-cron-alert.yaml), and optionally oc exec into a target workload
+#              to touch /etc/passwd (DEPLOYMENT_EVENT demo — defaults to payment processor).
 # Requires: ROX_CENTRAL_URL (or auto-detect), ROX_API_TOKEN, oc logged in, jq
+#
+# Optional env:
+#   FAM_SKIP_WORKLOAD_EXEC=1  — do not run oc exec into the demo workload
+#   FAM_EXEC_NAMESPACE        — default payments
+#   FAM_EXEC_WORKLOAD         — default deployment/mastercard-processor
+#   FAM_EXEC_CONTAINER        — optional -c name for multi-container pods
 
 set -euo pipefail
 
@@ -25,6 +32,9 @@ FAM_POLICIES=(
 )
 FAM_CRON_MANIFEST="${SCRIPT_DIR}/fam-cron-alert.yaml"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
+FAM_EXEC_NAMESPACE="${FAM_EXEC_NAMESPACE:-payments}"
+FAM_EXEC_WORKLOAD="${FAM_EXEC_WORKLOAD:-deployment/mastercard-processor}"
+FAM_EXEC_CONTAINER="${FAM_EXEC_CONTAINER:-}"
 
 # Get Central URL
 get_central_url() {
@@ -157,6 +167,33 @@ print_info "✓ CronJob rhacs-fam-trigger applied (see manifest for namespace an
 echo ""
 
 #================================================================
+# Step 4: One-shot oc exec — touch /etc/passwd inside target workload (deploy FAM demo)
+#================================================================
+print_step "4. FAM demo workload: oc exec → touch /etc/passwd (fam-basic-deploy-monitoring)..."
+
+if [ "${FAM_SKIP_WORKLOAD_EXEC:-0}" = "1" ]; then
+    print_info "Skipping (FAM_SKIP_WORKLOAD_EXEC=1)"
+else
+    if ! oc get "${FAM_EXEC_WORKLOAD}" -n "${FAM_EXEC_NAMESPACE}" &>/dev/null; then
+        print_warn "Resource not found: ${FAM_EXEC_WORKLOAD} in ${FAM_EXEC_NAMESPACE} — skipping oc exec"
+        print_warn "Set FAM_EXEC_NAMESPACE / FAM_EXEC_WORKLOAD or deploy your app first."
+    else
+        print_info "Running oc exec into ${FAM_EXEC_WORKLOAD} (ns ${FAM_EXEC_NAMESPACE}) ..."
+        if [ -n "${FAM_EXEC_CONTAINER}" ]; then
+            oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -c "${FAM_EXEC_CONTAINER}" -- touch /etc/passwd)
+        else
+            oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -- touch /etc/passwd)
+        fi
+        if "${oc_cmd[@]}"; then
+            print_info "✓ touch completed inside workload (check RHACS: fam-basic-deploy-monitoring)"
+        else
+            print_warn "oc exec failed (permissions, read-only FS, or default container) — run manually or set FAM_EXEC_CONTAINER"
+        fi
+    fi
+fi
+echo ""
+
+#================================================================
 # Next steps: Trigger FAM violations (run manually after install)
 #================================================================
 WORKER_NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -164,8 +201,9 @@ WORKER_NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.item
 
 print_step "File activity monitoring (FAM) setup complete"
 echo ""
-print_info "A CronJob (rhacs-fam-trigger) also runs on a schedule to exercise file-activity checks in-cluster."
-print_info "To trigger file activity violations manually, run these commands:"
+print_info "A CronJob (rhacs-fam-trigger) also runs on a schedule in default namespace."
+print_info "Step 4 targets ${FAM_EXEC_WORKLOAD} in ${FAM_EXEC_NAMESPACE} when that workload exists (override with FAM_EXEC_* env)."
+print_info "To trigger node-level FAM manually, run these commands:"
 echo ""
 echo "  1. Debug a worker node (detected: ${WORKER_NODE}):"
 echo "       oc debug node/${WORKER_NODE}"

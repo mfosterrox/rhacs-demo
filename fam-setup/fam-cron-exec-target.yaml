@@ -1,0 +1,94 @@
+# CronJob that periodically execs into an existing workload and runs:
+#   touch /etc/passwd
+#
+# Use this when you want DEPLOYMENT_EVENT-style FAM (e.g. fam-basic-deploy-monitoring)
+# on a real app pod. A standalone CronJob pod touching its own filesystem is often
+# attributed differently than activity inside your Deployment’s containers.
+#
+# Before applying:
+# 1. Set TARGET_NS on every resource (example: payments for project "production/payments").
+# 2. Set env TARGET_WORKLOAD / TARGET_NAMESPACE on the CronJob if different from defaults.
+# 3. If the image pull fails, switch `image` to something your cluster can pull, e.g.
+#    quay.io/openshift/origin-cli:4.16
+#
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhacs-fam-exec
+  namespace: payments
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhacs-fam-exec-into-workload
+  namespace: payments
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhacs-fam-exec-into-workload
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhacs-fam-exec-into-workload
+subjects:
+  - kind: ServiceAccount
+    name: rhacs-fam-exec
+    namespace: payments
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rhacs-fam-exec-trigger
+  namespace: payments
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: rhacs-fam-exec
+          restartPolicy: OnFailure
+          containers:
+            - name: oc-exec
+              image: registry.redhat.io/openshift4/ose-cli-rhel9:v4.16
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  set -euo pipefail
+                  NS="${TARGET_NAMESPACE}"
+                  WORKLOAD="${TARGET_WORKLOAD}"
+                  CONTAINER="${TARGET_CONTAINER}"
+                  echo "[$(date -Is)] oc exec -n ${NS} ${WORKLOAD} -- touch /etc/passwd"
+                  if [ -n "${CONTAINER}" ]; then
+                    oc exec -n "${NS}" "${WORKLOAD}" -c "${CONTAINER}" -- touch /etc/passwd
+                  else
+                    oc exec -n "${NS}" "${WORKLOAD}" -- touch /etc/passwd
+                  fi
+                  echo "[$(date -Is)] done"
+              env:
+                - name: TARGET_NAMESPACE
+                  value: "payments"
+                # Use deployment/name, pod/name, statefulset/name, job/name as supported by `oc exec`
+                - name: TARGET_WORKLOAD
+                  value: "deployment/mastercard-processor"
+                # Set to a container name if the workload is multi-container; leave empty for the default container
+                - name: TARGET_CONTAINER
+                  value: ""
