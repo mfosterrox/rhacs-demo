@@ -175,15 +175,43 @@ patch_hyperconverged_vsock() {
     else
         print_info "Adding VSOCK via JSON patch annotation on HyperConverged..."
         
-        # Patch HyperConverged with deployOVS and kubevirt jsonpatch annotations
-        oc patch hyperconverged ${hco_name} -n ${CNV_NAMESPACE} --type=merge -p '{
-          "metadata": {
-            "annotations": {
-              "deployOVS": "false",
-              "kubevirt.kubevirt.io/jsonpatch": "[{\"op\":\"add\",\"path\":\"/spec/configuration/developerConfiguration/featureGates/-\",\"value\":\"VSOCK\"}]"
+        # Multi-line jsonpatch string so `oc get hyperconverged -o yaml` shows block style (|-).
+        # Semantics match single-line JSON; newlines are insignificant to the parser.
+        # No trailing newline on the annotation value encourages YAML |-/block output from oc get.
+        local patch_json
+        if command -v python3 &>/dev/null; then
+            patch_json=$(
+                python3 <<'PY'
+import json
+
+jsonpatch = """[
+  {
+    "op":"add",
+    "path":"/spec/configuration/developerConfiguration/featureGates/-",
+    "value":"VSOCK"
+  }
+]""".rstrip("\n")
+
+print(
+    json.dumps(
+        {
+            "metadata": {
+                "annotations": {
+                    "deployOVS": "false",
+                    "kubevirt.kubevirt.io/jsonpatch": jsonpatch,
+                }
             }
-          }
-        }'
+        }
+    )
+)
+PY
+            )
+        else
+            print_warn "python3 not found — applying compact single-line jsonpatch (same effect)"
+            patch_json='{"metadata":{"annotations":{"deployOVS":"false","kubevirt.kubevirt.io/jsonpatch":"[{\"op\":\"add\",\"path\":\"/spec/configuration/developerConfiguration/featureGates/-\",\"value\":\"VSOCK\"}]"}}}'
+        fi
+
+        oc patch hyperconverged "${hco_name}" -n "${CNV_NAMESPACE}" --type=merge -p "${patch_json}"
         
         print_info "✓ Annotation applied to HyperConverged"
         print_info "  Waiting for HCO to propagate changes (30s)..."
