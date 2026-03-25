@@ -134,15 +134,25 @@ verify_lightspeed() {
 
     if oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" &>/dev/null; then
         print_ok "OLSConfig cluster exists"
-        local ready
-        ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-        if [ "${ready}" = "True" ]; then
-            print_ok "OLSConfig Ready=True"
-        elif [ -n "${ready}" ]; then
-            print_warn "OLSConfig Ready=${ready} (may still be reconciling)"
+        # OLS publishes overallStatus (e.g. Ready) and per-component conditions (ApiReady, CacheReady, — not type "Ready")
+        local overall api_ready cache_ready plugin_ready legacy_ready
+        overall=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.overallStatus}' 2>/dev/null || echo "")
+        api_ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="ApiReady")].status}' 2>/dev/null || echo "")
+        cache_ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="CacheReady")].status}' 2>/dev/null || echo "")
+        plugin_ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="ConsolePluginReady")].status}' 2>/dev/null || echo "")
+        legacy_ready=$(oc get olsconfig cluster -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+
+        if [ "${overall}" = "Ready" ]; then
+            print_ok "OLSConfig overallStatus=Ready"
+        elif [ "${legacy_ready}" = "True" ]; then
+            print_ok "OLSConfig Ready=True (legacy condition)"
+        elif [ "${api_ready}" = "True" ] && [ "${cache_ready}" = "True" ] && [ "${plugin_ready}" = "True" ]; then
+            print_ok "OLSConfig component conditions all True (Api/Cache/ConsolePlugin)"
+        elif [ -n "${overall}" ]; then
+            print_warn "OLSConfig overallStatus=${overall} (expected Ready when fully reconciled)"
             WARNINGS=$((WARNINGS + 1))
         else
-            print_warn "OLSConfig Ready condition not reported yet"
+            print_warn "OLSConfig status not Ready yet (overallStatus empty; ApiReady=${api_ready:-?} CacheReady=${cache_ready:-?} ConsolePluginReady=${plugin_ready:-?})"
             WARNINGS=$((WARNINGS + 1))
         fi
     else

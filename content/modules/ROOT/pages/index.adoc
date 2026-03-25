@@ -35,12 +35,7 @@ chmod +x install-all-setup.sh verify-all-setup.sh
 
 . Wait until the script finishes. You should see *Phase 1* (basic-setup) complete, then *Phase 2* parallel jobs start and *Waiting for N parallel job(s)* complete without errors.
 
-. Source your shell profile so `ROX_CENTRAL_URL`, `ROX_API_TOKEN`, and related variables are available in new shells:
-+
-[source,sh,subs="attributes",role=execute]
-----
-source ~/.bashrc
-----
+IMPORTANT: If the script fails, run again. You can also check the logs in the `~/rhacs-demo/.setup-parallel-logs/` directory. If all else fails, message @foster on slack.
 
 === Verify success
 
