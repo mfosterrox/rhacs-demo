@@ -28,6 +28,9 @@
 # or LLM vars imply the same skips as above.
 #
 # After install: ./verify-all-setup.sh
+#
+# Phase 1 (basic-setup) streams to your terminal and to .setup-parallel-logs/basic-setup.log so
+# long runs do not look hung over SSH; parallel phases still log only to per-job files until they finish.
 # --- end help ---
 
 set -euo pipefail
@@ -367,16 +370,19 @@ main() {
     if [ "${SKIP_BASIC_SETUP:-0}" != "1" ]; then
         print_step "Phase 1: basic-setup (sequential)"
         local basic_log="${LOG_DIR}/basic-setup.log"
-        if (
+        print_info "Streaming output here and to ${basic_log} (this phase often runs several minutes)."
+        set +e
+        (
             cd "${REPO_ROOT}"
             exec bash "${REPO_ROOT}/basic-setup/install.sh"
-        ) >"${basic_log}" 2>&1; then
-            print_info "✓ basic-setup completed (log: ${basic_log})"
-        else
-            local ec=$?
-            print_error "✗ basic-setup failed (exit ${ec}); see ${basic_log}"
+        ) 2>&1 | tee "${basic_log}"
+        local basic_ec="${PIPESTATUS[0]}"
+        set -e
+        if [ "${basic_ec}" -ne 0 ]; then
+            print_error "✗ basic-setup failed (exit ${basic_ec}); see ${basic_log}"
             exit 1
         fi
+        print_info "✓ basic-setup completed (log: ${basic_log})"
         echo ""
     fi
 
