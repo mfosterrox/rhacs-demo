@@ -174,12 +174,37 @@ verify_fam() {
 verify_monitoring() {
     print_step "monitoring-setup"
     local failed=0
+    local ms_name="sample-stackrox-monitoring-stack"
+    local scrape_name="sample-stackrox-scrape-config"
+    local prom_sts="${ms_name}-prometheus"
 
-    if oc get monitoringstack sample-stackrox-monitoring-stack -n "${RHACS_NAMESPACE}" &>/dev/null; then
-        print_ok "MonitoringStack sample-stackrox-monitoring-stack exists in ${RHACS_NAMESPACE}"
+    if oc get monitoringstack "${ms_name}" -n "${RHACS_NAMESPACE}" &>/dev/null; then
+        print_ok "MonitoringStack ${ms_name} exists in ${RHACS_NAMESPACE}"
     else
-        print_fail "MonitoringStack not found (expected name sample-stackrox-monitoring-stack)"
+        print_fail "MonitoringStack not found (expected name ${ms_name})"
         failed=1
+    fi
+
+    if oc get scrapeconfig "${scrape_name}" -n "${RHACS_NAMESPACE}" &>/dev/null; then
+        print_ok "ScrapeConfig ${scrape_name} exists in ${RHACS_NAMESPACE}"
+    else
+        print_fail "ScrapeConfig not found (expected name ${scrape_name}) — re-run monitoring-setup/02-install-monitoring.sh or oc apply -f monitoring-examples/cluster-observability-operator/scrape-config.yaml"
+        failed=1
+    fi
+
+    if oc get "statefulset/${prom_sts}" -n "${RHACS_NAMESPACE}" &>/dev/null; then
+        local ready desired
+        ready=$(oc get "statefulset/${prom_sts}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        desired=$(oc get "statefulset/${prom_sts}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+        if [ "${desired:-0}" -ge 1 ] 2>/dev/null && [ "${ready:-0}" -ge "${desired}" ] 2>/dev/null; then
+            print_ok "Prometheus StatefulSet ${prom_sts} ready (readyReplicas=${ready}, desired=${desired})"
+        else
+            print_warn "Prometheus StatefulSet ${prom_sts} not fully ready (readyReplicas=${ready:-?}, desired=${desired:-?})"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    else
+        print_warn "Prometheus StatefulSet ${prom_sts} not found yet (COO may still be reconciling)"
+        WARNINGS=$((WARNINGS + 1))
     fi
 
     if [ -n "${ROX_API_TOKEN:-}" ]; then
