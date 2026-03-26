@@ -43,7 +43,7 @@ mcp_subs_namespace() {
 # — those would run during install and can hang with no output when the API is slow.
 export_bashrc_vars() {
     [ ! -f ~/.bashrc ] && return 0
-    for var in ROX_CENTRAL_URL ROX_API_TOKEN RHACS_NAMESPACE; do
+    for var in ROX_CENTRAL_ADDRESS ROX_API_TOKEN RHACS_NAMESPACE; do
         local line
         # grep exits 1 when no match; with pipefail that would kill the script under set -e
         line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1) || true
@@ -59,9 +59,9 @@ export_bashrc_vars() {
     done
 }
 
-# Convert ROX_CENTRAL_URL (https://host) to host:port for MCP config
+# Convert ROX_CENTRAL_ADDRESS (https://host) to host:port for MCP config
 get_central_host_port() {
-    local url="${ROX_CENTRAL_URL:-}"
+    local url="${ROX_CENTRAL_ADDRESS:-}"
     url="${url#https://}"
     url="${url#http://}"
     if [[ ! "$url" =~ :[0-9]+$ ]]; then
@@ -96,14 +96,14 @@ main() {
     fi
     print_info "Logged in as: ${oc_user}"
 
-    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
-        print_info "Detecting ROX_CENTRAL_URL from route central..."
-        ROX_CENTRAL_URL=$(mcp_oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
+    if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        print_info "Detecting ROX_CENTRAL_ADDRESS from route central..."
+        ROX_CENTRAL_ADDRESS=$(mcp_oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
     fi
 
-    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
-        print_error "ROX_CENTRAL_URL not set and could not detect from cluster"
-        print_info "Set it: export ROX_CENTRAL_URL='https://central-stackrox.apps.your-cluster.com'"
+    if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        print_error "ROX_CENTRAL_ADDRESS not set and could not detect from cluster"
+        print_info "Set it: export ROX_CENTRAL_ADDRESS='https://central-stackrox.apps.your-cluster.com'"
         exit 1
     fi
 

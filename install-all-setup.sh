@@ -147,7 +147,7 @@ prompt_lightspeed_ols_or_skip() {
 }
 
 generate_rox_api_token() {
-    local central_url="${ROX_CENTRAL_URL:-}"
+    local central_url="${ROX_CENTRAL_ADDRESS:-}"
     local password="${ROX_PASSWORD:-}"
     if [ -z "${central_url}" ] || [ -z "${password}" ]; then
         return 1
@@ -182,14 +182,14 @@ ensure_rox_api_token() {
         export ROX_API_TOKEN
         return 0
     fi
-    if [ -z "${ROX_PASSWORD:-}" ] || [ -z "${ROX_CENTRAL_URL:-}" ]; then
-        print_error "ROX_API_TOKEN is not set, and ROX_CENTRAL_URL/ROX_PASSWORD are missing for token generation."
+    if [ -z "${ROX_PASSWORD:-}" ] || [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        print_error "ROX_API_TOKEN is not set, and ROX_CENTRAL_ADDRESS/ROX_PASSWORD are missing for token generation."
         return 1
     fi
     print_step "Generating ROX_API_TOKEN from RHACS Central..."
     local token
     token=$(generate_rox_api_token) || {
-        print_error "Failed to generate ROX_API_TOKEN. Check ROX_PASSWORD and ROX_CENTRAL_URL."
+        print_error "Failed to generate ROX_API_TOKEN. Check ROX_PASSWORD and ROX_CENTRAL_ADDRESS."
         return 1
     }
     export ROX_API_TOKEN="${token}"
@@ -291,22 +291,22 @@ main() {
     export RHACS_NAMESPACE
 
     # ---- Core RHACS ----
-    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
+    if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
         if [ "${NONINTERACTIVE}" = "1" ]; then
-            print_error "ROX_CENTRAL_URL is required when INSTALL_ALL_NONINTERACTIVE=1"
+            print_error "ROX_CENTRAL_ADDRESS is required when INSTALL_ALL_NONINTERACTIVE=1"
             exit 1
         fi
-        print_info "ROX_CENTRAL_URL not set; attempting discovery from cluster..."
-        ROX_CENTRAL_URL=$(oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
-        export ROX_CENTRAL_URL
+        print_info "ROX_CENTRAL_ADDRESS not set; attempting discovery from cluster..."
+        ROX_CENTRAL_ADDRESS=$(oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)
+        export ROX_CENTRAL_ADDRESS
     fi
-    if [ -z "${ROX_CENTRAL_URL:-}" ]; then
-        prompt_if_missing ROX_CENTRAL_URL "RHACS Central URL (https://…): " || exit 1
+    if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        prompt_if_missing ROX_CENTRAL_ADDRESS "RHACS Central URL (https://…): " || exit 1
     fi
 
-    case "${ROX_CENTRAL_URL}" in
+    case "${ROX_CENTRAL_ADDRESS}" in
         http://*|https://*) ;;
-        *) print_warn "ROX_CENTRAL_URL should usually start with https://" ;;
+        *) print_warn "ROX_CENTRAL_ADDRESS should usually start with https://" ;;
     esac
 
     if [ -z "${ROX_API_TOKEN:-}" ] && [ -z "${ROX_PASSWORD:-}" ]; then
@@ -355,7 +355,7 @@ main() {
 
     export GRPC_ENFORCE_ALPN_ENABLED="${GRPC_ENFORCE_ALPN_ENABLED:-false}"
 
-    export ROX_CENTRAL_URL ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME \
+    export ROX_CENTRAL_ADDRESS ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME \
         OPENAI_API_KEY LLM_API_KEY LLM_PROVIDER LLM_MODEL LLM_URL \
         AZURE_DEPLOYMENT AZURE_API_VERSION WATSONX_PROJECT_ID \
         SUBSCRIPTION_USERNAME SUBSCRIPTION_PASSWORD DEPLOY_SAMPLE_VMS MCP_NAMESPACE \

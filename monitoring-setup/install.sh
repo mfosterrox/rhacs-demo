@@ -26,7 +26,7 @@ cd "$SCRIPT_DIR"
 # Utility Functions
 #================================================================
 
-# Strip https:// from ROX_CENTRAL_URL for roxctl -e flag
+# Strip https:// from ROX_CENTRAL_ADDRESS for roxctl -e flag
 # roxctl expects host:port format and defaults to https
 #
 # Usage:
@@ -34,10 +34,10 @@ cd "$SCRIPT_DIR"
 #   roxctl -e "$ROX_ENDPOINT" --token "$ROX_API_TOKEN" central userpki list ...
 #
 # Example:
-#   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
+#   If ROX_CENTRAL_ADDRESS="https://central-stackrox.apps.cluster.com"
 #   Then get_rox_endpoint returns "central-stackrox.apps.cluster.com"
 get_rox_endpoint() {
-    local url="${ROX_CENTRAL_URL:-}"
+    local url="${ROX_CENTRAL_ADDRESS:-}"
     # Remove https:// prefix if present
     echo "${url#https://}"
 }
@@ -47,7 +47,7 @@ get_rox_endpoint() {
 load_rox_from_bashrc() {
     [ ! -f ~/.bashrc ] && return 0
     local var line
-    for var in ROX_CENTRAL_URL ROX_API_TOKEN RHACS_NAMESPACE; do
+    for var in ROX_CENTRAL_ADDRESS ROX_API_TOKEN RHACS_NAMESPACE; do
         line=$(grep -E "^(export[[:space:]]+)?${var}=" ~/.bashrc 2>/dev/null | head -1) || true
         [ -z "$line" ] && continue
         if grep -qE '\$\(|`' <<< "$line"; then
@@ -78,8 +78,8 @@ load_rox_from_bashrc
 # Check required environment variables
 MISSING_VARS=0
 
-if [ -z "${ROX_CENTRAL_URL:-}" ]; then
-  error "ROX_CENTRAL_URL is not set"
+if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+  error "ROX_CENTRAL_ADDRESS is not set"
   MISSING_VARS=$((MISSING_VARS + 1))
 fi
 
@@ -93,7 +93,7 @@ if [ $MISSING_VARS -gt 0 ]; then
   error "Missing required environment variables. Please set them and try again."
   echo ""
   echo "Example:"
-  echo "  export ROX_CENTRAL_URL='https://central-stackrox.apps.cluster.com'"
+  echo "  export ROX_CENTRAL_ADDRESS='https://central-stackrox.apps.cluster.com'"
   echo "  export ROX_API_TOKEN='your-api-token'"
   echo ""
   exit 1
@@ -172,14 +172,14 @@ echo "============================================"
 echo ""
 
 # Non-login shells do not source ~/.bashrc; sub-scripts do not export back to this shell.
-log "Loading ROX_CENTRAL_URL / ROX_API_TOKEN from ~/.bashrc before verification..."
+log "Loading ROX_CENTRAL_ADDRESS / ROX_API_TOKEN from ~/.bashrc before verification..."
 load_rox_from_bashrc
-if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
-  export ROX_CENTRAL_URL ROX_API_TOKEN
+if [ -n "${ROX_CENTRAL_ADDRESS:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
+  export ROX_CENTRAL_ADDRESS ROX_API_TOKEN
 fi
 
-if [ -z "${ROX_CENTRAL_URL:-}" ] || [ -z "${ROX_API_TOKEN:-}" ]; then
-  warn "Skipping API/metrics verification — ROX_CENTRAL_URL or ROX_API_TOKEN not set after reading ~/.bashrc."
+if [ -z "${ROX_CENTRAL_ADDRESS:-}" ] || [ -z "${ROX_API_TOKEN:-}" ]; then
+  warn "Skipping API/metrics verification — ROX_CENTRAL_ADDRESS or ROX_API_TOKEN not set after reading ~/.bashrc."
   warn "Run: source ~/.bashrc   then export or re-run this script."
 else
   # Give auth system time to propagate changes
@@ -190,11 +190,11 @@ else
 if [ -z "${AUTH_PROVIDER_ID:-}" ]; then
   # Try to get it from the API
   if command -v jq &>/dev/null; then
-    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_ADDRESS/v1/authProviders" \
       -H "Authorization: Bearer $ROX_API_TOKEN" | \
       jq -r '.authProviders[]? | select(.name=="Monitoring") | .id' 2>/dev/null)
   else
-    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+    AUTH_PROVIDER_ID=$(curl -k -s "$ROX_CENTRAL_ADDRESS/v1/authProviders" \
       -H "Authorization: Bearer $ROX_API_TOKEN" | \
       grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
   fi
@@ -202,7 +202,7 @@ fi
 
 # Verify the group was created
 log "Checking groups for auth provider..."
-GROUPS_LIST=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups" | grep -A5 "$AUTH_PROVIDER_ID" || echo "")
+GROUPS_LIST=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_ADDRESS/v1/groups" | grep -A5 "$AUTH_PROVIDER_ID" || echo "")
 
 if [ -n "$GROUPS_LIST" ]; then
   log "✓ Group mapping found for Monitoring auth provider"
@@ -210,7 +210,7 @@ if [ -n "$GROUPS_LIST" ]; then
   # Test client certificate authentication
   echo ""
   log "Testing client certificate authentication..."
-  AUTH_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_URL/v1/auth/status" 2>&1)
+  AUTH_TEST=$(curl -k -s --cert client.crt --key client.key "$ROX_CENTRAL_ADDRESS/v1/auth/status" 2>&1)
   
   if echo "$AUTH_TEST" | grep -q '"userId"'; then
     log "✓ Client certificate authentication successful!"
@@ -219,7 +219,7 @@ if [ -n "$GROUPS_LIST" ]; then
     echo ""
     log "Testing metrics endpoint access..."
     set +e
-    METRICS_TEST=$(curl -k -s --max-time 30 --cert client.crt --key client.key "$ROX_CENTRAL_URL/metrics" 2>&1 | head -10)
+    METRICS_TEST=$(curl -k -s --max-time 30 --cert client.crt --key client.key "$ROX_CENTRAL_ADDRESS/metrics" 2>&1 | head -10)
     set -e
 
     if echo "$METRICS_TEST" | grep -q "access for this user is not authorized"; then
@@ -229,7 +229,7 @@ if [ -n "$GROUPS_LIST" ]; then
       error "Run the troubleshooting script to fix:"
       echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
     elif echo "$METRICS_TEST" | grep -q '^curl:'; then
-      warn "Metrics curl failed (bad URL or network). Ensure ROX_CENTRAL_URL is set: source ~/.bashrc"
+      warn "Metrics curl failed (bad URL or network). Ensure ROX_CENTRAL_ADDRESS is set: source ~/.bashrc"
       echo "$METRICS_TEST"
     elif echo "$METRICS_TEST" | grep -q '^#'; then
       log "✓ Metrics endpoint access successful!"
@@ -241,8 +241,8 @@ if [ -n "$GROUPS_LIST" ]; then
     warn "Authentication failed: credentials not found"
     echo ""
     warn "This may take 10-30 seconds to propagate. Wait a moment and try:"
-    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/v1/auth/status"
-    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/metrics"
+    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_ADDRESS/v1/auth/status"
+    echo "  curl --cert client.crt --key client.key -k \$ROX_CENTRAL_ADDRESS/metrics"
     echo ""
     warn "If it continues to fail, run the troubleshooting script:"
     echo "  cd $SCRIPT_DIR && ./troubleshoot-auth.sh"
@@ -273,7 +273,7 @@ echo "  - ca.crt / ca.key          (CA certificate - configured in auth provider
 echo "  - client.crt / client.key  (Client certificate - use for API calls)"
 echo ""
 echo "Test authentication:"
-echo "  cd $SCRIPT_DIR && curl --cert client.crt --key client.key -k \$ROX_CENTRAL_URL/metrics"
+echo "  cd $SCRIPT_DIR && curl --cert client.crt --key client.key -k \$ROX_CENTRAL_ADDRESS/metrics"
 echo ""
 echo ""
 echo "Note: Auth changes may take 10-30 seconds to propagate."

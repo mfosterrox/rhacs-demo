@@ -16,7 +16,7 @@
 #   1. Command-line arguments
 #   2. Current environment variables
 #   3. Variables defined in ~/.bashrc
-#   4. Auto-detection from cluster (for ROX_CENTRAL_URL)
+#   4. Auto-detection from cluster (for ROX_CENTRAL_ADDRESS)
 #
 
 set -euo pipefail
@@ -57,7 +57,7 @@ print_step() {
 # Utility Functions
 #================================================================
 
-# Strip https:// from ROX_CENTRAL_URL for roxctl -e flag
+# Strip https:// from ROX_CENTRAL_ADDRESS for roxctl -e flag
 # roxctl expects host:port format and defaults to https
 #
 # Usage:
@@ -65,10 +65,10 @@ print_step() {
 #   roxctl -e "$ROX_ENDPOINT" central userpki create ...
 #
 # Example:
-#   If ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
+#   If ROX_CENTRAL_ADDRESS="https://central-stackrox.apps.cluster.com"
 #   Then get_rox_endpoint returns "central-stackrox.apps.cluster.com"
 get_rox_endpoint() {
-    local url="${ROX_CENTRAL_URL:-}"
+    local url="${ROX_CENTRAL_ADDRESS:-}"
     # Remove https:// prefix if present
     echo "${url#https://}"
 }
@@ -234,12 +234,12 @@ add_bashrc_vars_from_cluster() {
 
     touch ~/.bashrc
 
-    if ! grep -qE "^(export[[:space:]]+)?ROX_CENTRAL_URL=" ~/.bashrc 2>/dev/null; then
+    if ! grep -qE "^(export[[:space:]]+)?ROX_CENTRAL_ADDRESS=" ~/.bashrc 2>/dev/null; then
         local url
         url=$(oc get route "${route}" -n "${ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null) || true
         if [ -n "${url}" ]; then
-            echo "export ROX_CENTRAL_URL=\"${url}\"" >> ~/.bashrc
-            print_info "Added ROX_CENTRAL_URL to ~/.bashrc"
+            echo "export ROX_CENTRAL_ADDRESS=\"${url}\"" >> ~/.bashrc
+            print_info "Added ROX_CENTRAL_ADDRESS to ~/.bashrc"
         fi
     fi
 
@@ -281,7 +281,7 @@ add_bashrc_vars_from_cluster() {
 
 # Function to export variables from ~/.bashrc without sourcing (avoids exit from /etc/bashrc etc)
 export_bashrc_vars() {
-    local vars=(ROX_CENTRAL_URL ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME KUBECONFIG GUID CLOUDUSER)
+    local vars=(ROX_CENTRAL_ADDRESS ROX_PASSWORD RHACS_NAMESPACE RHACS_ROUTE_NAME KUBECONFIG GUID CLOUDUSER)
     [ ! -f ~/.bashrc ] && return 0
     
     for var in "${vars[@]}"; do
@@ -296,7 +296,7 @@ export_bashrc_vars() {
 
 # Generate API token using curl (outputs only token to stdout)
 generate_api_token() {
-    local central_url="${ROX_CENTRAL_URL:-}"
+    local central_url="${ROX_CENTRAL_ADDRESS:-}"
     local password="${ROX_PASSWORD:-}"
     
     if [ -z "${central_url}" ] || [ -z "${password}" ]; then
@@ -426,8 +426,8 @@ main() {
     local missing_vars=0
     
     # Check for RHACS API/CLI credentials (needed for roxctl and API calls)
-    print_info "Checking ROX_CENTRAL_URL..."
-    if ! check_variable "ROX_CENTRAL_URL" "RHACS Central URL for API access and roxctl CLI"; then
+    print_info "Checking ROX_CENTRAL_ADDRESS..."
+    if ! check_variable "ROX_CENTRAL_ADDRESS" "RHACS Central URL for API access and roxctl CLI"; then
         missing_vars=$((missing_vars + 1))
     fi
     print_info "Checking ROX_PASSWORD..."
@@ -458,7 +458,7 @@ main() {
         print_error "Please add the missing variables to ~/.bashrc or export them in your environment"
         print_error ""
         print_error "Required variables:"
-        print_error "  - ROX_CENTRAL_URL"
+        print_error "  - ROX_CENTRAL_ADDRESS"
         print_error "  - ROX_PASSWORD"
         print_error ""
         exit 1
@@ -525,7 +525,7 @@ main() {
                 print_error "Please verify:"
                 print_error "  1. RHACS Central is running and accessible"
                 print_error "  2. ROX_PASSWORD is correct"
-                print_error "  3. ROX_CENTRAL_URL is accessible"
+                print_error "  3. ROX_CENTRAL_ADDRESS is accessible"
                 print_error ""
                 exit 1
             else
@@ -545,13 +545,13 @@ main() {
             print_error "Possible causes:"
             print_error "  1. RHACS Central is not running or not accessible"
             print_error "  2. ROX_PASSWORD is incorrect or not set"
-            print_error "  3. ROX_CENTRAL_URL is incorrect or unreachable"
+            print_error "  3. ROX_CENTRAL_ADDRESS is incorrect or unreachable"
             print_error "  4. Network connectivity issues"
             print_error ""
             print_error "To debug:"
             print_error "  - Check Central status: oc get pods -n ${RHACS_NAMESPACE:-stackrox}"
             print_error "  - Verify password: oc get secret central-htpasswd -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.data.password}' | base64 -d"
-            print_error "  - Test URL: curl -k ${ROX_CENTRAL_URL:-<CENTRAL_URL>}/v1/ping"
+            print_error "  - Test URL: curl -k ${ROX_CENTRAL_ADDRESS:-<CENTRAL_URL>}/v1/ping"
             print_error ""
             exit 1
         fi
@@ -626,8 +626,8 @@ main() {
     print_info "=================================="
     print_info "Username: admin"
     
-    if [ -n "${ROX_CENTRAL_URL:-}" ]; then
-        print_info "Central URL: ${ROX_CENTRAL_URL}"
+    if [ -n "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        print_info "Central URL: ${ROX_CENTRAL_ADDRESS}"
     fi
     
     if [ -n "${ROX_PASSWORD:-}" ]; then
@@ -674,7 +674,7 @@ main() {
             print_info "To retrieve or reset the admin password:"
             print_info "  1. Check Central logs: oc logs -n ${ns} deployment/central --tail=1000 | grep -i password"
             print_info "  2. Check if stored in ~/.bashrc: grep ROX_PASSWORD ~/.bashrc"
-            print_info "  3. Reset via Central UI at: ${ROX_CENTRAL_URL:-[Central URL]}"
+            print_info "  3. Reset via Central UI at: ${ROX_CENTRAL_ADDRESS:-[Central URL]}"
             print_info ""
         fi
     fi

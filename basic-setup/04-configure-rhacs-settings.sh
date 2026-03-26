@@ -40,7 +40,7 @@ trap 'error_handler $? $LINENO' ERR
 
 # Default values
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
-ROX_CENTRAL_URL="${ROX_CENTRAL_URL:-}"
+ROX_CENTRAL_ADDRESS="${ROX_CENTRAL_ADDRESS:-}"
 ROX_PASSWORD="${ROX_PASSWORD:-}"
 
 # Function to check if jq is installed
@@ -94,8 +94,8 @@ get_admin_password() {
 
 # Function to get Central URL
 get_central_url() {
-    if [ -n "${ROX_CENTRAL_URL}" ]; then
-        echo "${ROX_CENTRAL_URL}"
+    if [ -n "${ROX_CENTRAL_ADDRESS}" ]; then
+        echo "${ROX_CENTRAL_ADDRESS}"
         return 0
     fi
     
@@ -361,7 +361,7 @@ main() {
     local central_url=$(get_central_url)
     if [ -z "${central_url}" ]; then
         print_error "Could not determine Central URL"
-        print_error "Please ensure RHACS is installed or set ROX_CENTRAL_URL"
+        print_error "Please ensure RHACS is installed or set ROX_CENTRAL_ADDRESS"
         exit 1
     fi
     print_info "Central URL: ${central_url}"

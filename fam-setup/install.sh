@@ -4,7 +4,7 @@
 # Description: Enable file activity monitoring on SecuredCluster, submit FAM policies to ACS via API,
 #              apply fam-cron-exec-target.yaml (CronJob that oc exec’s into the payment processor and
 #              touch /etc/passwd every 10 minutes), and optionally run a one-shot oc exec for an immediate demo.
-# Requires: ROX_CENTRAL_URL (or auto-detect), ROX_API_TOKEN, oc logged in, jq
+# Requires: ROX_CENTRAL_ADDRESS (or auto-detect), ROX_API_TOKEN, oc logged in, jq
 #
 # Optional env:
 #   FAM_SKIP_CRONJOB=1        — do not apply the exec CronJob manifest
@@ -39,8 +39,8 @@ FAM_EXEC_CONTAINER="${FAM_EXEC_CONTAINER:-}"
 
 # Get Central URL
 get_central_url() {
-    if [ -n "${ROX_CENTRAL_URL:-}" ]; then
-        echo "${ROX_CENTRAL_URL}"
+    if [ -n "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        echo "${ROX_CENTRAL_ADDRESS}"
         return 0
     fi
     local url
@@ -81,7 +81,7 @@ if ! command -v jq &>/dev/null; then
 fi
 
 CENTRAL_URL=$(get_central_url) || {
-    print_error "Could not determine ROX_CENTRAL_URL. Set it or ensure RHACS route exists."
+    print_error "Could not determine ROX_CENTRAL_ADDRESS. Set it or ensure RHACS route exists."
     exit 1
 }
 

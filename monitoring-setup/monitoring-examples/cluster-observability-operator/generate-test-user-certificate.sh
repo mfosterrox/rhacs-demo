@@ -5,7 +5,7 @@
 # After having configured User Certificates auth provider in RHACS, you can test
 # the access with:
 #
-# curl --cert tls.crt --key tls.key $ROX_CENTRAL_URL/v1/auth/status
+# curl --cert tls.crt --key tls.key $ROX_CENTRAL_ADDRESS/v1/auth/status
 
 # Generate a private key and certificate:
 rm -f tls.key tls.crt

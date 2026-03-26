@@ -33,7 +33,7 @@ wait_for_prometheus_server_role() {
     local roles_json http_code
     roles_json=$(curl -k -s -w "\n%{http_code}" --max-time 30 \
       -H "Authorization: Bearer $ROX_API_TOKEN" \
-      "$ROX_CENTRAL_URL/v1/roles" 2>/dev/null) || true
+      "$ROX_CENTRAL_ADDRESS/v1/roles" 2>/dev/null) || true
     http_code=$(echo "$roles_json" | tail -n1)
     roles_json=$(echo "$roles_json" | sed '$d')
     if ! echo "$http_code" | grep -qE '^2'; then
@@ -69,8 +69,8 @@ echo "=========================================="
 echo ""
 
 # Check required environment variables
-if [ -z "${ROX_CENTRAL_URL:-}" ]; then
-  error "ROX_CENTRAL_URL is not set"
+if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
+  error "ROX_CENTRAL_ADDRESS is not set"
   exit 1
 fi
 
@@ -141,7 +141,7 @@ sleep 30
 # Wait for Central API to be ready (may take a moment after restart)
 log "Checking Central API readiness..."
 for i in $(seq 1 30); do
-  if code=$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 10 "$ROX_CENTRAL_URL/v1/auth/status" -H "Authorization: Bearer $ROX_API_TOKEN") && echo "$code" | grep -qE "^[234][0-9]{2}$"; then
+  if code=$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 10 "$ROX_CENTRAL_ADDRESS/v1/auth/status" -H "Authorization: Bearer $ROX_API_TOKEN") && echo "$code" | grep -qE "^[234][0-9]{2}$"; then
     log "Central API is ready"
     break
   fi
@@ -153,11 +153,11 @@ log "Checking for existing 'Monitoring' auth provider..."
 
 # Get all auth providers and extract the ID for "Monitoring"
 if command -v jq &>/dev/null; then
-  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_ADDRESS/v1/authProviders" \
     -H "Authorization: Bearer $ROX_API_TOKEN" | \
     jq -r '.authProviders[]? | select(.name=="Monitoring") | .id' 2>/dev/null) || EXISTING_AUTH_ID=""
 else
-  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_URL/v1/authProviders" \
+  EXISTING_AUTH_ID=$(curl -k -s "$ROX_CENTRAL_ADDRESS/v1/authProviders" \
     -H "Authorization: Bearer $ROX_API_TOKEN" | \
     grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4) || EXISTING_AUTH_ID=""
 fi
@@ -165,7 +165,7 @@ fi
 # Delete if exists
 if [ -n "$EXISTING_AUTH_ID" ] && [ "$EXISTING_AUTH_ID" != "null" ]; then
   log "Deleting existing 'Monitoring' auth provider (ID: $EXISTING_AUTH_ID)..."
-  curl -k -s -X DELETE "$ROX_CENTRAL_URL/v1/authProviders/$EXISTING_AUTH_ID" \
+  curl -k -s -X DELETE "$ROX_CENTRAL_ADDRESS/v1/authProviders/$EXISTING_AUTH_ID" \
     -H "Authorization: Bearer $ROX_API_TOKEN" > /dev/null
   log "✓ Deleted existing auth provider"
   sleep 2
@@ -178,7 +178,7 @@ AUTH_PROVIDER_ID=""
 max_auth_retries=4
 auth_retry_delay=20
 for auth_attempt in $(seq 1 $max_auth_retries); do
-  AUTH_PROVIDER_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/authProviders" \
+  AUTH_PROVIDER_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_ADDRESS/v1/authProviders" \
     -H "Authorization: Bearer $ROX_API_TOKEN" \
     -H "Content-Type: application/json" \
     --data-raw "$(envsubst < monitoring-examples/rhacs/auth-provider.json.tpl)")
@@ -227,7 +227,7 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
   group_created=false
   
   for attempt in $(seq 1 $max_retries); do
-    GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_URL/v1/groups" \
+    GROUP_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X POST "$ROX_CENTRAL_ADDRESS/v1/groups" \
       -H "Authorization: Bearer $ROX_API_TOKEN" \
       -H "Content-Type: application/json" \
       --data-raw "$GROUP_PAYLOAD")
@@ -278,7 +278,7 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
   if [ "$group_created" != "true" ]; then
     echo ""
     warn "Attempting to verify if group exists..."
-    EXISTING_GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/groups" | \
+    EXISTING_GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_ADDRESS/v1/groups" | \
       grep -A10 "$AUTH_PROVIDER_ID" 2>/dev/null) || EXISTING_GROUPS=""
     
     if [ -n "$EXISTING_GROUPS" ]; then
@@ -299,7 +299,7 @@ if [ -n "$AUTH_PROVIDER_ID" ]; then
       error "   - Role: Prometheus Server"
       error ""
       error "2. Via API:"
-      error "   curl -k -X POST \"\$ROX_CENTRAL_URL/v1/groups\" \\"
+      error "   curl -k -X POST \"\$ROX_CENTRAL_ADDRESS/v1/groups\" \\"
       error "     -H \"Authorization: Bearer \$ROX_API_TOKEN\" \\"
       error "     -H \"Content-Type: application/json\" \\"
       error "     -d '{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Prometheus Server\"}'"

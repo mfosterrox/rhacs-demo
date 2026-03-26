@@ -162,12 +162,12 @@ echo ""
 step "Step 6: Removing User-Certificate auth provider and groups"
 echo ""
 
-if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
+if [ -n "${ROX_CENTRAL_ADDRESS:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
     log "Searching for 'Monitoring' auth provider..."
     
     # Get list of auth providers
     AUTH_PROVIDERS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-        "$ROX_CENTRAL_URL/v1/authProviders" 2>/dev/null || echo "")
+        "$ROX_CENTRAL_ADDRESS/v1/authProviders" 2>/dev/null || echo "")
     
     if echo "$AUTH_PROVIDERS" | grep -q '"name":"Monitoring"'; then
         PROVIDER_ID=$(echo "$AUTH_PROVIDERS" | jq -r '.authProviders[] | select(.name=="Monitoring") | .id' 2>/dev/null || \
@@ -179,7 +179,7 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
             # First, delete associated groups
             log "Searching for groups associated with this auth provider..."
             GROUPS=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-                "$ROX_CENTRAL_URL/v1/groups" 2>/dev/null || echo "")
+                "$ROX_CENTRAL_ADDRESS/v1/groups" 2>/dev/null || echo "")
             
             if echo "$GROUPS" | grep -q "$PROVIDER_ID"; then
                 log "Found associated groups, deleting..."
@@ -191,7 +191,7 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
                             log "  Deleting group: $group_id"
                             curl -k -s -X DELETE \
                                 -H "Authorization: Bearer $ROX_API_TOKEN" \
-                                "$ROX_CENTRAL_URL/v1/groups/$group_id" >/dev/null 2>&1
+                                "$ROX_CENTRAL_ADDRESS/v1/groups/$group_id" >/dev/null 2>&1
                         fi
                     done
                     log "✓ Associated groups deleted"
@@ -204,7 +204,7 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
             log "Deleting auth provider..."
             DELETE_RESPONSE=$(curl -k -s -w "\n%{http_code}" -X DELETE \
                 -H "Authorization: Bearer $ROX_API_TOKEN" \
-                "$ROX_CENTRAL_URL/v1/authProviders/$PROVIDER_ID" 2>&1)
+                "$ROX_CENTRAL_ADDRESS/v1/authProviders/$PROVIDER_ID" 2>&1)
             
             HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -1)
             if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
@@ -221,7 +221,7 @@ if [ -n "${ROX_CENTRAL_URL:-}" ] && [ -n "${ROX_API_TOKEN:-}" ]; then
         log "✓ Auth provider 'Monitoring' not found"
     fi
 else
-    warning "ROX_CENTRAL_URL or ROX_API_TOKEN not set"
+    warning "ROX_CENTRAL_ADDRESS or ROX_API_TOKEN not set"
     warning "Skipping auth provider and groups deletion"
     warning "You may need to delete them manually in RHACS UI:"
     warning "  Platform Configuration → Access Control → Auth Providers → Delete 'Monitoring'"

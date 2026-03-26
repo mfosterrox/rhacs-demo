@@ -29,7 +29,7 @@ print_step() {
 # Default values
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 COMPLIANCE_NAMESPACE="${COMPLIANCE_NAMESPACE:-openshift-compliance}"
-ROX_CENTRAL_URL="${ROX_CENTRAL_URL:-}"
+ROX_CENTRAL_ADDRESS="${ROX_CENTRAL_ADDRESS:-}"
 ROX_PASSWORD="${ROX_PASSWORD:-}"
 SCAN_NAME="acs-catch-all"
 
@@ -59,8 +59,8 @@ ensure_jq() {
 
 # Function to get Central URL
 get_central_url() {
-    if [ -n "${ROX_CENTRAL_URL}" ]; then
-        echo "${ROX_CENTRAL_URL}"
+    if [ -n "${ROX_CENTRAL_ADDRESS}" ]; then
+        echo "${ROX_CENTRAL_ADDRESS}"
         return 0
     fi
     

@@ -15,7 +15,7 @@ This setup enables file activity monitoring on the SecuredCluster, submits FAM p
 ```bash
 # Set credentials (if not in ~/.bashrc)
 export ROX_API_TOKEN='your-api-token'
-# ROX_CENTRAL_URL is auto-detected from cluster route
+# ROX_CENTRAL_ADDRESS is auto-detected from cluster route
 
 # Run the install script
 ./install.sh

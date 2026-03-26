@@ -69,8 +69,8 @@ skip_section() {
 }
 
 get_central_url() {
-    if [ -n "${ROX_CENTRAL_URL:-}" ]; then
-        echo "${ROX_CENTRAL_URL}"
+    if [ -n "${ROX_CENTRAL_ADDRESS:-}" ]; then
+        echo "${ROX_CENTRAL_ADDRESS}"
         return 0
     fi
     oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || echo ""

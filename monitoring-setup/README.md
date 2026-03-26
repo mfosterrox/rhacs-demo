@@ -22,17 +22,17 @@ This setup aligns with:
 
 The scripts use the following environment variables:
 
-- `ROX_CENTRAL_URL`: Full URL to RHACS Central (e.g., `https://central-stackrox.apps.cluster.com`)
+- `ROX_CENTRAL_ADDRESS`: Full URL to RHACS Central (e.g., `https://central-stackrox.apps.cluster.com`)
 - `ROX_API_TOKEN`: API token for authentication
 
 **Important for `roxctl` usage:**
 
-The `roxctl` CLI expects `host:port` format for the `-e` flag and defaults to `https://`. If your `ROX_CENTRAL_URL` includes `https://`, strip it before using with `roxctl`:
+The `roxctl` CLI expects `host:port` format for the `-e` flag and defaults to `https://`. If your `ROX_CENTRAL_ADDRESS` includes `https://`, strip it before using with `roxctl`:
 
 ```bash
 # Correct usage with roxctl
-export ROX_CENTRAL_URL="https://central-stackrox.apps.cluster.com"
-ROX_ENDPOINT="${ROX_CENTRAL_URL#https://}"  # Strips https:// prefix
+export ROX_CENTRAL_ADDRESS="https://central-stackrox.apps.cluster.com"
+ROX_ENDPOINT="${ROX_CENTRAL_ADDRESS#https://}"  # Strips https:// prefix
 roxctl -e "$ROX_ENDPOINT:443" central userpki list
 
 # Alternative: use the helper function in the scripts
@@ -44,7 +44,7 @@ For `curl` commands, use the full URL with `https://`:
 
 ```bash
 # Correct usage with curl
-curl -k -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_URL/v1/auth/status"
+curl -k -H "Authorization: Bearer $ROX_API_TOKEN" "$ROX_CENTRAL_ADDRESS/v1/auth/status"
 ```
 
 ## Quick Start
@@ -55,7 +55,7 @@ Run the comprehensive setup script:
 
 ```bash
 cd monitoring-setup
-export ROX_CENTRAL_URL="https://your-central-url"
+export ROX_CENTRAL_ADDRESS="https://your-central-url"
 export ROX_API_TOKEN="your-api-token"
 ./install.sh
 ```
@@ -103,7 +103,7 @@ cd monitoring-setup
 ./02-install-monitoring.sh
 
 # Step 3: Configure RHACS authentication
-export ROX_CENTRAL_URL="https://your-central-url"
+export ROX_CENTRAL_ADDRESS="https://your-central-url"
 export ROX_API_TOKEN="your-api-token"
 ./03-configure-rhacs-auth.sh
 ```
@@ -170,8 +170,8 @@ For testing purposes, you can use TLS client certificates:
 
 3. Test access:
    ```bash
-   export ROX_CENTRAL_URL='https://your-central-url'
-   curl --cert tls.crt --key tls.key $ROX_CENTRAL_URL/v1/auth/status
+   export ROX_CENTRAL_ADDRESS='https://your-central-url'
+   curl --cert tls.crt --key tls.key $ROX_CENTRAL_ADDRESS/v1/auth/status
    ```
 
 **Detailed Instructions**: See [CERTIFICATE-AUTH-GUIDE.md](CERTIFICATE-AUTH-GUIDE.md) for step-by-step configuration with screenshots and troubleshooting.
@@ -220,10 +220,10 @@ To configure custom metrics:
 
 ```bash
 # Get current configuration
-curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/v1/config | jq
+curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_ADDRESS/v1/config | jq
 
 # Set custom metrics (example: image vulnerabilities)
-curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/v1/config | \
+curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_ADDRESS/v1/config | \
   jq '.privateConfig.metrics.imageVulnerabilities = {
         gatheringPeriodMinutes: 10,
         descriptors: {
@@ -235,7 +235,7 @@ curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/v1/config | \
           }
         }
       } | { config: . }' | \
-  curl -X PUT -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/v1/config --data-binary @-
+  curl -X PUT -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_ADDRESS/v1/config --data-binary @-
 ```
 
 ## Monitoring Stack
@@ -311,17 +311,17 @@ kubectl describe scrapeconfig sample-stackrox-scrape-config -n stackrox
 
 **With TLS certificates:**
 ```bash
-export ROX_CENTRAL_URL='https://your-central-url'
-curl --cert tls.crt --key tls.key -k $ROX_CENTRAL_URL/v1/auth/status
-curl --cert tls.crt --key tls.key -k $ROX_CENTRAL_URL/metrics
+export ROX_CENTRAL_ADDRESS='https://your-central-url'
+curl --cert tls.crt --key tls.key -k $ROX_CENTRAL_ADDRESS/v1/auth/status
+curl --cert tls.crt --key tls.key -k $ROX_CENTRAL_ADDRESS/metrics
 ```
 
 **With API token:**
 ```bash
 export ROX_API_TOKEN='your-token-here'
-export ROX_CENTRAL_URL='https://your-central-url'
-curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/v1/auth/status
-curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_URL/metrics
+export ROX_CENTRAL_ADDRESS='https://your-central-url'
+curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_ADDRESS/v1/auth/status
+curl -H "Authorization: Bearer $ROX_API_TOKEN" -k $ROX_CENTRAL_ADDRESS/metrics
 ```
 
 ### View Prometheus Logs
@@ -352,7 +352,7 @@ kubectl logs -n stackrox -l app.kubernetes.io/name=prometheus -f
 
 **If using Cluster Observability Operator** (endpoints work locally but Prometheus not scraping):
 
-If `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics` works but the dashboard shows no data, Prometheus may be failing TLS verification when scraping Central. The ScrapeConfig includes `insecureSkipVerify: true` to bypass server cert verification. Re-apply the scrape config:
+If `curl --cert client.crt --key client.key -k $ROX_CENTRAL_ADDRESS/metrics` works but the dashboard shows no data, Prometheus may be failing TLS verification when scraping Central. The ScrapeConfig includes `insecureSkipVerify: true` to bypass server cert verification. Re-apply the scrape config:
 
 ```bash
 oc apply -f monitoring-examples/cluster-observability-operator/scrape-config.yaml
@@ -365,19 +365,19 @@ Run the debug script to test connectivity at each step (RHACS → Prometheus →
 
 ```bash
 cd monitoring-setup
-export ROX_CENTRAL_URL="https://your-central-url"
+export ROX_CENTRAL_ADDRESS="https://your-central-url"
 ./debug-monitoring.sh
 ```
 
 Key checks:
-- **Client cert auth**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/v1/auth/status`
-- **Metrics endpoint**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/metrics | head -20`
+- **Client cert auth**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_ADDRESS/v1/auth/status`
+- **Metrics endpoint**: `curl --cert client.crt --key client.key -k $ROX_CENTRAL_ADDRESS/metrics | head -20`
 - **Prometheus targets**: `oc port-forward -n stackrox svc/sample-stackrox-monitoring-stack-prometheus 9090:9090` then open http://localhost:9090/targets
 - **Enable metrics**: Policy violations, image/node vulnerabilities are disabled by default. Enable in RHACS: **Platform Configuration → System Configuration → Prometheus metrics**
 
 ### Issue: Client certificate authentication fails with "credentials not found"
 
-**Symptoms:** `curl --cert client.crt --key client.key -k $ROX_CENTRAL_URL/v1/auth/status` returns `{"code":16, "message":"credentials not found"}`
+**Symptoms:** `curl --cert client.crt --key client.key -k $ROX_CENTRAL_ADDRESS/v1/auth/status` returns `{"code":16, "message":"credentials not found"}`
 
 **Root cause:** The group mapping (role assignment) for the auth provider wasn't created or hasn't propagated yet.
 
@@ -410,11 +410,11 @@ Key checks:
    ```bash
    # Get the auth provider ID
    AUTH_PROVIDER_ID=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-     "$ROX_CENTRAL_URL/v1/authProviders" | \
+     "$ROX_CENTRAL_ADDRESS/v1/authProviders" | \
      grep -B2 '"name":"Monitoring"' | grep '"id"' | cut -d'"' -f4)
    
    # Create the group
-   curl -k -X POST "$ROX_CENTRAL_URL/v1/groups" \
+   curl -k -X POST "$ROX_CENTRAL_ADDRESS/v1/groups" \
      -H "Authorization: Bearer $ROX_API_TOKEN" \
      -H "Content-Type: application/json" \
      -d "{\"props\":{\"authProviderId\":\"$AUTH_PROVIDER_ID\",\"key\":\"\",\"value\":\"\"},\"roleName\":\"Prometheus Server\"}"

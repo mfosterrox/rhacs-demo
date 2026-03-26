@@ -34,14 +34,14 @@ cd mcp-server-setup
 1. Applies Kubernetes manifests from `manifests/` (based on [stackrox-mcp](https://github.com/stackrox/stackrox-mcp) commit `779f4a0`)
 2. Deploys the MCP server to `stackrox-mcp` namespace
 3. Creates an OpenShift Route for external access
-4. Configures connection to RHACS Central (auto-detected or from `ROX_CENTRAL_URL`)
+4. Configures connection to RHACS Central (auto-detected or from `ROX_CENTRAL_ADDRESS`)
 5. **If OpenShift Lightspeed is installed:** configures MCP integration automatically
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ROX_CENTRAL_URL` | Yes* | RHACS Central URL (e.g., `https://central-stackrox.apps.cluster.com`). Auto-detected from cluster route if not set. |
+| `ROX_CENTRAL_ADDRESS` | Yes* | RHACS Central URL (e.g., `https://central-stackrox.apps.cluster.com`). Auto-detected from cluster route if not set. |
 | `ROX_API_TOKEN` | Recommended | API token for Central. Run `basic-setup/install.sh` first to generate. Without it, MCP uses passthrough auth (client must send token). |
 | `RHACS_NAMESPACE` | No | RHACS namespace (default: `stackrox`) |
 | `MCP_NAMESPACE` | No | MCP server namespace (default: `stackrox-mcp`) |
@@ -108,7 +108,7 @@ The `manifests/` directory contains Kubernetes resources:
 | `service.yaml` | ClusterIP service on port 8080 |
 | `route.yaml` | OpenShift Route for external access |
 
-The install script substitutes `ROX_CENTRAL_URL`, `ROX_API_TOKEN`, and `MCP_NAMESPACE` before applying.
+The install script substitutes `ROX_CENTRAL_ADDRESS`, `ROX_API_TOKEN`, and `MCP_NAMESPACE` before applying.
 
 ### Setup Scripts
 
