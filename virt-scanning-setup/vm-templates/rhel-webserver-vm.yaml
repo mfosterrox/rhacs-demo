@@ -61,7 +61,7 @@ spec:
               chpasswd: { expire: false }
               runcmd:
                 - sudo subscription-manager register --org="$SUBSCRIPTION_ORG_ID" --activationkey="$SUBSCRIPTION_ACTIVATION_KEY"
-                - sudo subscription-manager release --set=9.4
+                - sudo subscription-manager release --set=9.6
                 - |
                   sudo subscription-manager repos \
                     --enable=rhel-9-for-x86_64-baseos-eus-rpms \
