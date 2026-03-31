@@ -588,6 +588,7 @@ main() {
                     print_info "✓ Successfully completed: ${script_name}"
                 else
                     print_error "✗ Failed: ${script_name}"
+                    print_info "To rerun: bash \"${script}\" --email mfoster@redhat.com"
                     exit 1
                 fi
                 print_info ""
@@ -599,6 +600,7 @@ main() {
                 print_info "✓ Successfully completed: ${script_name}"
             else
                 print_error "✗ Failed: ${script_name}"
+                print_info "To rerun: bash \"${script}\""
                 exit 1
             fi
             print_info ""

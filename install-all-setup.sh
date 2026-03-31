@@ -31,6 +31,8 @@
 #
 # After install: ./verify-all-setup.sh
 #
+# On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.
+#
 # Phase 1 (basic-setup) streams to your terminal and to .setup-parallel-logs/basic-setup.log so
 # long runs do not look hung over SSH; parallel phases still log only to per-job files until they finish.
 # --- end help ---
@@ -166,12 +168,16 @@ wait_for_pid() {
     local name="$1"
     local pid="$2"
     local log="$3"
+    local script_path="${4:-}"
     if wait "${pid}"; then
         print_info "✓ ${name} finished (log: ${log})"
         return 0
     else
         local ec=$?
         print_error "✗ ${name} failed (exit ${ec}); see ${log}"
+        if [ -n "${script_path}" ]; then
+            print_info "To rerun this step: bash \"${script_path}\""
+        fi
         return "${ec}"
     fi
 }
@@ -315,6 +321,7 @@ main() {
         set -e
         if [ "${basic_ec}" -ne 0 ]; then
             print_error "✗ basic-setup failed (exit ${basic_ec}); see ${basic_log}"
+            print_info "To rerun Phase 1: cd \"${REPO_ROOT}\" && bash basic-setup/install.sh"
             exit 1
         fi
         print_info "✓ basic-setup completed (log: ${basic_log})"
@@ -324,6 +331,7 @@ main() {
     declare -a jobs_names=()
     declare -a jobs_pids=()
     declare -a jobs_logs=()
+    declare -a jobs_scripts=()
 
     # Background jobs MUST start in this shell — do not use pid=$(...) around the launcher
     # or the child is not waitable (command substitution runs in a subshell).
@@ -340,6 +348,7 @@ main() {
         jobs_names+=("${n}")
         jobs_pids+=("${pid}")
         jobs_logs+=("${lg}")
+        jobs_scripts+=("${script}")
         print_info "Started ${n} (pid ${pid}) → ${lg}"
     }
 
@@ -374,9 +383,11 @@ main() {
     echo ""
 
     failed=0
+    declare -a failed_parallel_scripts=()
     for i in "${!jobs_pids[@]}"; do
-        if ! wait_for_pid "${jobs_names[$i]}" "${jobs_pids[$i]}" "${jobs_logs[$i]}"; then
+        if ! wait_for_pid "${jobs_names[$i]}" "${jobs_pids[$i]}" "${jobs_logs[$i]}" "${jobs_scripts[$i]}"; then
             failed=1
+            failed_parallel_scripts+=("${jobs_scripts[$i]}")
         fi
     done
 
@@ -386,6 +397,12 @@ main() {
         exit 0
     fi
     print_error "One or more parallel jobs failed. Review logs in ${LOG_DIR}"
+    if [ ${#failed_parallel_scripts[@]} -gt 0 ]; then
+        print_info "After fixing the issue, rerun failed step(s):"
+        for s in "${failed_parallel_scripts[@]}"; do
+            print_info "  bash \"${s}\""
+        done
+    fi
     exit 1
 }
 

@@ -44,6 +44,11 @@ get_rox_endpoint() {
 
 # Load ROX_* from ~/.bashrc without executing $(...) (avoids hangs / surprises).
 # Use || true on grep so missing lines do not abort under set -e + pipefail.
+# Echo a copy-paste command to retry after a failed sub-script.
+print_rerun() {
+  log "To rerun this step: bash \"$1\""
+}
+
 load_rox_from_bashrc() {
     [ ! -f ~/.bashrc ] && return 0
     local var line
@@ -96,6 +101,7 @@ if [ $MISSING_VARS -gt 0 ]; then
   echo "  export ROX_CENTRAL_ADDRESS='https://central-stackrox.apps.cluster.com'"
   echo "  export ROX_API_TOKEN='your-api-token'"
   echo ""
+  log "Then rerun: bash \"$SCRIPT_DIR/install.sh\""
   exit 1
 fi
 
@@ -117,6 +123,7 @@ if "$SCRIPT_DIR/01-setup-certificates.sh"; then
   log "✓ Certificate setup complete"
 else
   error "Certificate setup failed"
+  print_rerun "$SCRIPT_DIR/01-setup-certificates.sh"
   exit 1
 fi
 
@@ -140,6 +147,7 @@ if "$SCRIPT_DIR/02-install-monitoring.sh"; then
   log "✓ Monitoring stack installation complete"
 else
   error "Monitoring stack installation failed"
+  print_rerun "$SCRIPT_DIR/02-install-monitoring.sh"
   exit 1
 fi
 
@@ -158,6 +166,7 @@ if "$SCRIPT_DIR/03-configure-rhacs-auth.sh"; then
   log "✓ RHACS authentication configuration complete"
 else
   error "RHACS authentication configuration failed"
+  print_rerun "$SCRIPT_DIR/03-configure-rhacs-auth.sh"
   exit 1
 fi
 

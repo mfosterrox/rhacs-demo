@@ -4,20 +4,27 @@
 
 == Setup Instructions
 
-Use the single orchestration script `install-all-setup.sh` at the root of the demo repository. It runs *basic-setup* first (so RHACS Central stays stable while APIs are configured), then runs the other demo stacks in parallel: FAM (file activity monitoring), monitoring, MCP, and VM vulnerability scanning.
+Below are the instrcutions to set up the demo. 
+
+There is a single installation script called `install-all-setup.sh`. It initializes are runhs 6 seperate scripts.
+
+First, it runs the *basic-setup* then runs the other 5 scripts in parallel including:
+- FAM (file activity monitoring), 
+- Persus monitoring in the console, 
+- MCP server setup
+- Vulnerability management for Virtual Machines
+- Policy as Code (GitOps) via Argo CD
 
 === Requirements
 
-*Optional — VM vulnerability scanning*
+All requirements are setup in the *basic-setup* script. However, if you want to set up the VM scanning stack, you will need to create an activation key for RHEL 9(see <<activation-key-rhel9,activation key instructions>>).
 
-If you use the optional VM scanning stack, collect the following (see <<activation-key-rhel9,activation key instructions>>):
-
-* *Red Hat subscription* — organization ID and activation key to entitle the demo Virtual Machine (`virt-scanning-setup`).
+If you do not require the VM scanning stack, you can skip the activation key creation step. The installation script will skip the VM scanning stack.
 
 [[activation-key-rhel9]]
-=== Creating an activation key for RHEL 9 (organization admin)
+=== Creating an activation key for RHEL 9
 
-To set up an activation key for your RHEL 9 VM in your organization, an administrator creates the key in the Red Hat Hybrid Cloud Console, then you register the VM using that key. Activation keys are suited to organizations because they allow automated registration, automatic subscription attachment, and consistent configuration (for example, system purpose and repositories) without sharing usernames and passwords.
+All Red Hatters should have access to the https://console.redhat.com[Red Hat Hybrid Cloud Console,window=blank] to create an activation key.
 
 *Step 1 — Create an activation key*
 
@@ -55,16 +62,11 @@ IMPORTANT: Note the following for use with `install-all-setup.sh`:
 === Installation Procedure
 
 [start=1]
-. Load your shell profile so pre-provisioned variables (including `ROX_API_TOKEN`) are set in the environment:
-+
-[source,sh,subs="attributes",role=execute]
-----
-source ~/.bashrc
-----
 . Copy and paste the following command into your terminal:
 +
 [source,sh,subs="attributes",role=execute]
 ----
+source ~/.bashrc
 cd ~/
 git clone https://github.com/mfosterrox/rhacs-demo.git 2>/dev/null || true
 cd ~/rhacs-demo && git pull
@@ -78,7 +80,7 @@ chmod +x install-all-setup.sh verify-all-setup.sh
 
 . Wait until the script finishes. You should see *Phase 1* (basic-setup) complete, then *Phase 2* parallel jobs start and *Waiting for N parallel job(s)* complete without errors.
 
-IMPORTANT: If a script fails, run it again. You can also check the logs in the `~/rhacs-demo/.setup-parallel-logs/` directory. If all else fails, message @foster on slack.
+IMPORTANT: If a script fails, you can run the indivdual script again. The error messages will provide the command to rerun the script.
 
 === Verify success
 
