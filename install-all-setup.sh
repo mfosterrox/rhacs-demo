@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run basic-setup first (sequential), then the other *-setup installs in parallel (FAM, monitoring,
-# MCP, virt-scanning, and GitOps-deployed RHACS custom policies).
+# MCP, virt-scanning, OpenShift Pipelines/Tekton RHACS tasks, and GitOps-deployed RHACS custom policies).
 # Order avoids RHACS Central churn (e.g. upgrades/restarts) while other scripts use the API.
 #
 # Typical usage:
@@ -24,6 +24,7 @@
 #   - No org ID / activation key → virt-scanning-setup is not run
 #
 # Optional skip flags (export before running):
+#   SKIP_OPENSHIFT_PIPELINES_SETUP=1 — do not run openshift-pipelines-setup/install.sh (Tekton / rox-pipeline)
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
 #
 # Non-interactive / CI: INSTALL_ALL_NONINTERACTIVE=1 and set SUBSCRIPTION_ORG_ID + SUBSCRIPTION_ACTIVATION_KEY;
@@ -32,6 +33,9 @@
 # After install: ./verify-all-setup.sh
 #
 # On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.
+#
+# Phase 2 progress (long waits / SSH): each job prints when it exits; every INSTALL_ALL_PARALLEL_PROGRESS_SEC
+# (default 45) a line lists jobs still running. Tune with INSTALL_ALL_PARALLEL_POLL_SEC (default 3).
 #
 # Phase 1 (basic-setup) streams to your terminal and to .setup-parallel-logs/basic-setup.log so
 # long runs do not look hung over SSH; parallel phases still log only to per-job files until they finish.
@@ -164,24 +168,6 @@ ensure_rox_api_token() {
     print_info "ROX_API_TOKEN generated (${#token} chars)"
 }
 
-wait_for_pid() {
-    local name="$1"
-    local pid="$2"
-    local log="$3"
-    local script_path="${4:-}"
-    if wait "${pid}"; then
-        print_info "✓ ${name} finished (log: ${log})"
-        return 0
-    else
-        local ec=$?
-        print_error "✗ ${name} failed (exit ${ec}); see ${log}"
-        if [ -n "${script_path}" ]; then
-            print_info "To rerun this step: bash \"${script_path}\""
-        fi
-        return "${ec}"
-    fi
-}
-
 apply_noninteractive_skips() {
     # Subscription: need both org ID and activation key
     if [ "${SKIP_VIRT_SCANNING:-0}" != "1" ]; then
@@ -301,7 +287,8 @@ main() {
     export GRPC_ENFORCE_ALPN_ENABLED="${GRPC_ENFORCE_ALPN_ENABLED:-false}"
 
     export ROX_CENTRAL_ADDRESS ROX_PASSWORD ROX_API_TOKEN RHACS_NAMESPACE RHACS_ROUTE_NAME \
-        SUBSCRIPTION_ORG_ID SUBSCRIPTION_ACTIVATION_KEY DEPLOY_SAMPLE_VMS MCP_NAMESPACE
+        SUBSCRIPTION_ORG_ID SUBSCRIPTION_ACTIVATION_KEY DEPLOY_SAMPLE_VMS MCP_NAMESPACE \
+        PIPELINE_NAMESPACE
 
     echo ""
     print_step "Setup phases (logs under ${LOG_DIR})..."
@@ -352,7 +339,7 @@ main() {
         print_info "Started ${n} (pid ${pid}) → ${lg}"
     }
 
-    print_step "Phase 2: FAM, monitoring, MCP, virt-scanning, custom-policies (parallel)"
+    print_step "Phase 2: FAM, monitoring, MCP, virt-scanning, OpenShift Pipelines, custom-policies (parallel)"
     if [ "${SKIP_FAM_SETUP:-0}" != "1" ] && [ "${SKIP_FIM_SETUP:-0}" != "1" ]; then
         add_job fam-setup "${REPO_ROOT}/fam-setup/install.sh"
     fi
@@ -364,6 +351,9 @@ main() {
     fi
     if [ "${SKIP_VIRT_SCANNING:-0}" != "1" ]; then
         add_job virt-scanning-setup "${REPO_ROOT}/virt-scanning-setup/install.sh"
+    fi
+    if [ "${SKIP_OPENSHIFT_PIPELINES_SETUP:-0}" != "1" ]; then
+        add_job openshift-pipelines-setup "${REPO_ROOT}/openshift-pipelines-setup/install.sh"
     fi
     if [ "${SKIP_CUSTOM_POLICIES_SETUP:-0}" != "1" ]; then
         add_job custom-policies "${REPO_ROOT}/custom-policies/install.sh"
@@ -382,13 +372,60 @@ main() {
     print_step "Waiting for ${#jobs_pids[@]} parallel job(s)..."
     echo ""
 
+    # Poll so completions print in finish order (not start order) and SSH sees periodic activity.
     failed=0
     declare -a failed_parallel_scripts=()
-    for i in "${!jobs_pids[@]}"; do
-        if ! wait_for_pid "${jobs_names[$i]}" "${jobs_pids[$i]}" "${jobs_logs[$i]}" "${jobs_scripts[$i]}"; then
-            failed=1
-            failed_parallel_scripts+=("${jobs_scripts[$i]}")
+    local n_jobs=${#jobs_pids[@]}
+    declare -a job_done
+    local _i _j
+    for ((_j = 0; _j < n_jobs; _j++)); do
+        job_done[$_j]=0
+    done
+    local completed=0
+    local progress_every="${INSTALL_ALL_PARALLEL_PROGRESS_SEC:-45}"
+    local poll_sleep="${INSTALL_ALL_PARALLEL_POLL_SEC:-3}"
+    local next_progress=$((SECONDS + progress_every))
+
+    print_info "Live progress: each job reports here when it exits; every ~${progress_every}s — which jobs are still running."
+
+    while [ "${completed}" -lt "${n_jobs}" ]; do
+        for _i in "${!jobs_pids[@]}"; do
+            if [ "${job_done[$_i]}" = "1" ]; then
+                continue
+            fi
+            local pid="${jobs_pids[$_i]}"
+            if ! kill -0 "${pid}" 2>/dev/null; then
+                local ec=0
+                wait "${pid}" || ec=$?
+                job_done[$_i]=1
+                completed=$((completed + 1))
+                if [ "${ec}" -eq 0 ]; then
+                    print_info "✓ ${jobs_names[$_i]} finished (${completed}/${n_jobs}) — log: ${jobs_logs[$_i]}"
+                else
+                    failed=1
+                    failed_parallel_scripts+=("${jobs_scripts[$_i]}")
+                    print_error "✗ ${jobs_names[$_i]} failed (exit ${ec}); see ${jobs_logs[$_i]}"
+                    print_info "To rerun this step: bash \"${jobs_scripts[$_i]}\""
+                fi
+            fi
+        done
+        if [ "${completed}" -ge "${n_jobs}" ]; then
+            break
         fi
+        if [ "${SECONDS}" -ge "${next_progress}" ]; then
+            local running_list=()
+            for _i in "${!jobs_pids[@]}"; do
+                if [ "${job_done[$_i]}" = "1" ]; then
+                    continue
+                fi
+                if kill -0 "${jobs_pids[$_i]}" 2>/dev/null; then
+                    running_list+=("${jobs_names[$_i]}")
+                fi
+            done
+            print_info "[parallel ${completed}/${n_jobs}] Still running: ${running_list[*]}"
+            next_progress=$((SECONDS + progress_every))
+        fi
+        sleep "${poll_sleep}"
     done
 
     echo ""

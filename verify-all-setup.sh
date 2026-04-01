@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Verify cluster state for each *-setup install (basic, FAM, monitoring, MCP, virt).
+# Verify cluster state for each *-setup install (basic, FAM, monitoring, MCP, virt, OpenShift Pipelines).
 #
 # Usage:
 #   ./verify-all-setup.sh
@@ -13,6 +13,8 @@
 #   # or reuse install-all flags (SKIP_FAM_SETUP; legacy SKIP_FIM_SETUP still honored):
 #   SKIP_FAM_SETUP=1 ./verify-all-setup.sh
 #   SKIP_VIRT_SCANNING=1 ./verify-all-setup.sh
+#   VERIFY_SKIP_PIPELINES=1 ./verify-all-setup.sh
+#   SKIP_OPENSHIFT_PIPELINES_SETUP=1 ./verify-all-setup.sh
 #
 # Exit: 0 = no failures (warnings allowed); 1 = one or more checks failed.
 # --- end help ---
@@ -36,6 +38,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
+PIPELINE_NAMESPACE="${PIPELINE_NAMESPACE:-pipeline-demo}"
 # CronJob rhacs-fam-exec-trigger is created in the app namespace (install.sh default: payments)
 FAM_CRON_NAMESPACE="${FAM_CRON_NAMESPACE:-payments}"
 
@@ -284,6 +287,44 @@ verify_virt() {
     return "${failed}"
 }
 
+verify_openshift_pipelines() {
+    print_step "openshift-pipelines-setup (Tekton)"
+    local failed=0
+    local ns="${PIPELINE_NAMESPACE}"
+
+    if ! oc get namespace "${ns}" &>/dev/null; then
+        print_fail "Namespace ${ns} not found"
+        return 1
+    fi
+    print_ok "Namespace ${ns} exists"
+
+    local t
+    for t in rox-image-scan rox-image-check rox-deployment-check; do
+        if oc get task "${t}" -n "${ns}" &>/dev/null; then
+            print_ok "Task ${t} exists"
+        else
+            print_fail "Task ${t} not found in ${ns}"
+            failed=1
+        fi
+    done
+
+    if oc get pipeline rox-pipeline -n "${ns}" &>/dev/null; then
+        print_ok "Pipeline rox-pipeline exists"
+    else
+        print_fail "Pipeline rox-pipeline not found in ${ns}"
+        failed=1
+    fi
+
+    if oc get secret roxsecrets -n "${ns}" &>/dev/null; then
+        print_ok "Secret roxsecrets exists"
+    else
+        print_fail "Secret roxsecrets not found in ${ns}"
+        failed=1
+    fi
+
+    return "${failed}"
+}
+
 main() {
     if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
         usage
@@ -339,6 +380,13 @@ main() {
         :
     else
         verify_virt || FAILURES=$((FAILURES + 1))
+    fi
+    echo ""
+
+    if skip_section "openshift-pipelines-setup" "VERIFY_SKIP_PIPELINES" "SKIP_OPENSHIFT_PIPELINES_SETUP"; then
+        :
+    else
+        verify_openshift_pipelines || FAILURES=$((FAILURES + 1))
     fi
 
     echo ""
