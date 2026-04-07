@@ -27,11 +27,11 @@ NOTE: If you do not require the VM scanning stack, you can skip the activation k
 [[activation-key-rhel9]]
 === Creating an activation key for RHEL 9
 
-All Red Hatters should have access to the https://console.redhat.com[Red Hat Hybrid Cloud Console,window=blank] to create an activation key.
+All Red Hatters should have access to the https://console.redhat.com/insights/dashboard#tags=[Red Hat Hybrid Cloud Console - RHEL 9,window=blank] to create an activation key.
 
 .Procedure
-. Log in to the https://console.redhat.com[Red Hat Hybrid Cloud Console,window=blank].
-. Navigate to *Services* > *System Configuration* > *Activation Keys* (or, in some views, *Inventory* > *System Configuration* > *Activation Keys*).
+. Log in to the https://console.redhat.com/insights/dashboard#tags=[Red Hat Hybrid Cloud Console - RHEL 9,window=blank].
+. Navigate to *Registration Assistant*
 . Click *Create activation key* and provide:
 +
 --
@@ -58,6 +58,8 @@ IMPORTANT: Note the following for use with `install-all-setup.sh`:
 
 * The activation key *name*.
 * Your organization's *Organization ID* (a numeric value, visible at the top of the Activation Keys page or under your account details).
+
+You can find the created keys here: https://console.redhat.com/insights/connector/activation-keys[Activation Keys,window=blank].
 
 === Set up scripts
 
@@ -99,6 +101,8 @@ OUTPUT:
 [STEP] Summary
   ✓ No failed checks (0 warning(s))
 ----
+
+NOTE: The virtual machine cloud-initwill take approximately 10 minutes to complete. Once done you will see the information in the RHACS UI.
 
 == Accessing the Consoles
 
