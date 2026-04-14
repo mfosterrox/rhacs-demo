@@ -1,0 +1,201 @@
+= Module 06: Network graph
+:source-highlighter: rouge
+
+include::partial$_attributes.adoc[]
+
+This module covers the RHACS {rhacs_version} Network Graph: how it visualizes observed traffic between deployments, surfaces anomalous connections, and generates Kubernetes-native Network Policy objects from the observed traffic baseline.
+
+*Estimated time*: 8-10 minutes
+
+== Part 1: Network graph overview and navigation
+
+=== Know
+
+_Context: Network visibility in a Kubernetes cluster is one of the hardest problems for security teams to solve. Traditional network monitoring tools were built for fixed-topology networks. Container environments have dynamic, ephemeral endpoints with traffic flows that change every time a deployment is updated._
+
+**The network visibility gap:**
+
+* Security teams managing containerized workloads often have no practical way to answer: "What is actually talking to what inside this cluster?"
+* IP-based network monitoring tools lose context as pod IPs are reassigned constantly
+* Without visibility into east-west traffic (service to service within the cluster), lateral movement by an attacker is effectively invisible
+
+**What the RHACS Network Graph provides:**
+
+* A real-time, deployment-level flow diagram of observed traffic across all connected clusters and namespaces
+* Traffic is tracked by deployment identity, not IP address, so the view remains accurate as pods are rescheduled
+* Active and baseline views: observed traffic for a configurable time window versus the established traffic baseline
+* Anomalous flow detection: connections that deviate from the baseline are surfaced immediately
+
+**Three tools in one:**
+
+The Network Graph functions simultaneously as a flow diagram (what is talking to what right now), a firewall diagram (what Network Policies are in place), and a firewall rule builder (generate Network Policies from observed traffic). No other tool in the OpenShift ecosystem combines all three.
+
+=== Show
+
+**What I say**:
+
+"Network visibility is one of the areas where RHACS does something that is genuinely hard to do with any other tool in this stack. Let me show you the Network Graph."
+
+**What I do**:
+
+. From the left side menu, navigate to *Network > Network Graph*.
+
+. In the cluster dropdown at the top, confirm the Production cluster is selected. In the *NS* (namespace) dropdown, select several namespaces including *Payments*:
++
+"The dropdowns at the top let you scope the view to specific clusters, namespaces, and deployments. For a first look, let us include a few namespaces so you can see the traffic flows between them."
+
+. Point to the Active view and the time window dropdown:
++
+"The default view is Active -- actual observed traffic for the past hour. You can change the time window to look further back. Navigation controls and the legend are at the bottom left. You can zoom with the scroll wheel, drag deployments to reposition them, and resize namespace boxes."
+
+. Demonstrate zooming and scrolling:
++
+"As you zoom in, the namespace boxes expand to show individual deployment names. The graph gives you a spatial layout of your microservices topology that is automatically derived from observed traffic -- no manual diagramming required."
+
+**What they should notice:**
+
+* The graph is built from observed traffic, not from manually configured topology data
+* Deployment identity is used instead of IP addresses, so the view stays accurate as pods are rescheduled
+* Anomalous flows are visually distinct from baseline flows
+
+[NOTE]
+====
+**Presenter tip:** For platform engineers who have tried to diagram their own microservices topology manually, the automatic graph is immediately compelling. The common reaction is "we have been trying to get this view for months." Emphasize that it requires zero manual configuration -- RHACS derives it entirely from observed network activity.
+====
+
+image::06-network-graph-overview.png[Network Graph showing deployment-level traffic flows across Payments and other namespaces,link=self,window=blank,width=700,title="Network Graph with multiple namespaces selected"]
+
+// TODO: Capture screenshot of the Network Graph with Payments namespace visible
+
+== Part 2: Deployment detail and anomalous flows
+
+=== Know
+
+_Context: The aggregate traffic view shows the topology. Drilling into a specific deployment shows the security detail: which flows are expected, which are anomalous, and what network policies are currently governing that deployment's traffic._
+
+**Baseline vs anomalous flows:**
+
+* RHACS establishes a traffic baseline for each deployment over time -- the set of connections that are consistently observed and considered normal
+* Any new connection that was not present when the baseline was established is flagged as anomalous
+* Anomalous flows are not necessarily malicious -- a new integration or a configuration change can produce one -- but they warrant review because unexpected network connections are a common indicator of lateral movement
+
+**What deployment-level network detail provides:**
+
+* A per-deployment summary of observed inbound and outbound connections
+* Network Policy status: whether a policy exists and whether it correctly restricts traffic to the baseline
+* Listening port inventory: what ports the container is advertising, regardless of whether traffic is active
+
+=== Show
+
+**What I say**:
+
+"Let me zoom into the Payments namespace and click on the visa-processor deployment to see the network detail for a specific workload."
+
+**What I do**:
+
+. Zoom into the *Payments* namespace until the individual deployment names are visible.
+
+. Click on the *visa-processor* deployment:
++
+"Clicking a deployment opens a summary panel on the right. You can see observed traffic flows, the network policy status for this deployment, and the listening ports."
+
+. Click *Flows* in the right-hand panel:
++
+"In the Flows panel, you can see baseline flows and anomalous flows separated. This deployment has one anomalous flow -- traffic that was observed but that deviates from the established baseline."
+
+. Point to the anomalous flow entry:
++
+"This is an unexpected connection -- it appeared after the baseline was established. Whether it is a new legitimate integration or an attacker moving laterally, it needs a review. RHACS surfaces it without requiring the security team to parse raw network logs."
+
+**What they should notice:**
+
+* Baseline and anomalous flows are separated, not mixed into a single undifferentiated list
+* Each flow shows the source, destination, port, and protocol
+* The presence of a Network Policy -- or its absence -- is visible at a glance for each deployment
+
+[NOTE]
+====
+**Presenter tip:** The anomalous flow is a good entry point for a discussion about incident response. If this were a real lateral movement event, the next step would be to correlate with the Violations page (is there a runtime violation for this deployment?) and the Risk view (does this connection appear in the process activity timeline?). RHACS provides the data to connect those dots.
+====
+
+image::06-network-deployment-flows.png[Deployment detail panel for visa-processor showing one anomalous flow and three baseline flows,link=self,window=blank,width=700,title="Deployment network flows showing anomalous connection"]
+
+// TODO: Capture screenshot of the visa-processor deployment flows panel
+
+== Part 3: Network Policy simulator
+
+=== Know
+
+_Context: Identifying that a deployment has no Network Policy -- or an insufficient one -- is the starting point. The harder problem is generating correct Network Policy objects that restrict traffic to exactly what is needed without breaking legitimate application flows. RHACS automates this._
+
+**The Network Policy problem:**
+
+* Kubernetes Network Policies are powerful but verbose. A correct policy for a microservice with multiple inbound and outbound connections requires detailed knowledge of every expected flow.
+* Most teams know they should have Network Policies in place -- PCI-DSS requires them, as shown in the Compliance module -- but writing them manually is time-consuming and error-prone.
+* An incorrect Network Policy can break application traffic, making teams reluctant to implement them at all.
+
+**What the Network Policy Simulator provides:**
+
+* Uses the observed traffic history to generate Network Policy YAML that allows exactly the flows that have been seen
+* The generated policies are standard Kubernetes Network Policy objects -- not proprietary RHACS rules
+* Policies can be reviewed, simulated against the current traffic baseline, and exported for application to the cluster
+
+**The platform-native philosophy:**
+
+The Network Policy Simulator is the clearest illustration of the RHACS design philosophy: security through platform-native features, with fixes delivered as configuration for OpenShift rather than as a proprietary enforcement layer. The firewall that protects your workloads is the same Kubernetes Network Policy mechanism that OpenShift already runs. There is no proprietary component that could fail and cause an application outage.
+
+=== Show
+
+**What I say**:
+
+"Now I want to show you something that I think is one of the most practically useful features in RHACS for platform teams. The Network Policy Simulator generates Kubernetes-native firewall rules from observed traffic."
+
+**What I do**:
+
+. Click the *Network Policy generator* button in the upper right of the Network Graph.
+
+. Click *Generate and Simulate network policies*:
++
+"RHACS is analyzing the traffic history for the selected namespaces and generating Network Policy objects that allow exactly those flows."
+
+. Point to the generated policy YAML:
++
+"Notice that these are standard Kubernetes Network Policy objects. They are not proprietary RHACS rules, not a custom CRD, not a sidecar configuration. These can be committed directly to your GitOps repository alongside your application manifests."
+
+. Highlight the implication:
++
+"This addresses the problem we saw in Compliance -- that 8% PCI-DSS score for Control 1.1.4. The path from 'we have no Network Policies' to 'we have correct Network Policies for all our production workloads' is: run this generator, review the output, commit to Git, apply to the cluster."
+
+. Point to the simulation capability:
++
+"Before applying, you can simulate the generated policies against the current traffic baseline to confirm they do not block any legitimate flows. This removes the risk that makes teams reluctant to add Network Policies in the first place."
+
+. Connect back to the design philosophy:
++
+"There is no proprietary firewall sitting in your cluster that RHACS manages. The security enforcement lives in the OpenShift Network Policy layer that is already there. If RHACS were removed tomorrow, your Network Policies would continue to function. That is intentional -- security controls should not create a single point of failure for your applications."
+
+**What they should notice:**
+
+* Generated policies are standard Kubernetes YAML, ready for GitOps workflows
+* The simulation step validates the policies against observed traffic before any changes are applied
+* The output directly addresses compliance gaps identified in the Compliance module
+
+[NOTE]
+====
+**Presenter tip:** For teams with a GitOps practice, the fact that the output is standard Kubernetes YAML is a strong selling point. The generated policies go into the same Git repository as the application manifests, making network security a reviewable, versioned artifact rather than a configuration locked in a security tool.
+====
+
+[NOTE]
+====
+**Transition:** Next we will cover Integrations -- how RHACS connects to image registries, notification systems, CI/CD tools, and security platforms to fit into the tooling your organization already uses.
+====
+
+image::06-network-policy-generator.png[Network Policy Simulator showing generated Kubernetes Network Policy YAML for the Payments namespace,link=self,window=blank,width=700,title="Network Policy Simulator output"]
+
+// TODO: Capture screenshot of the Network Policy generator with YAML output visible
+
+== Assets needed
+
+. `content/modules/ROOT/assets/images/06-network-graph-overview.png` -- Network Graph with Payments and other namespaces selected, showing deployment-level traffic flows
+. `content/modules/ROOT/assets/images/06-network-deployment-flows.png` -- visa-processor deployment detail panel showing anomalous and baseline flows
+. `content/modules/ROOT/assets/images/06-network-policy-generator.png` -- Network Policy Simulator with generated Kubernetes Network Policy YAML

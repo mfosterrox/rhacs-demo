@@ -1,0 +1,246 @@
+= Module 04: Violations and policy management
+:source-highlighter: rouge
+
+include::partial$_attributes.adoc[]
+
+This module covers how RHACS {rhacs_version} records policy violations across the full application lifecycle, what forensic data is captured at runtime, and how the unified policy engine spans build, deploy, and runtime enforcement without requiring separate tooling for each stage.
+
+*Estimated time*: 12-15 minutes
+
+== Part 1: Violations and forensic data
+
+=== Know
+
+_Context: A violation in RHACS is a record of a specific moment when a policy criterion was met by an object in your cluster -- an image, a deployment configuration, or a runtime process. The goal is not to produce a to-do list. It is to give security and platform teams an accurate record of what happened, when, and what to do about it._
+
+**Two categories of violations:**
+
+* *Build and deploy time* -- policy criteria evaluated against image content or deployment configuration before or at the point of deployment. These violations capture misconfiguration before it reaches production.
+* *Runtime* -- policy criteria triggered by observed process activity, network connections, or system calls inside a running container. These violations capture attacker behavior or policy drift that occurred after deployment.
+
+**Why runtime forensic data matters:**
+
+Container runtime incidents are different from VM incidents. The process list is small, the expected behavior is constrained, and the filesystem is immutable by design. When RHACS detects a policy violation at runtime, it captures the full context that incident response needs: the process name, arguments, the UID it ran as, the container ID, and the exact timestamp. That is the "who, what, when, where, and why" of the event in a format security operations teams recognize.
+
+**From alert to posture improvement:**
+
+A runtime violation is not just something to resolve. It is evidence that a container can behave in a way that should not be possible. The correct long-term response is to remove the capability from the image -- not just acknowledge the alert.
+
+=== Show
+
+**What I say**:
+
+"The Violations page is the event stream for everything RHACS has detected. Let me show you what a deploy-time violation looks like and then a runtime violation, because they carry very different information."
+
+**What I do**:
+
+. From the left side menu, navigate to *Violations*.
+
+. Point to the violations list:
++
+"Every entry here is a specific instance of a policy criterion being met -- by an image, a deployment configuration, or a runtime process. This is a continuous stream, not a periodic report."
+
+. Locate a violation for the *Fixable Severity at Least Important* policy and click it:
++
+"This is a deploy-time violation. It was triggered when a deployment was created with an image containing a fixable, high-severity CVE. The detail view shows the same information that would appear in a CI/CD tool at build time -- the CVE, the affected component, the severity, and what version fixes it."
+
+. Point to the detail fields:
++
+"The information here is consistent across every integration point: the developer sees the same data in their pipeline output, in the Developer Hub, and here in the Violations page. There is no translation layer between what the security team sees and what the developer needs to act on."
+
+. Navigate back to the Violations list.
+
+. Filter for the *Ubuntu Package Manager Execution* policy -- type `Ubuntu` in the Policy filter bar and select the matching entry:
++
+"This is a runtime violation. A package manager executed inside a running container. That is the forensic record."
+
+. Click on the violation to open the detail view:
++
+"Runtime violations carry a different set of details. You can see the process name, the arguments passed to it, the UID it ran under, the container ID, and the exact timestamp. This is the incident data your security operations team needs to triage the event."
+
+. Point to the resolution options:
++
+"The team has options to resolve or suppress this notification. But the more important action is on the Policy tab."
+
+. Click the *Policy* tab at the top of the violation detail:
++
+"The policy that triggered this violation includes a Guidance section. It tells the development team exactly what to remove from the Dockerfile to prevent this from happening again. A package manager has no legitimate purpose in a container that ships with all its dependencies. Removing it from the image eliminates an entire class of attacker capability in the next build."
+
+**What they should notice:**
+
+* Deploy-time and runtime violations carry different forensic data suited to their context
+* Runtime violations include process-level detail that maps directly to incident response workflows
+* The Guidance section converts a runtime alert into a specific, actionable Dockerfile improvement
+
+[NOTE]
+====
+**Presenter tip:** The "runtime incident as a learning opportunity" framing resonates strongly with security architects. It reframes alert fatigue -- instead of just managing a stream of notifications, teams are using each incident to permanently reduce attack surface in their images.
+====
+
+image::04-violations-list.png[Violations page showing a mix of deploy-time and runtime policy violations,link=self,window=blank,width=700,title="Violations event stream"]
+
+// TODO: Capture screenshot of the Violations list
+
+image::04-violations-runtime-detail.png[Runtime violation detail for Ubuntu Package Manager Execution showing process name, arguments, UID, and container ID,link=self,window=blank,width=700,title="Runtime violation forensic detail"]
+
+// TODO: Capture screenshot of a runtime violation detail view
+
+== Part 2: The built-in policy library
+
+=== Know
+
+_Context: RHACS ships with a library of policies built from Red Hat's security expertise, interpretations of industry best practices, and mappings to common compliance standards. These policies cover the full lifecycle -- from what should never appear in a container image to what should never execute at runtime._
+
+**What the policy library provides:**
+
+* Build and deploy time policies that catch misconfigurations and vulnerable images before they reach production
+* Runtime policies that detect behaviors associated with attacker techniques: gaining a foothold, maintaining presence, moving laterally, and exfiltrating data
+* Rationale and guidance built into every policy so the development team understands why a policy exists and exactly what to change
+
+**The package manager philosophy:**
+
+Package managers like apk, apt, and yum are useful tools in a virtual machine context where software is installed and updated in place. In a container, they have no legitimate purpose -- a container image should ship with every dependency it needs at build time. The presence of a package manager is an attack surface: if an attacker gains code execution, they can use it to install arbitrary software inside a running container. RHACS policies targeting package managers reflect a deliberate hardening stance, not an arbitrary restriction.
+
+**Policy scope and exceptions:**
+
+The unified policy engine makes it straightforward to write policies with appropriate scope. A policy that prevents compiler tools can be scoped to production clusters only, with an exception for development namespaces and CI/CD tooling namespaces. Security gets enforcement where it matters; development teams are not blocked in the environments where those tools are legitimate.
+
+=== Show
+
+**What I say**:
+
+"Let me show you what a policy looks like inside RHACS and how the unified engine handles policies that span the build, deploy, and runtime stages without requiring separate tools for each."
+
+**What I do**:
+
+. From the left side menu, navigate to *Platform Configuration > Policy Management*.
+
+. Point to the policy list:
++
+"This is the full library of built-in policies. They cover build and deploy time -- catching misconfigurations and vulnerable images before deployment -- and runtime, detecting behaviors that map to known attacker techniques."
+
+. Locate and click the *Alpine Linux Package Manager (apk) in Image* policy:
++
+"This is what a policy looks like. Front and center: the Rationale, explaining why this matters, and the Guidance, explaining exactly what to change. Both are written for the development team, not just the security team."
+
+. Read the Rationale section aloud:
++
+"Package managers in a container image have no legitimate purpose. A container should ship with all of its dependencies. The presence of apk, apt, or yum is an attack surface -- it gives an attacker who has gained code execution the ability to install arbitrary software."
+
+. Point to the Guidance section:
++
+"The guidance tells the developer which Dockerfile command removes the package manager. This is a one-line fix that permanently reduces attack surface in the next image build."
+
+. Navigate back to the policy list and highlight the lifecycle column:
++
+"Policies are tagged with the lifecycle stages they apply to: Build, Deploy, and Runtime. Other security tools require separate policy engines for each stage. RHACS uses one engine for all three, so you do not end up with inconsistent rules in different systems."
+
+. Point to a policy that spans multiple lifecycle stages:
++
+"You can write a single policy that combines criteria across stages -- for example, flagging a critical CVE specifically in deployments that are also running as privileged containers. Neither criterion alone is necessarily a block; the combination is. That kind of cross-stage logic is not possible when your vulnerability scanner and your runtime monitor are separate products."
+
+**What they should notice:**
+
+* Every policy includes Rationale and Guidance written for developers, not just security reviewers
+* The lifecycle tags show which stage each policy applies to at a glance
+* Cross-lifecycle policy criteria eliminate the need to coordinate between separate tooling
+
+[NOTE]
+====
+**Presenter tip:** The "we don't like package managers" line from the script lands well in a technical audience. It is a memorable way to explain the philosophy: containers should be immutable, minimal, and ship with exactly what they need. Package managers are the opposite of that principle.
+====
+
+image::04-policy-library.png[Policy Management page showing the built-in policy library with lifecycle stage tags,link=self,window=blank,width=700,title="Policy library with lifecycle tags"]
+
+// TODO: Capture screenshot of the Policy Management list
+
+image::04-policy-detail-alpine.png[Alpine Package Manager policy showing Rationale and Guidance sections,link=self,window=blank,width=700,title="Policy detail with Rationale and Guidance"]
+
+// TODO: Capture screenshot of the Alpine Package Manager policy detail
+
+== Part 3: Policy enforcement and the admission controller
+
+=== Know
+
+_Context: Informing teams about policy violations is the starting point. For high-risk criteria, security teams need a guarantee that non-compliant workloads cannot be deployed -- not just notified. RHACS enforcement integrates with the Kubernetes Admission Controller to make that guarantee._
+
+**How enforcement works:**
+
+* When a policy is set to enforce at deploy time, RHACS programs the Kubernetes Admission Controller to evaluate incoming deployment requests against the policy
+* A deployment that violates an enforced policy is rejected by the OpenShift API with a clear error message that includes the policy name and remediation guidance
+* There is no proprietary sidecar or custom webhook that could fail and cause an outage -- enforcement flows through the same Admission Controller that OpenShift already uses for its own validation
+
+**Why this approach matters for platform teams:**
+
+* Developers see a standard OpenShift API failure, not an opaque security tool error that forces them to open a ticket with the security team
+* The rejection message includes exactly what needs to change, so developers can self-serve the fix
+* Enforcement is declarative and auditable -- the policy definition is the source of truth for what is and is not allowed to deploy
+
+**Build-time enforcement:**
+
+Enforcement does not have to wait for deploy time. When integrated with a CI/CD pipeline, RHACS can evaluate images against policies during the build stage using `roxctl`. A build that includes a CVE that violates an enforced policy fails the pipeline step, preventing the image from being promoted at all. This is covered in detail in the CI/CD module.
+
+=== Show
+
+**What I say**:
+
+"RHACS is designed to help and inform development teams first. But security teams also need a hard line on certain criteria -- things that should never make it to production regardless of circumstances. Let me show you how enforcement works."
+
+**What I do**:
+
+. From the Policy Management list, locate the *Fixable CVSS >= 7* policy. You can filter for it by typing `fixable` in the filter bar (it is typically 20-30 rows down the list).
+
+. Click *Actions > Edit* in the upper right of the policy.
+
+. In the left hand navigation of the edit flow, click *Policy behavior > Actions*:
++
+"By default, most policies are set to Inform -- they generate a violation record and optionally send a notification, but they do not block anything. This is the right starting point. Teams need time to understand the landscape before enforcement begins."
+
+. Point to the *Response method* options:
++
+"Switching to Inform and Enforce activates the Admission Controller integration. Now, any deployment that includes an image with a fixable CVE scoring 7 or above will be rejected by the OpenShift API."
+
+. Point to the *Configure Enforcement Behavior* switches for Build and Deploy:
++
+"You can apply enforcement at Build time -- blocking pipeline promotion of a non-compliant image -- at Deploy time -- blocking the Kubernetes deployment resource from being created -- or both. For this policy, enabling both gives you defense in depth: the image cannot be promoted through CI/CD, and even if it somehow reaches the cluster, the deployment cannot be created."
+
+. Point to the enforcement message behavior:
++
+"When a deployment is rejected, the developer sees a standard OpenShift API error. It includes the policy name and the remediation steps from the Guidance section. They do not need to contact the security team to find out why their deployment failed or what to fix. The information is in the error response."
+
+. Click *Inform and enforce*, toggle Build and Deploy enforcement on.
+
+. Click *Review policy* from the left hand navigation, then click *Save*.
+
+**What they should notice:**
+
+* Enforcement flows through the Kubernetes Admission Controller -- no proprietary infrastructure required
+* Developers receive actionable error messages, not opaque rejections
+* Build and deploy enforcement together create a two-stage gate that catches violations early and prevents any bypass
+
+[NOTE]
+====
+**Presenter tip:** The "programming OpenShift to prevent security risk" framing is effective with platform architects. It positions RHACS enforcement as a natural extension of the Kubernetes API machinery that the cluster already runs, rather than an external system that could conflict with or duplicate OpenShift's own admission logic.
+====
+
+[NOTE]
+====
+**Important:** After the demo, undo the enforcement change on this policy to avoid blocking pipeline runs in subsequent sections. Navigate back to the policy, click *Actions > Edit*, set the response method back to *Inform only*, and save.
+====
+
+[NOTE]
+====
+**Transition:** With violations and policy management covered, we move to the CI/CD integration -- showing how RHACS enforcement extends into the development pipeline itself and how developers interact with security findings without leaving their tooling.
+====
+
+image::04-policy-enforcement-actions.png[Policy behavior edit screen showing Inform and Enforce options with Build and Deploy enforcement switches,link=self,window=blank,width=700,title="Policy enforcement configuration"]
+
+// TODO: Capture screenshot of the Policy behavior Actions screen
+
+== Assets needed
+
+. `content/modules/ROOT/assets/images/04-violations-list.png` -- Violations page showing mixed deploy-time and runtime violations
+. `content/modules/ROOT/assets/images/04-violations-runtime-detail.png` -- Runtime violation detail with process name, arguments, UID, and container ID
+. `content/modules/ROOT/assets/images/04-policy-library.png` -- Policy Management list showing lifecycle stage tags
+. `content/modules/ROOT/assets/images/04-policy-detail-alpine.png` -- Alpine Package Manager policy detail with Rationale and Guidance
+. `content/modules/ROOT/assets/images/04-policy-enforcement-actions.png` -- Policy behavior Actions screen with Inform and Enforce selected

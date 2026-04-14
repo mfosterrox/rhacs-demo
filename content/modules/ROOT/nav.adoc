@@ -2,3 +2,38 @@
 ** xref:index.adoc#labname[Lab Overview]
 ** xref:index.adoc#openshift-console-access[OpenShift Console Access]
 ** xref:index.adoc#rhacs-console-access[RHACS Console Access]
+
+* xref:01-ui-overview.adoc[Module 01: UI overview]
+** xref:01-ui-overview.adoc#part-1-dashboard-and-top-bar[Dashboard and top bar]
+** xref:01-ui-overview.adoc#part-2-navigation-and-global-search[Navigation and global search]
+
+* xref:02-vulnerability-management.adoc[Module 02: Vulnerability management and risk]
+** xref:02-vulnerability-management.adoc#part-1-vulnerability-results-overview[Vulnerability results overview]
+** xref:02-vulnerability-management.adoc#part-2-image-details-and-cve-triage[Image details and CVE triage]
+** xref:02-vulnerability-management.adoc#part-3-risk-and-deployment-context[Risk and deployment context]
+** xref:02-vulnerability-management.adoc#part-4-process-discovery-and-runtime-activity[Process discovery and runtime activity]
+
+* xref:03-compliance.adoc[Module 03: Compliance]
+** xref:03-compliance.adoc#part-1-compliance-dashboard-overview[Compliance dashboard overview]
+** xref:03-compliance.adoc#part-2-standards-and-namespace-breakdown[Standards and namespace breakdown]
+** xref:03-compliance.adoc#part-3-evidence-export-and-scan-scheduling[Evidence export and scan scheduling]
+
+* xref:04-violations-policy.adoc[Module 04: Violations and policy management]
+** xref:04-violations-policy.adoc#part-1-violations-and-forensic-data[Violations and forensic data]
+** xref:04-violations-policy.adoc#part-2-the-built-in-policy-library[The built-in policy library]
+** xref:04-violations-policy.adoc#part-3-policy-enforcement-and-the-admission-controller[Policy enforcement and the admission controller]
+
+* xref:05-cicd.adoc[Module 05: CI/CD integration]
+** xref:05-cicd.adoc#part-1-developer-hub-and-ide-security-feedback[Developer Hub and IDE security feedback]
+** xref:05-cicd.adoc#part-2-the-three-roxctl-pipeline-tasks[The three roxctl pipeline tasks]
+** xref:05-cicd.adoc#part-3-policy-enforcement-at-build-time[Policy enforcement at build time]
+
+* xref:06-network-graph.adoc[Module 06: Network graph]
+** xref:06-network-graph.adoc#part-1-network-graph-overview-and-navigation[Network graph overview and navigation]
+** xref:06-network-graph.adoc#part-2-deployment-detail-and-anomalous-flows[Deployment detail and anomalous flows]
+** xref:06-network-graph.adoc#part-3-network-policy-simulator[Network Policy simulator]
+
+* xref:07-integrations.adoc[Module 07: Integrations]
+** xref:07-integrations.adoc#part-1-image-registry-and-vulnerability-scanner-integrations[Image registry and vulnerability scanner integrations]
+** xref:07-integrations.adoc#part-2-notification-and-siem-integrations[Notification and SIEM integrations]
+** xref:07-integrations.adoc#part-3-software-supply-chain-and-authentication-integrations[Software supply chain and authentication integrations]

@@ -1,0 +1,209 @@
+= Module 07: Integrations
+:source-highlighter: rouge
+
+include::partial$_attributes.adoc[]
+
+This module covers how RHACS {rhacs_version} connects to the systems your organization already uses: image registries, vulnerability management tools, notification and SIEM platforms, and software supply chain infrastructure.
+
+*Estimated time*: 5-8 minutes
+
+== Part 1: Image registry and vulnerability scanner integrations
+
+=== Know
+
+_Context: RHACS does not require you to replace your existing image registry or vulnerability management tooling. It is designed to integrate with what you have and add the Kubernetes-native security context that registry-only tools lack._
+
+**Why registry integration matters:**
+
+* RHACS needs access to image content to perform vulnerability scanning -- registry credentials allow it to pull and scan images that are not yet deployed
+* For organizations with private registries on-premise or in cloud-hosted environments, RHACS supports all major registry types without requiring images to be moved or re-hosted
+* Scanning happens within your environment -- image content does not leave your infrastructure to be analyzed by an external service
+
+**Registry support:**
+
+RHACS integrates with a broad range of registries including:
+
+* *Red Hat* -- Quay, Red Hat Container Registry
+* *Cloud-hosted* -- Amazon ECR, Google Artifact Registry, Microsoft Azure Container Registry
+* *Community and enterprise* -- Docker Hub, JFrog Artifactory, Sonatype Nexus, Harbor
+* *Generic* -- Any OCI-compliant registry via standard credentials
+
+**Existing vulnerability tooling:**
+
+For organizations that have already invested in vulnerability management platforms, RHACS can integrate with existing scanners rather than running a parallel process. This allows teams to feed RHACS findings into existing workflows and avoid duplicating triage work across two systems.
+
+=== Show
+
+**What I say**:
+
+"Let me show you the Integrations page. This is where RHACS connects to the systems already in your environment -- registries, notification tools, and supply chain infrastructure."
+
+**What I do**:
+
+. From the left side menu, navigate to *Platform Configuration > Integrations*.
+
+. Point to the *Image Integrations* section:
++
+"These are the registry integrations. RHACS connects to any registry your teams use -- on-premise Quay deployments, Amazon ECR, Google Artifact Registry, or any OCI-compliant registry. Once connected, RHACS can scan images in the registry before they are deployed, not just after."
+
+. Click into an existing registry integration or point to the available types:
++
+"Each integration type has a configuration form for credentials and endpoint. Once configured, scanning is automatic -- any image in a connected registry that matches a watched namespace or deployment is scanned without additional configuration."
+
+. Point to the *Vulnerability Management* integrations section:
++
+"For organizations with existing vulnerability management platforms, RHACS can integrate with them directly. This avoids creating a parallel vulnerability workflow and allows teams to route RHACS findings into their existing triage and ticketing processes."
+
+**What they should notice:**
+
+* Registry integrations cover on-premise, cloud-hosted, and generic OCI registries
+* Scanning is automatic once a registry is connected -- no per-image configuration required
+* Existing vulnerability tooling investments are preserved, not replaced
+
+[NOTE]
+====
+**Presenter tip:** For organizations with Quay already deployed, this is a natural connection point. Quay provides image storage and access control; RHACS adds vulnerability scanning, policy enforcement, and runtime monitoring. They are complementary, not competing.
+====
+
+image::07-integrations-overview.png[Integrations page showing Image Integrations section with registry types,link=self,window=blank,width=700,title="Integrations page overview"]
+
+// TODO: Capture screenshot of the Integrations page
+
+== Part 2: Notification and SIEM integrations
+
+=== Know
+
+_Context: A security platform that generates findings no one sees is not providing value. RHACS is designed to route violation alerts, compliance reports, and policy notifications into the systems your security operations team already monitors -- whether that is a SIEM, a ticketing platform, or a chat tool._
+
+**Meeting SOC teams where they work:**
+
+* Security operations centers run on SIEM platforms: Splunk, IBM QRadar, and similar tools are the primary interface for security analysts
+* Platform and DevOps teams work in chat: Slack and Microsoft Teams are where operational alerts surface for those audiences
+* Compliance and audit teams work in ticketing: ServiceNow and Jira are where remediation work is tracked
+
+RHACS notifications can be routed to all of these simultaneously with different filters -- a critical runtime violation goes to the SIEM and to the security channel; a build-time policy violation goes to the developer's team channel and opens a Jira ticket.
+
+**Notification targets supported:**
+
+* *Chat and collaboration* -- Slack, Microsoft Teams, PagerDuty
+* *Ticketing and ITSM* -- ServiceNow, Jira
+* *SIEM and security platforms* -- Splunk, IBM QRadar, Sumo Logic
+* *Cloud security services* -- AWS Security Hub, Google Cloud Security Command Center
+* *Open standards* -- Generic webhook (integrates with any platform that accepts HTTP), syslog (integrates with any SIEM that accepts standard log streams)
+
+**Why open standards matter:**
+
+The webhook and syslog integrations ensure that RHACS is not limited to a fixed list of supported platforms. Any system that can receive an HTTP POST or a syslog stream can receive RHACS notifications. This future-proofs the integration against tooling changes without requiring a RHACS upgrade.
+
+=== Show
+
+**What I say**:
+
+"Security findings are only useful if they reach the right people in the right systems. Let me show you the notification integrations and how RHACS fits into your existing alerting and SIEM infrastructure."
+
+**What I do**:
+
+. On the Integrations page, scroll to the *Notifier Integrations* section.
+
+. Point to the available notifier types:
++
+"RHACS supports notifications to Slack, Microsoft Teams, PagerDuty, ServiceNow, Jira, Splunk, QRadar, Sumo Logic, and the cloud security services -- AWS Security Hub and Google Cloud Security Command Center."
+
+. Point to the webhook and syslog options:
++
+"For platforms not in this list, the generic webhook and syslog integrations cover almost any enterprise system. If it accepts an HTTP request or a syslog stream, RHACS can notify it."
+
+. Click into an existing notifier or the Slack integration type to show the configuration form:
++
+"Each notifier is configured with an endpoint or webhook URL and optional filtering. You can configure multiple notifiers -- for example, send critical runtime violations to Splunk for the SOC team and send build-time policy violations to a Slack channel for the development team."
+
+. Connect to the compliance scan scheduling covered in Module 03:
++
+"These same notifiers are used for compliance report delivery. When a scheduled compliance scan completes, the report goes to the configured recipients via any of these channels."
+
+**What they should notice:**
+
+* Notification routing can be filtered by severity, lifecycle stage, or policy category -- not all alerts go to all destinations
+* Webhook and syslog cover any platform not in the explicit list
+* The same notifier configuration is shared across violation alerts, compliance reports, and policy change notifications
+
+[NOTE]
+====
+**Presenter tip:** For organizations already running Splunk or QRadar as their primary SOC tool, the native SIEM integration is often the deciding factor in adoption. Security analysts do not want to learn a new console -- they want RHACS findings to appear in the dashboard they already monitor. Confirm that RHACS sends structured data that maps cleanly to common SIEM field formats.
+====
+
+image::07-integrations-notifiers.png[Notifier Integrations section showing Slack, Splunk, ServiceNow, and other targets,link=self,window=blank,width=700,title="Notifier integrations overview"]
+
+// TODO: Capture screenshot of the Notifier Integrations section
+
+== Part 3: Software supply chain and authentication integrations
+
+=== Know
+
+_Context: Software supply chain security has become a board-level concern since high-profile incidents demonstrated how a compromised build or dependency can propagate across thousands of organizations simultaneously. RHACS integrates with the emerging ecosystem of supply chain security tools to give teams verifiable assurance about what they are deploying._
+
+**What software supply chain security means in practice:**
+
+* Knowing that the image running in production was built from a specific, verified source commit
+* Knowing that the build process itself was not tampered with
+* Being able to verify, at deploy time, that an image carries a valid cryptographic signature from a trusted signer
+
+**RHACS supply chain integrations:**
+
+* *Cosign* -- RHACS can verify image signatures generated by Sigstore's Cosign tool. A policy can require that any image deployed to production carries a valid Cosign signature, blocking unsigned or tampered images at the Admission Controller.
+* *Tekton Chains* -- As shown in the CI/CD module, Tekton Chains generates signed provenance attestations for every pipeline build. RHACS can evaluate those attestations as part of policy enforcement.
+* *roxctl* in CI/CD -- The `roxctl` CLI integrates into any pipeline, making RHACS policy checks available in Jenkins, GitHub Actions, GitLab CI, Tekton, and any other CI/CD platform that can execute a command-line tool.
+
+**Authentication and access control:**
+
+For enterprise deployments, RHACS integrates with identity providers via OIDC and SAML 2.0, allowing organizations to use their existing SSO infrastructure for RHACS access control. Role-based access control maps identity provider groups to RHACS roles, ensuring that security team members, platform engineers, and developers each see the data relevant to their function without over-provisioning access.
+
+=== Show
+
+**What I say**:
+
+"Let me briefly cover two more integration categories that matter for enterprise deployments: supply chain security and authentication."
+
+**What I do**:
+
+. On the Integrations page, scroll to the *Signature Integrations* section:
++
+"RHACS supports image signature verification via Cosign. You can configure a trusted signing key here, and then create a policy that requires a valid signature for any image deployed to production. An unsigned image -- or one signed with an untrusted key -- is rejected by the Admission Controller."
+
+. Point to the *Authentication Tokens* or *API Token* section:
++
+"The `roxctl` CLI authenticates to RHACS using API tokens generated here. This is how the pipeline tasks in the CI/CD module authenticate. A token can be scoped to a specific role -- for example, a token used only for image scanning does not need write access to policies."
+
+. Navigate to *Platform Configuration > Access Control*:
++
+"For SSO integration, RHACS supports OIDC and SAML 2.0 identity providers. Groups from your identity provider map directly to RHACS roles. This means access to the RHACS console is controlled by the same identity management system as the rest of your OpenShift environment -- no separate user management required."
+
+. Point to the built-in RBAC roles:
++
+"RHACS ships with pre-defined roles: Admin, Analyst, Continuous Integration, Sensor Creator, and Scope Manager, among others. The Continuous Integration role is scoped for pipeline use -- it can scan images and check policies but cannot modify the policy configuration. That separation ensures your CI/CD tokens cannot be used to disable the policies they are supposed to enforce."
+
+**What they should notice:**
+
+* Signature verification creates a cryptographic enforcement gate at deploy time -- not just a scan report
+* API tokens are role-scoped, so pipeline credentials cannot be used to modify security policy
+* SSO integration means RHACS access is governed by the same identity lifecycle as the rest of the environment
+
+[NOTE]
+====
+**Presenter tip:** The role-scoped CI token point resonates with security architects who have concerns about pipeline credentials. A compromised pipeline token that cannot modify policies is a significantly smaller blast radius than one that can. This is a defense-in-depth argument that security teams appreciate.
+====
+
+[NOTE]
+====
+**Transition:** That covers the core integration surface. The final module covers Observability -- how RHACS metrics and monitoring data fit into your existing observability stack.
+====
+
+image::07-integrations-supply-chain.png[Integrations page showing Signature Integrations section for Cosign configuration,link=self,window=blank,width=700,title="Signature integrations for supply chain security"]
+
+// TODO: Capture screenshot of the Signature Integrations section
+
+== Assets needed
+
+. `content/modules/ROOT/assets/images/07-integrations-overview.png` -- Integrations page showing Image Integrations section with registry types
+. `content/modules/ROOT/assets/images/07-integrations-notifiers.png` -- Notifier Integrations section showing available targets
+. `content/modules/ROOT/assets/images/07-integrations-supply-chain.png` -- Signature Integrations section for Cosign configuration

@@ -1,0 +1,257 @@
+= Module 05: CI/CD integration
+:source-highlighter: rouge
+
+include::partial$_attributes.adoc[]
+
+This module shows how RHACS {rhacs_version} integrates into the development pipeline through Red Hat Developer Hub and OpenShift Pipelines, giving developers security feedback at the point they write code and enforcing policy gates during the build process using `roxctl`.
+
+*Estimated time*: 12-15 minutes
+
+== Part 1: Developer Hub and IDE security feedback
+
+=== Know
+
+_Context: Security findings discovered in production are expensive to fix. The earlier in the development lifecycle a vulnerability is caught, the cheaper and faster the remediation. RHACS integrates at the IDE level so developers see security problems the moment they write the code that introduces them._
+
+**The shift-left principle for security teams:**
+
+* A CVE discovered at runtime requires a production incident response process: triage, remediation, rebuild, redeploy, verification
+* The same CVE caught in the IDE costs a developer 30 seconds to undo
+* The challenge is giving developers accurate, actionable security information in the tools they already use -- not forcing them to context-switch to a separate security console
+
+**What the Developer Hub integration provides:**
+
+* In-IDE vulnerability detection as developers edit dependency files like `pom.xml`
+* A detailed vulnerability report accessible directly from the IDE, showing CVE details, severity, and available fix versions
+* The same CVE data that RHACS surfaces in the security console, presented in the developer's context
+
+**Red Hat Developer Hub:**
+
+Red Hat Developer Hub is a customized, enterprise-grade distribution of Backstage -- an internal developer portal that centralizes software catalog, CI/CD pipelines, documentation, and tooling. The RHACS integration extends the security visibility that exists in the operations console into the developer's daily workflow.
+
+=== Show
+
+**What I say**:
+
+"We have seen how RHACS surfaces security findings in the operations console. Let me show you the other end of the lifecycle -- what it looks like when a developer introduces a vulnerability and how RHACS gives them feedback before it ever reaches the build system."
+
+**What I do**:
+
+. Switch to the *Developer Hub* browser tab.
+
+. Navigate to the application component in the software catalog and locate the `pom.xml` file.
+
+. Click *Edit* and select *Open in Web IDE*.
++
+NOTE: You may be prompted to log in. Use the same credentials as Developer Hub. If you see a 404, navigate back and click *Edit > Open in Web IDE* again.
+
+. In the IDE, search for `<dependencyManagement>`.
+
+. Add the following vulnerable dependencies immediately before the last `</dependencies>` tag:
++
+[source,xml]
+----
+<dependency>
+    <groupId>org.apache.logging.log4j</groupId>
+    <artifactId>log4j-core</artifactId>
+    <version>2.14.1</version>
+</dependency>
+
+<dependency>
+    <groupId>org.apache.struts</groupId>
+    <artifactId>struts2-core</artifactId>
+    <version>2.5.2</version>
+</dependency>
+----
+
+. Point to the red squiggly line that appears under the version numbers:
++
+"The IDE is flagging these immediately. The dependency check has detected known CVEs in these specific versions. A developer does not need to run a separate scan or wait for a pipeline result."
+
+. Click the yellow lightbulb icon and select *Detailed Vulnerability Report*:
++
+"The report shows the CVE details, severity, and the fixed version available. This is the same data that would appear in the RHACS console and in the pipeline output -- consistent information at every layer."
+
+. Press `Ctrl+Z` or manually delete the added dependency lines to undo the change:
++
+"For the purposes of this demo, we will revert that change. But the point is made -- the developer caught it before committing."
+
+**What they should notice:**
+
+* Vulnerability detection happens in the IDE, at the moment the dependency is written
+* The feedback is specific: which CVE, which version is affected, what version fixes it
+* No separate tool, no separate console -- the information surfaces in the developer's existing workflow
+
+[NOTE]
+====
+**Presenter tip:** The squiggly line in the IDE is a strong visual. It is the same UX pattern developers already associate with syntax errors and type mismatches. Framing security feedback as "just another kind of error the IDE catches" helps position RHACS as a developer productivity tool, not just a security gate.
+====
+
+image::05-devhub-ide-vuln.png[Developer Hub Web IDE showing red squiggly line on vulnerable log4j version with vulnerability report popup,link=self,window=blank,width=700,title="In-IDE vulnerability detection in Developer Hub"]
+
+// TODO: Capture screenshot of the IDE with vulnerable dependency highlighted
+
+== Part 2: The three roxctl pipeline tasks
+
+=== Know
+
+_Context: After code is committed, the CI/CD pipeline is the next enforcement point. RHACS integrates into OpenShift Pipelines through three dedicated Tekton tasks that each cover a different security check, running automatically on every build._
+
+**Why three separate checks:**
+
+A complete build-time security gate needs to answer three distinct questions:
+
+* *Does this image contain known vulnerabilities?* -- Image scanning via `roxctl image scan`
+* *Does this image violate our security policies?* -- Policy evaluation via `roxctl image check`
+* *Is the deployment configuration itself risky?* -- Deployment YAML scanning via `roxctl deployment check`
+
+Separating these into distinct pipeline tasks makes the output readable and the failure reason unambiguous. A developer whose build fails knows immediately whether the problem is a CVE in a dependency, a policy violation in the image, or a missing resource limit in the deployment manifest.
+
+**Tekton Chains and supply chain security:**
+
+The pipeline uses Tekton Chains, a Kubernetes controller that augments OpenShift Pipelines with supply chain security capabilities. Chains automatically signs build artifacts and generates attestations, creating a verifiable record of what was built, from what source, and with what tools. RHACS policy checks run within this signed pipeline context.
+
+**What each roxctl task checks:**
+
+* `roxctl image scan` -- Scans the built image against the CVE database and outputs a full vulnerability report
+* `roxctl image check` -- Evaluates the image against RHACS policies: no log4j, no package managers, no curl or wget in production images
+* `roxctl deployment check` -- Evaluates the deployment YAML against policies: resource requests and limits defined, no privileged containers, proper namespace scoping
+
+=== Show
+
+**What I say**:
+
+"Now let me make a small legitimate change and commit it so we can watch the pipeline run and see where the RHACS tasks appear."
+
+**What I do**:
+
+. In the Web IDE, navigate to `src/resources/META-INF/index.html`.
+
+. Search for the word `Congratulations` and add a small text change after it.
+
+. Click the *Source Control* button, add a commit message, and commit to the main branch. Click *Sync Changes*.
+
+. Switch back to the *Developer Hub* tab and click *CI*.
+
+. Point to the pipeline visualization:
++
+"The pipeline is running. You can see the individual Tekton tasks in the pipeline graph. Notice these three tasks -- they are the RHACS integration points."
+
+. Identify and point to the three RHACS tasks in the pipeline:
++
+"The bottom task is `roxctl image scan` -- it scans the built image against the CVE database. The middle task is `roxctl image check` -- it evaluates the image against our security policies. The top task is `roxctl deployment check` -- it evaluates the deployment YAML to catch configuration issues like missing resource limits."
+
+. Click the *View Output* icon under Actions once the pipeline completes.
+
+. Walk through the three output tabs:
++
+"Each task produces its own output. Here you can see the CVE scan results, the policy check results, and the deployment check results. Since we are in Inform mode for most policies right now, the build completed successfully -- it reported findings but did not block."
+
+**What they should notice:**
+
+* Three focused checks give developers specific, actionable failure messages rather than a single pass/fail verdict
+* The pipeline output mirrors what the security team sees in the RHACS console
+* Tekton Chains provides a signed, verifiable record of each build alongside the security scan results
+
+[NOTE]
+====
+**Presenter tip:** The distinction between the three tasks is a useful technical depth point for platform engineers. `roxctl image scan` is informational. `roxctl image check` is where enforcement lives. `roxctl deployment check` catches the configuration drift that vulnerability scanners miss entirely -- a deployment YAML that sets `privileged: true` will not show up in a CVE scan.
+====
+
+image::05-pipeline-three-tasks.png[OpenShift Pipelines view in Developer Hub showing three RHACS roxctl tasks in the pipeline graph,link=self,window=blank,width=700,title="Three RHACS tasks in the CI/CD pipeline"]
+
+// TODO: Capture screenshot of the pipeline with the three roxctl tasks visible
+
+image::05-pipeline-task-output.png[Pipeline task output showing roxctl image scan results with CVE findings,link=self,window=blank,width=700,title="roxctl image scan output in pipeline"]
+
+// TODO: Capture screenshot of the pipeline task output tabs
+
+== Part 3: Policy enforcement at build time
+
+=== Know
+
+_Context: Reporting findings during a build is useful. Blocking a build that violates a critical policy is essential. The same RHACS policy engine that governs runtime enforcement can be applied at build time, preventing non-compliant images from being promoted through the pipeline entirely._
+
+**Build-time enforcement vs deploy-time enforcement:**
+
+* Deploy-time enforcement via the Admission Controller catches anything that reaches the cluster -- including images promoted outside the CI/CD pipeline
+* Build-time enforcement via `roxctl image check` catches violations earlier, before the image is pushed to a registry
+* Defense in depth means both are active: you cannot promote a non-compliant image through the pipeline, and even if one reaches the cluster by another path, the Admission Controller rejects the deployment
+
+**Creating a targeted policy:**
+
+RHACS policies can target specific CVEs, making it straightforward to respond to a newly disclosed high-profile vulnerability. A policy targeting CVE-2023-6267 with Build enforcement enabled means no image containing that CVE can be promoted through any pipeline integrated with RHACS -- across all teams, all clusters, all environments.
+
+=== Show
+
+**What I say**:
+
+"We just saw the pipeline complete successfully because the policies were in Inform mode. Let me show you what happens when we turn enforcement on for a specific CVE and re-run the pipeline."
+
+**What I do**:
+
+. Navigate to *RHACS > Platform Configuration > Policy Management > Create Policy*.
+
+. Fill in the policy fields:
++
+* *Name*: `Block CVE-2023-6267`
+* *Description*: Block images containing CVE-2023-6267 at build time
+* *Rationale*: This CVE is present in the demo application image and should not be promoted through the pipeline.
+
+. Select *Build* as the lifecycle stage.
+
+. In the *Rules* section, drag and drop *CVE* from the right-hand menu under *Image Content*.
+
+. Enter `CVE-2023-6267` in the CVE field.
+
+. Click *Next* until you reach *Policy Behavior > Actions*.
+
+. Select *Inform and Enforce* and toggle the *Build* enforcement switch on.
+
+. Click *Next*, then *Save*.
+
+. Return to the Web IDE, make any small edit to trigger a commit, and click *Sync Changes*.
+
+. Switch back to Developer Hub and click *CI* to watch the new pipeline run.
++
+"The pipeline is running the same stages as before. It will build successfully, push the image, and then hit the RHACS image check task."
+
+. Point to the pipeline task that fails:
++
+"As expected, the build has failed at the `roxctl image check` step. Click on the failed task to see the reason."
+
+. Click the failed task to show the output:
++
+"The failure message identifies the policy that was violated: our `Block CVE-2023-6267` policy. The developer knows exactly what policy blocked the build and which CVE triggered it. There is no ambiguity and no need to contact the security team to decode the error."
+
+**What they should notice:**
+
+* A policy change in RHACS takes effect on the next pipeline run immediately, with no pipeline configuration changes required
+* The failure message is specific -- policy name, CVE ID, and severity are all visible in the pipeline output
+* Build-time enforcement prevents the image from reaching the registry, which is earlier than Admission Controller enforcement
+
+[NOTE]
+====
+**Presenter tip:** Creating a policy live during the demo and watching it block the next build is one of the strongest proof points in the entire demo. The time between "I created this policy" and "it blocked a build" is one pipeline run. That immediacy demonstrates that RHACS policy changes have real-time operational effect across the entire development organization.
+====
+
+[NOTE]
+====
+**Cleanup:** After the demo, delete the `Block CVE-2023-6267` policy to restore the pipeline to its original state. Navigate to *Policy Management*, find the policy, and click *Actions > Delete policy*.
+====
+
+[NOTE]
+====
+**Transition:** With the development pipeline covered, we move to the Network Graph -- how RHACS visualizes actual traffic between deployments and uses that observation to generate Kubernetes-native firewall rules.
+====
+
+image::05-pipeline-enforcement-fail.png[Pipeline build failed at roxctl image check step with policy violation message visible in task output,link=self,window=blank,width=700,title="Pipeline blocked by RHACS policy enforcement"]
+
+// TODO: Capture screenshot of the failed pipeline task with the policy violation message
+
+== Assets needed
+
+. `content/modules/ROOT/assets/images/05-devhub-ide-vuln.png` -- Web IDE showing red squiggly on vulnerable log4j version with vulnerability report popup
+. `content/modules/ROOT/assets/images/05-pipeline-three-tasks.png` -- Pipeline graph in Developer Hub with three RHACS roxctl tasks visible
+. `content/modules/ROOT/assets/images/05-pipeline-task-output.png` -- Pipeline task output tabs showing roxctl image scan results
+. `content/modules/ROOT/assets/images/05-pipeline-enforcement-fail.png` -- Failed pipeline build with RHACS policy violation message in task output

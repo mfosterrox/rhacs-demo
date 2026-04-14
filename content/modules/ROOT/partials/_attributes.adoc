@@ -1,0 +1,4 @@
+// RHACS Demo -- static attributes
+// Runtime variables ({acs_route}, {acs_portal_username}, etc.) are injected by Showroom automatically.
+
+:rhacs_version: 4.10

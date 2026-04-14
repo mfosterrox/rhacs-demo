@@ -1,0 +1,159 @@
+= Module 01: UI overview
+:source-highlighter: rouge
+
+include::partial$_attributes.adoc[]
+
+This module introduces the Red Hat Advanced Cluster Security {rhacs_version} console. Presenters walk through the dashboard, navigation, and global search to establish the full scope of the platform before diving into individual use cases.
+
+*Estimated time*: 5-8 minutes
+
+== Part 1: Dashboard and top bar
+
+=== Know
+
+_Context: Securing containerized workloads at scale requires visibility across the entire environment from a single control plane._
+
+**Business challenge:**
+
+* Security teams managing containerized applications face fragmented tooling: separate scanners, policy engines, and runtime monitors
+* Without a unified view, understanding where risk lives across clusters, namespaces, and deployments requires multiple context switches
+* Compliance audits and incident response are slowed by the need to correlate data from disconnected systems
+
+**What RHACS provides:**
+
+* A single security control plane spanning the full application lifecycle: build, deploy, and runtime
+* Centralized visibility into vulnerabilities, policy violations, network flows, and runtime activity across all connected clusters
+* Actionable data organized by risk priority, not raw alert volume
+
+**Key message for this audience:**
+
+For platform teams, RHACS integrates with OpenShift natively. No agents to manage, no separate infrastructure to run. For security teams, it surfaces Kubernetes-native risk signals that traditional tools miss entirely.
+
+=== Show
+
+**Optional slide**: Architecture diagram showing RHACS sitting above OpenShift clusters, collecting signals from build, deploy, and runtime layers.
+
+**What I say**:
+
+"Let me start by orienting you to the RHACS console. This is your security operations view for everything running in OpenShift. I'll show you how it's organized before we go deeper into each use case."
+
+**What I do**:
+
+. Open the RHACS console.
++
+Access it from the *RHACS Console* tab in the right panel, or navigate directly to {acs_route}[window=blank].
+
+. Log in using:
++
+[cols="1,1"]
+|===
+| *Username:* | {acs_portal_username}
+| *Password:* | {acs_portal_password}
+|===
++
+NOTE: Choose the standard *username and password* option, not the monitoring login path.
+
+. Navigate to *Dashboard* from the left side menu.
+
+. Walk through the dashboard sections:
++
+"The dashboard is the security overview for the platform -- risk categories, violation counts, and compliance posture all in one place. Every element is clickable for deeper detail, and the categories are customizable."
+
+. Hover over the top bar and highlight:
++
+"At the top, you can see we have one OpenShift cluster with 7 nodes connected. RHACS supports any number of clusters in a single UI, which is important for teams managing multiple environments -- staging, production, edge."
+
+. Click the top bar summary counts to show:
++
+* Violations count
+* Deployments count
+* Images and Secrets summary
+
+**What they should notice:**
+
+* The dashboard aggregates risk signals without requiring manual correlation
+* Cluster and node counts are visible at a glance
+* The UI is organized around security workflows, not raw event streams
+
+[NOTE]
+====
+**Presenter tip:** If asked about multi-cluster support, confirm that RHACS connects to any number of OpenShift or Kubernetes clusters and presents a unified view. This is a frequent requirement for enterprise platform teams managing separate environments per business unit.
+====
+
+image::01-rhacs-dashboard.png[RHACS dashboard showing violation counts, risk categories, and compliance posture,link=self,window=blank,width=700,title="RHACS security dashboard"]
+
+// TODO: Capture screenshot of the RHACS dashboard
+
+== Part 2: Navigation and global search
+
+=== Know
+
+_Context: The breadth of what RHACS monitors often surprises teams new to the platform. This section establishes the full scope before the detailed use case demos._
+
+**What RHACS tracks across your environment:**
+
+* Vulnerabilities in container images, running deployments, and cluster nodes
+* Deployment configuration risk: privileged containers, exposed ports, missing resource limits
+* Network traffic flows between deployments: both observed baseline and anomalous connections
+* Runtime process activity inside pods: what is running and what deviates from the established baseline
+* Policy violations across build, deploy, and runtime lifecycle stages
+* Compliance posture against standards including PCI-DSS, HIPAA, CIS Benchmarks, and NIST SP 800-190
+
+**Why global search matters for security and platform teams:**
+
+Security incidents and audits often start with a question: "Are we running this image anywhere?" or "Which deployments are affected by this CVE?" RHACS answers those questions instantly across the entire environment, without requiring manual inventory, scripting, or cluster access.
+
+=== Show
+
+**What I say**:
+
+"Before we go into the individual use cases, I want to show you the left-hand navigation and the global search. This gives you a sense of the full scope of what RHACS monitors, which will make each section more meaningful."
+
+**What I do**:
+
+. Hover over the left-hand navigation menu and walk through the top-level sections:
++
+"Each item here represents a core security workflow. We will cover Vulnerability Management, Compliance, Violations, Policy Management, CI/CD integration, and the Network Graph. Platform Configuration at the bottom is where you manage policies, integrations, and access control."
+
+. Click the *Search* icon in the top bar to open Global Search.
+
+. Type `Process Name` in the search bar and select that key from the suggestions.
+
+. Enter `bash` and press Enter, then click away to clear the dropdown.
++
+"There are five deployments that have been seen running bash since they started -- all of them in production. Global search lets your security team answer that question immediately, without SSH access or custom scripting."
+
+. Clear the search and type `CVE-2021-44228`:
++
+"Same approach for CVEs. 'Are we impacted by log4shell?' is a one-line query across the entire environment. You get affected images, deployments, and namespaces in a single result."
+
+. Close the search.
+
+. Point to the *Create Policy* button in the upper right of the Risk page:
++
+"Once you have a search that identifies interesting criteria, you can create a policy directly from that filter. That policy then runs continuously, automatically identifying this same criteria going forward."
+
+**What they should notice:**
+
+* Search spans all tracked data: CVEs, images, deployments, runtime process activity
+* Results are cross-referenced so a CVE query returns affected deployments, not just a finding list
+* No query language to learn; search uses structured keys with auto-complete
+
+[NOTE]
+====
+**Presenter tip:** For security operations teams, emphasize that global search replaces the need for kubectl commands or node-level access during incident investigations. For platform teams, emphasize that this data is collected automatically by the RHACS sensor with no manual instrumentation required.
+====
+
+[NOTE]
+====
+**Transition:** From here, we go into the individual security workflows. We will start with Vulnerability Management, which is the first area most teams want to explore.
+====
+
+image::01-rhacs-global-search.png[RHACS global search showing process name filter results for bash across production deployments,link=self,window=blank,width=700,title="Global search filtering by process name"]
+
+// TODO: Capture screenshot of global search with bash filter applied
+
+== Assets needed
+
+. `content/modules/ROOT/assets/images/01-rhacs-dashboard.png` -- RHACS dashboard showing violation counts, risk categories, and compliance posture
+. `content/modules/ROOT/assets/images/01-rhacs-global-search.png` -- Global search results for bash process name filter across production deployments

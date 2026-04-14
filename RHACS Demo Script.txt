@@ -1,0 +1,410 @@
+﻿Updated Mar 24, 2026 by Michael Foster. Contact with issues/suggestions. Current work in progress for 4.10 updates
+Red Hat Advanced Cluster Security Demo Guide
+Built for Version 4.10
+About this Guide
+This RHACS demo guide is purpose-built for the ACS Demo Environment  It is a living document that will reflect the current state of the product as features are added. It is meant to be a great starting demo flow for field and technical teams to understand the use cases of RHACS.
+
+
+Feedback is always welcome and appreciated!
+
+You can comment and suggest changes directly in the document or add it to the ISSUES page.
+Ordering the demo environment  (Required: Est time ~1 hrs)
+1. Log into RHDP. 
+2. Search for “Advanced Cluster Security Demo (CNV)” (or use this  link). 
+3. Click ‘Order’. 
+4. Order page
+   1. Fill out the fields appropriate to your use case and make sure to add your case number/oppID
+   2. IMPORTANT: Turn off the auto-stop 
+5. Click ‘Order’.
+6. Wait ~1 hour for the completion email.
+7. Access the RHDP platform “Services” tab for the showroom instance and all of the set up details.
+Environment setup (Required: Est time ~15 min)
+1. Click the Showroom URL and follow the set up instructions.
+2. Run the set up commands to ensure all of the use cases are configured in the environment.
+3. Run the verify script to ensure everything is set up correctly.
+4. Proceed through the demo walkthrough.
+Demo Walkthrough 
+About this Guide
+Bulleted sentences are to be read “in your own words”—make it your own! These cover the major talking points about each feature. There is no one, single canonical script, but this example will take you through the bulk of the product's capabilities.
+
+
+Navigation
+
+
+Instructions in Red are navigation guidance. You should follow these guides as you step through the product.
+
+
+Other relevant notes are in italics, indicating a choice of how to proceed or sections you can skip.
+________________
+
+
+UI Overview
+Navigate to the Dashboard tab from the left side menu
+Dashboard
+* The ACS dashboard serves as the security overview - helping the security team understand the sources of risk, categories of violations, and gaps in compliance. 
+* All of the elements are clickable for more information, and categories are customizable
+Top bar
+* Hover over the top bar in the UI
+* Near the top, we see that we have one OpenShift cluster with a total of 7 nodes, but the platform supports observation of any number of OpenShift clusters in a single UI.
+* And with a click we can get information on the Violations, Deployments and the usage of Images and Secrets in the clusters.
+* The top bar also provides links to Search, Command-line tools, Cluster Health, Documentation, API Reference, and logged-in user account
+Left menus
+* Hover over the left-hand side menu bar
+* The left-hand menus provide navigation into each of the core security workflows
+*  The left-hand menus also contain the Platform Configuration tab with various Policy Management, Administration Events and integration options.
+Global Search
+* The global search allows you to search for any data that ACS tracks—vulnerabilities, images, deployments, and runtime—on every page throughout the UI.
+* It’s the place to get answers to questions like, “Are we using this image anywhere?” “Are we impacted by log4shell (CVE-2021-44228)?” and " Who’s running user-interactive shell commands in a production container?”
+Vulnerability Management
+Click on Vulnerability Management on the left-hand side menu to expand it, then on the RESULTS tab
+Overview
+* Let’s start with Vulnerability Management, a core use case for most security teams.
+* The Results page lists all CVEs in all containerized  and OpenShift Virtual Machine workloads running on your clusters. 
+* Workloads are separated at the top of the page to help with filtering.
+   * User workloads = user applications
+   * Platform = OpenShift Platform components
+   * Nodes = Node Operating System.
+* This helps to diagnose where the vulnerability is originating from and what layer to fix it. 
+* By default, ACS filters CVEs to show only Important and Critical vulnerabilities that are "Fixable"—they have a patch available. This particular environment may not show anything with these filters enabled. You can remove these filters to see a complete view of all vulnerabilities.
+* In “User Workloads” view, click on the button labeled "<#> Deployments"  
+* You can also view vulnerability data organized by Images or Deployments. Image details include CVE counts by severity, Operating System, and the number of Deployments using this image.
+* More important than fixing any vulnerability is establishing a process to keep container images updated and prevent the promotion through the pipeline of images with serious, fixable vulnerabilities.
+* Other controls on this page allow you to switch to a Namespace-oriented view of vulnerabilities or to view Deferred or False Positive CVEs. CVE reporting workflows are managed under the Exception Management page.
+Node Scanning
+   * From top, menu click on "Nodes"
+   * ACS also scans the Cluster infrastructure - the RHEL CoreOS Nodes - for vulnerabilities.
+   * Each Node is listed with the OS version and the container engine.
+   * Click on "<#> Nodes" below the filters. Click on a Node in the list. Scroll down the CVE list. Click on an arrow to the left of a CVE / RHSA in the list to show the details.
+   * You can also drill down to see the list of vulnerabilities, and the components that the ACS scanner found to be impacted by the CVE or RHSA  in the Node operating system.
+Image overview and image details
+   * Navigate back to the main Vulnerability Management -> Results  page
+   * Click the "<#> CVEs" button under the filter controls.
+   * Click on the image "rhacs-demo/visa-processor:latest-v2"
+   * The Image Summary at the top provides the important security details of the image overall. This includes OS, age when it was last scanned, and by which scanner (StackRox Scanner or Scanner V4).
+   * You can also see, at the top, the warning that CVE data is stale - that this image has a base OS version whose distribution has stopped providing security information on, and has likely stopped publishing security fixes for. This is extremely insecure. 
+   * At the bottom, the Image Findings section displays vulnerabilities, sorted by Severity.
+   * This image shows us a serious security problem - the base image was imported more than five years ago.
+   * Time is not kind to images and components - as vulnerabilities are discovered, ACS will display newly discovered CVEs.
+CVE Example
+   * Scroll down to the Vulnerabilities section. Filter the most recent CVEs to the top by clicking the double arrow next to "CVE".
+   * This will sort the CVEs by number bringing the most recently released to the top.
+   * The CVE list for each image focuses on high-severity vulnerabilities and the “fixable,” where the upstream package maintainers have published a fix. 
+   * We at Red Hat don’t think it’s practical to ask your teams to fix Linux or Javascript vulnerabilities - but we think it’s reasonable to ask them to pick up fixes published by those communities.
+   * Click on a Fixable, Critical CVE in the list, like CVE-2023-50164
+   * This CVE, for example, is very serious - being ranked as Critical - and fixable. 
+   * CVE-2025-6965 is a memory corruption flaw found in SQLite. Under specific conditions a query can be generated where the number of aggregate terms could exceed the number of columns available. This issue could lead to memory corruption and subsequent unintended behavior. 
+   * The vulnerability contains both NVD and RHSA feeds. Showing both the standard vulnerability release and Red Hat’s impacted products.
+   * The lower section now shows the number of affected images. This is useful for locating how many images contain this vulnerability so you can get a sense of its impact.
+   * Sometimes, if the vulnerability is located in a base image layer organizations can fix a single vulnerability with one update.
+Pivot to Deployments (In the same dashboard)
+   * Vulnerability management is a key factor in cluster risk but it is not the whole picture. How do we judge the true risk - which vulnerabilities are likely to be exploited? 
+   * Which vulnerabilities do we truly have to fix first?
+   * RHACS can use other sources of information in OpenShift to judge the risk that a given vulnerability would be exploited, and hence to set priorities for fixes.
+   * The first risk factor - is the vulnerable component actually in a running deployment?
+   * Click on the <#> Deployments button.
+   * These are the deployments running right now with containers from images with this vulnerability present.
+   * Being “Up and running” is a risk factor - vulnerabilities are only going to be exploited if they’re in a running container somewhere in one of the clusters.
+   * We display the critical information here - so you can see that we have this present in the Production cluster, in Namespaces like Payments, which starts to provide context to the security team. 
+   * RHACS also displays the number of images that are linked to the deployment, and when it was first discovered. 
+   * Click the arrow to the left of the webgoat deployment.
+   * Clicking the arrow will display deeper information about the affected deployment, including the affected deployment and can show what containerfile layer the SQLite vulnerability was introduced in 
+
+
+9.8 (V3) | libsqlite3-0 | 3.45.1-1ubuntu2 | 0:3.45.1-1ubuntu2.4 - OS | var/lib/dpkg/status
+
+   * These boxes will also show more information like the CVSS score, the version number, what version it is fixed in, the source, as well as the name and location in the dockerfile. 
+   * So - of these deployments, which is the most likely to be exploited and how is it determined?
+Risk
+Navigate to the Risk tab from the left-side menu
+Overview
+   * Let’s take a look at the Risk view, where we go beyond the basics of vulnerabilities to understand how deployment configuration and runtime activity impact the likelihood of an exploit occurring and how successful those exploits will be.
+   * This list view shows all deployments in all clusters and namespaces, ordered by Risk priority.
+   * Risk is also influenced by runtime activity - and Deployments that have activity that could indicate a breach in progress have a red dot on the left.
+   * Obviously - the first one in the list should be our first focus.
+   * The reality of security is that it’s just not possible to tackle all sources of Risk, so organizations end up prioritizing their efforts. 
+   * We want RHACS to help inform that prioritization.  
+Single Deployment Details
+   * Click on the number 1 deployment, “visa-processor” to bring up the Risk Indicators on the right
+   * The Risk Indicators tab shows why this deployment is considered a high risk.
+   * The deployment has serious, fixable vulnerabilities, but it also has configurations like network ports and service exposure outside the cluster, making it more likely to be attacked.
+   * In addition, other configurations, like privileged containers, allow a successful attacker to access the underlying host network and filesystem, including other containers running on that host.
+   * Navigate to the bottom of the Risk Indicators page to see the Service Reachability and Components Useful for Attackers sections
+   * At the bottom, we see several other Risk factors that ACS interprets automatically. "Service Reachability" is a measure of how exposed the service is. Services exposed within the cluster, or connected to a Route that allows external access, are more likely to be attacked. Components Useful for Attackers are software packages like system utilities, network configuration, shells, and debug or troubleshooting tools that attackers can use once they have a foothold in the container. While these tools aren't malicious, they can be used maliciously to exploit an initial misconfiguration.
+   * All of these configurations are gleaned automatically by ACS from OpenShift, and the built-in policies assign a risk score to each, meaning that this Risk report is available as soon as you start running ACS.
+Process Discovery / Runtime
+   * Navigate to the Process Discovery tab of the details page
+   * Of course, we can’t restrict ourselves to build and deploy time configuration.
+   * Even a perfectly configured application has the potential for an attacker to gain access and cause havoc.
+   * Here we show how ACS continuously monitors runtime activity within pods in the deployment, building a baseline of observed behavior, and tracking deviations from that baseline.
+   * Click on the Header bar in the section for Event Timeline (with View Graph in the labels, toward the top
+
+
+
+
+  
+
+	Event Timeline Location - Hard to find!
+	
+
+
+
+
+
+   * The event timeline pop-up should appear
+   * The event timeline shows us, for each pod, the process activity that has occurred over time. 
+   * Click on the squares/circles in the timeline to show the process activity detail
+   * We can take advantage of the constrained lifecycle of containers for better runtime incident detection and response.
+   * Container activity should be pretty boring—they’re not general-purpose Virtual machines. Containers typically have a period of startup, with some initialization, and then settle down to a small number of processes running continuously and making or receiving connections.
+   * Deviations from the baseline can be used to take enforcement action and alert team members.
+   * Runtime activity rules can be combined with other activity or configuration using policy
+   * Close the event timeline pop-up by clicking somewhere outside the popup
+Filters
+   * Most UI pages have a filters section at the top that allows you to narrow the reporting view to matching or non-matching criteria.
+   * Almost all of the attributes that ACS gathers are filterable
+   * It’s really useful here in Risk when you know what you’re looking for - when you want answers to questions like, “what applications have CVE-2020-1008 present,” or “
+   * Click in the Filters Bar
+   * Using the Filter Deployments box at the top of Risk, start typing “Process Name” and select the Process Name key
+   * Type bash and press enter; click away to get the filters dropdown to clear
+   * There’s five deployments that have been “seen” running bash since they started - and all of them in Production.
+   * At the upper right there’s a Create Policy button. Now that we’ve searched for interesting criteria, we can create a policy from the search filter to automatically identify this criteria going forward.
+
+
+Network Graph
+Navigate to the Network > Network Graph tab from the left side menu. 
+Overview
+   * The Network Graph is a flow diagram, firewall diagram, and firewall rule builder in one.
+   * At the top, you’ll see the dropdown for clusters, namespaces, and deployments  so I can easily tailor my view to
+   * Since there's only one cluster connected in the demo, it should already be selected. If not, select Production from the Clusters ("CL") dropdown. Then, select a few Namespaces from the "NS" dropdown, including the Payments namespace.
+   * The default view, Active, shows me actual traffic for the Past Hour between the deployments in all of the namespaces.
+   * You can change the time frame in the dropdown in the upper left, and navigation controls and the legend are at the bottom left.
+   * You can zoom in and out with mouse scrolling, drag and drop deployments, resize namespaces, and more!
+Namespace and Deployment Detail
+   * Zoom in on Payments Namespace
+   * As we zoom in, the namespace boxes show the individual deployment names
+   * Click on visa-processor deployment
+   * Clicking on a deployment brings up a summary of observed traffic including any anomalous traffic flows, the status of network policies, and any listening ports.
+Baseline and Anomalous Flows
+   * Click on Flows in the right hand side pane.
+   * In flows on the right hand pane, we see that the observed traffic shows 1 anomalous flow and 3 baseline flows. The one anomalous flow is "unusual" - traffic that was observed that deviates from the container baseline. This is part of the runtime security to detect indicators of compromise - in this case, 
+Network Policy Simulator
+   * Click on Network Policy generator button in the top right
+   * The Network Policy Simulator is designed to help solve this problem by using the history of observed traffic to build firewall rules.
+   * Click on Generate and Simulate network policies
+   * You’ll notice, though, that the firewall rules we’re generating are not proprietary rules, but OpenShift-native Network Policy objects.
+   * This feature, more than any other, illustrates the philosophy that ACS represents: Security through platform-native features, with fixes supplied as configuration for OpenShift.
+   * By implementing stronger security through declarative code we believe this avoids the anti-pattern of having configuration rules in a separate system - this code becomes part of your application, ensuring the consistency of “single source of truth” from your codebase.
+   * This approach also reduces operational risk since there is no proprietary firewall in your cluster or in your pods that could fail, causing an application outage.
+   * ACS is leveraging the firewall that’s already in your OpenShift cluster.
+   * You’ll see this approach - “fix it in the code,” “leverage the platform,” - everywhere throughout the product - and we’ll take a look at what those policies look like, with examples of policy violations.
+Violations
+Navigate to the Violations tab from the left side menu
+Overview
+   * Violations record all of the specific times where a policy criteria has been met by any of the objects in your cluster - images and their components, deployments, runtime activity.
+   * Think of it as the “stream” of events that have occurred, although we don’t want this to just be a “to-do” list for incident response folks.
+Violation Example: Fixable Severity at Least Important
+   * Click on a Violation of the Fixable Severity at Least Important policy. You may have to look for one! The violation details are displayed.
+   * Here’s an example of the details recorded for a policy violated at deployment time.
+   * You’ll see that it’s the same information presented in a CI/CD tool or developer console when using the build-time integration.
+Violation Example: Runtime
+   * Click on a Violation of the Ubuntu Package Manager Execution policy. Again, you may have to look or search (filter “Policy:” Ubuntu) for it. The violation details are displayed.
+   * This violation is a runtime incident - so it has a different set of details and actions available.
+   * The forensic data recorded will be familiar to most incident response team - the “who, what, when, where, and why” of the activity, including process names, arguments, UIDs, container IDs
+   * In this case, for our demo, there’s been no enforcement of the action, just a notification, and the team has options to resolve or suppress these notifications in the future.
+Policy Summary
+   * ACS has a number of built-in policies to detect activity that is related to attacker goals: gain a foothold, maintain a presence, move laterally, and exfiltrate data.
+   * The continuous runtime monitoring observes all container activity and will automatically respond to events with appropriate enforcement and notification
+   * In the top menu of the Violation, click on the Policy tab
+   * But that would be missing out on an opportunity - ACS wants to go one step further, to take advantage of the ephemeral, immutable nature of containers to improve security in a measurable way going forward.
+   * In this case, we highlight the fact that Package Managers - useful in a Virtual Machine context - serve no valid purpose in a containerized workload.
+   * Highlight the text in the Guidance Section of the Policy
+   * Removing the package manager - using the simple Dockerfile command we supply here - will lower the surface area for attack in the next build, interrupting attack chains that depend on it.
+   * We are, essentially, using runtime incidents as a learning opportunity to improve security going forward by constraining how our containers can act.
+
+
+Policy Management
+Navigate to the Policy Management page from the Platform Configuration tab from the left side menu
+Overview of Built-in Policies
+   * All of the policies that ship with the product are designed to provide targeted remediation that improves security hardening.
+   * This list contains many Build and Deploy time policies to catch misconfigurations early in the pipeline, as well as Runtime policies that point back to specific hardening recommendations.
+   * These policies come from us at Red Hat - our expertise, our interpretation of industry best practices, and our interpretation of common compliance standards, but you can modify them or create your own.
+Specific Policy Example - Alpine Package Manager in Image
+   * Click on the Alpine Linux Package Manager (apk) in Image Policy.
+   * This is what an ACS policy looks like - front and center, you can see the Rationale and Guidance designed to give the DevOps team some context about why this issue is important for security and, more importantly, what to do about the issue.
+   * You might get the impression that we don’t like Package Managers!
+   * While useful, containers just represent a tool that an attacker can use to install software and don’t have a legitimate use—a container should ship with all of the dependencies it requires.
+Power of a single policy engine
+   * Policy criteria can cross the build, deploy, and runtime lifecycles.
+   * For example, policies highlighting vulnerabilities in deployments with privileged containers in that deployment.
+   * Another example might be runtime criteria - like execution of shell commands - in containers in deployments that have external network exposure.
+   * It’s easy to write a policy that prevents use of compilers and other build tools - except in development clusters, in namespaces for CI/CD tools.
+   * There are no “silos” - other tools require you to manage policies for vulnerabilities and runtime separately.
+   * The unified policy engine allows for targeted conditions and targeted enforcement, easily allowing exceptions for specific applications once approved by security.
+
+
+Policy Enforcement
+   * Return to the Policy list and click on the Fixable CVSS >=7 policy in the list. (It’s usually 20-30 rows down. You can also filter for it by typing “fixable” in the filters bar.
+   * As you’ve seen - ACS focuses on empowering and encouraging developers to understand and resolve security issues in their own deployments.
+   * Sometimes we have to balance the carrot with a little stick, because security officers need to know that dangerous misconfigurations won’t be promoted and deployed in certain environments, and that’s where enforcement of policy comes in.
+   * Click Action->Edit in the upper right of the policy
+   * Click Policy behavior → Actions  in the left hand menu and show response method. 
+   * Enforcement is another demonstration of Kubernetes-native security, leveraging the pipeline process to prevent unacceptable risks.
+   * In the absence of CI/CD integration, or for images that are promoted without going through CI/CD, we leverage the built-in power of a Kubernetes Admission Controller to decide if a deployment can be created.
+   * We’re essentially programming OpenShift to prevent security risk
+   * Security gets their enforcement, and DevOps sees a “normal” failure from the OpenShift API, with clear remediation steps instead of a nebulous error that forces them to go open a ticket or look in another console.
+   * Click Inform and enforce, and click ON for both Build and Deploy enforcement.
+   * Click Review policy from the left hand menu and click Save. 
+Compliance
+Navigate to the Compliance -> Dashboard (Deprecated) tab from the left side menu and select Dashboard. 
+
+If no data is available, click "Scan environment". 
+Overview
+   * The compliance reports gather information for configuration, industry standards, and best practices for container-based workloads running in OpenShift.
+   * In many ways, you’ve already seen the compliance features - because they’re tied to controls that we saw in Risk, in the Network Graph, and in Policies
+   * Each standard represents a series of controls, with guidance provided by StackRox on the specific OpenShift configuration or DevOps process required to meet that control.
+Standards Details
+   * Click on PCI, or the PCI percentage bar, in the upper-left “Passing Standards Across Clusters” graph
+   * Click on Control 1.1.4, “Requirements for a firewall…”
+   * For example, PCI-DSS has controls that refer to firewalls and DMZ - not exactly cloud-native
+   * In OpenShift, that requirement, and other isolation requirements, is met by Network Policies, and the 8% compliance score here indicates that only a fraction of my deployments have correctly defined policies.
+Namespace Compliance Details
+   * Navigate to the Compliance tab from the left side menu and select Dashboard. 
+   * Click on Namespaces in the top toolbar of the compliance page
+   * Of course, like every other report - it’s also valuable to break this data down by Clusters, Namespaces, and Deployments.
+   * Namespaces in particular - being able to see, application-by-application, or team-by-team, where the gaps in compliance are.
+Evidence Export
+   * Navigate to the Compliance tab from the left side menu and select Dashboard
+   * Last thing about compliance - you’re only as compliant as you can prove!
+   * Click on the Export button in the upper right to show the “Evidence as CSV” option
+   * This is the evidence export that your auditors will want to see for proof that the security controls mandated are actually in place.
+   * (optional) Switch to the Google Sheets with prepared evidence export, if you have it
+   * The evidence spreadsheet has all the gory details—control by control, object by object—that demonstrate exactly what’s being tested and what the pass/fail verdict is.
+Scheduling and Reporting
+   * Navigate to the Compliance tab on the left side menu and select Schedules
+   * This is where you can create compliance scan schedules for your environment. 
+   * Click on the Create Scan Schedule button.
+   * This first window is where you will set basic parameters such as the name of your scheduled scan, the description, as well as when and how frequently the scan will run. 
+   * Set a name for the scan, and pick a frequency/time for the scan and click next. 
+   * In this window, we select the clusters you would like to scan. 
+   * Select a cluster and click next. 
+   * Now we'll select what kind of profiles we would like to scan for. We have a breadth of choice here with everything from CIS to PCI-DSS, and even STIG. This window also shows the number of rules in the scan, the applicability (whether Platform or Node), and the version. 
+   * Select any profile and click next. 
+   * Here we can set up recipients for the reports. 
+   * Click add delivery destination, select a notifier (if no notifiers are available, create one and explain the process). [a]
+   * You can also send this to multiple recipients using the distribution list.
+   * Enter a couple fake e-mail addresses following the format <email>, <email>, <email> and click Next. 
+   * Now that we have our schedule planned, we just need to save it. 
+   * Click Save.
+   * The scan is now ready and will run automatically on the day/time it was scheduled for. We can also run it manually. 
+   * Click the scan schedule you just created, click Actions in the top right corner, and select Run Scan. 
+CI/CD with OpenShift Pipelines
+
+
+In this section, we will take a look at the broader implementation of security in the development process. We’ve shown how ACS covers the lifecycle of applications from build to deployment to runtime, so let’s dive a little deeper. 
+Overview
+   * Red Hat® OpenShift Pipelines is a Kubernetes-native CI/CD (Continuous Integration/Continuous Deployment) solution that automates the process of building, testing, and deploying applications. 
+   * It leverages Tekton, a powerful and flexible open-source framework, to create cloud-native pipelines that integrate seamlessly with OpenShift and other Kubernetes environments. 
+   * This enables developers to define and manage their build and deployment workflows as code, ensuring consistency, scalability, and repeatability across the software development lifecycle.
+   * We also have integration with Red Hat Developer Hub to further enhance the security of the coding and build process.
+Procedure
+   * Switch browser tabs to Developer Hub
+   * We’re going to jump right into what it looks like when a developer adds something potentially harmful in a code update. 
+   * We’re going to add a vulnerable, struts2 dependency. 
+   * Look for the pom.xml file and click on it. 
+   * Click Edit and Open in Web IDE
+   * NOTE: You may be asked to log in, if so, use the same user and password as you originally did to log into Developer Hub. If you get a 404, go back and click on Edit -> Open in Web IDE again. It should load properly. 
+   * In the IDE, do a search for <dependencyManagement>
+   * Add the following code right before the last </dependencies>
+       <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.14.1</version>
+        </dependency>
+
+
+        <dependency>
+            <groupId>org.apache.struts</groupId>
+            <artifactId>struts2-core</artifactId>
+            <version>2.5.2</version>
+        </dependency>
+	   * Take a look at the code, you’ll notice a squiggly red line under the version number. This means our dependency check has detected a vulnerability. We can get more info by clicking the little yellow light bulb and selecting detailed vulnerability report. 
+   * Click the Detailed Vulnerability Report and show the page. 
+   *      * Let’s go back and undo the code change.
+   * Press CTRL+Z or delete the lines we added. 
+   * Now lets just make a small change to the code to show how ACS fits into all this. 
+   * Go to the index.html file under src->resources->META-INF
+   * I’m going to search for “Congratulations” and make a small edit.”
+   * Search for “Congratulations”, add text after. 
+   *      * Now we’ll commit the code. 
+   * Click the Source Control button, add a message, and commit to the main branch, then click Sync Changes. 
+   * Go back to the Developer Hub tab.
+   * Click on CI
+   * The template is leveraging Tekton Chains, a Kubernetes Custom Resource Definition (CRD) controller, that nicely augments the supply chain security within OpenShift Pipelines. We can see the different stages but what is interesting is these 3 ACS specific entries. 
+   *      * These 3 Advanced Cluster Security tasks leveraging roxctl
+   * The bottom-most task is performing CVE scanning via roxctl image scan.
+   * The middle task is performing a policy check via roxctl image check. These policies might be things like 'No log4j allowed' or perhaps no curl, wget nor a package manager in a production image.
+   * The top-most task is perform yaml scanning via roxctl deployment check and it might identify that your Deployment.yaml has not properly configured its resource request and limit.
+   * A series of dashboards visualize the reporting from these 3 roxctl tasks, 
+   * Click on the View Output icon under ACTIONS
+   * Show the three tabs
+   * So here we can see all the vulnerabilities that ACS has found. 
+   * Since ACS is only reporting, the build actually completed successfully. Let’s create a policy for CVE-2023-6267 and set it to enforce and see what happens. 
+   * Go back to ACS
+   * Click on Platform Configuration -> Policy Management -> Create Policy
+   * Enter a name for the policy, a description, and a rationale
+   * Select the Build lifecycle stage
+   * In Rules, drag and drop CVE from the right hand menu under Image Content. 
+   * Enter CVE-2023-6267 in the box
+   * Click next until you are at Actions under Policy Behavior, select Inform and Enforce under Enforcement, click the Build switch under Configure Enforcement Behavior
+   * Click Next, then Save
+   * Return to the Web IDE and undo the change you made, commit, and sync
+   * Return to the Pipeline
+   * Now we’ll let the pipeline run for a bit. What is happening is the same thing that happened before, it’s going through the process of building, and it’ll eventually get to the point that ACS will scan the image to ensure that everything is ok. 
+   * Show the process failing and the ACS portion
+  
+
+      * As expected, the build has failed
+      * If we click on the failed object, we’ll notice that it’s because of the policy that it is violating. 
+      *   
+
+
+
+Integrations
+Navigate to Platform Configuration -> Integrations
+
+
+Now that we’ve covered all of the security use cases, let’s finish by describing how the product interoperates with other systems in your environment.
+Image Registry Integrations
+         * ACS integrates with on-premise and cloud service-hosted registries for image content.
+         * While ACS provides complete vulnerability scanning built-in, it also supports integrating with existing vulnerability management tools.
+Notifier Integrations
+         * Aside from the CI/CD integration, ACS supports sending notifications to a variety of human-readable and machine systems like Slack, ServiceNow, QRadar, or  Splunk. 
+         * It also supports notifications to cloud-provider hosted services like AWS Security Hub and Google Security Command Center.
+         * ACS also supports standards like webhook and syslog for integration with almost any enterprise systems.
+Software Supply Chain Integrations
+Summary
+         * There’s always more to look at, more details we haven’t seen in this demo, but I hope that gives you an idea of the power of the ACS platform 
+         * Are there any questions?
+         * Was there anything you were expecting to see, but didn’t?
+
+
+Optional
+Optional: Configuration Management
+Navigate to Configuration Management from the left-hands side menu
+         * Configuration management provides visibility into a number of infrastructure components: clusters and nodes, namespaces and deployments, and Kubernetes systems like RBAC and secrets.
+         * 
+
+Optional: API Reference and Product Documentation
+Navigate to the ? in the upper right part of the top bar
+         * ACS provides a documented API for all of the data and actions you see in the UI.
+         * Example use cases include extracting violation data, import and export of policy, or automating compliance runs and reports.
+         * Full documentation for the product is also embedded in the UI here
+
+
+Optional: Access Control
+Navigate to Platform Configuration -> Access Control
+         * ACS can integrate with Single Sign-on identity providers via OIDC or SAML 2.0.
+         * You can assign RBAC roles to individuals or groups based on metadata from the IDP
+
+
+Optional: Other product configuration
+[a]Is there a way to skip the notifier and get the scan result from the UI?
