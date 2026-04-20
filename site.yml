@@ -1,33 +1,26 @@
 ---
 site:
   title: Advanced Cluster Security Demo
-  url: https://redhat-scholars.github.io/course-template
+  url: https://github.com/rhpds/showroom_template_nookbag
   start_page: modules::index.adoc
 
 content:
   sources:
-  - url: .
-    start_path: content
-    branches: [HEAD]
+    - url: .
+      start_path: content
 
 ui:
   bundle:
-    url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/rh-one-2025/ui-bundle.zip
+    url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/latest/ui-bundle.zip
     snapshot: true
-  supplemental_files:
-    - path: ./content/supplemental-ui
-    - path: ./content/lib
-    - path: .nojekyll
-    - path: ui.yml
-      contents: "static_files: [ .nojekyll ]"
-
-runtime:
-  cache_dir: ./.cache/antora
 
 antora:
   extensions:
-  - require: ./content/lib/dev-mode.js
-    enabled: true
+    - require: '@sntke/antora-mermaid-extension'
+      mermaid_library_url: https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs
+      script_stem: header-scripts
+      mermaid_initialize_options:
+        start_on_load: true
 
 output:
   dir: ./www
