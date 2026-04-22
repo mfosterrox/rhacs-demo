@@ -34,6 +34,12 @@ print_fail() { echo -e "  ${RED}✗${NC} $*"; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [ -f "${REPO_ROOT}/setup-rerun-hint.sh" ]; then
+    # shellcheck disable=SC1090
+    source "${REPO_ROOT}/setup-rerun-hint.sh"
+    setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+fi
+
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
 PIPELINE_NAMESPACE="${PIPELINE_NAMESPACE:-pipeline-demo}"
@@ -42,6 +48,11 @@ FAM_CRON_NAMESPACE="${FAM_CRON_NAMESPACE:-payments}"
 
 FAILURES=0
 WARNINGS=0
+FAIL_BASIC=0
+FAIL_FAM=0
+FAIL_MONITORING=0
+FAIL_MCP=0
+FAIL_PIPELINES=0
 
 usage() {
     sed -n '2,/^# --- end help ---$/p' "$0" | sed 's/^# \{0,1\}//' | sed '/^--- end help ---$/d'
@@ -319,49 +330,67 @@ main() {
 
     if ! command -v oc &>/dev/null; then
         print_error "oc CLI not found"
+        setup_rerun_hint_print
         exit 1
     fi
     if ! oc whoami &>/dev/null; then
         print_error "Not logged into a cluster. Run: oc login"
+        setup_rerun_hint_print
         exit 1
     fi
     if ! command -v jq &>/dev/null; then
         print_error "jq is required for API checks"
+        setup_rerun_hint_print
         exit 1
     fi
 
     if skip_section "basic-setup" "VERIFY_SKIP_BASIC" "SKIP_BASIC_SETUP"; then
         :
     else
-        verify_basic || FAILURES=$((FAILURES + 1))
+        verify_basic || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_BASIC=1
+        }
     fi
     echo ""
 
     if skip_section "fam-setup" "VERIFY_SKIP_FAM" "SKIP_FAM_SETUP" "VERIFY_SKIP_FIM" "SKIP_FIM_SETUP"; then
         :
     else
-        verify_fam || FAILURES=$((FAILURES + 1))
+        verify_fam || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_FAM=1
+        }
     fi
     echo ""
 
     if skip_section "monitoring-setup" "VERIFY_SKIP_MONITORING" "SKIP_MONITORING_SETUP"; then
         :
     else
-        verify_monitoring || FAILURES=$((FAILURES + 1))
+        verify_monitoring || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_MONITORING=1
+        }
     fi
     echo ""
 
     if skip_section "mcp-server-setup" "VERIFY_SKIP_MCP" "SKIP_MCP_SETUP"; then
         :
     else
-        verify_mcp || FAILURES=$((FAILURES + 1))
+        verify_mcp || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_MCP=1
+        }
     fi
     echo ""
 
     if skip_section "openshift-pipelines-setup" "VERIFY_SKIP_PIPELINES" "SKIP_OPENSHIFT_PIPELINES_SETUP"; then
         :
     else
-        verify_openshift_pipelines || FAILURES=$((FAILURES + 1))
+        verify_openshift_pipelines || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_PIPELINES=1
+        }
     fi
 
     echo ""
@@ -371,6 +400,23 @@ main() {
         exit 0
     fi
     print_fail "${FAILURES} section(s) had failures — review messages above"
+    print_info "To rerun installs for failed section(s) (from repo root):"
+    if [ "${FAIL_BASIC}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash basic-setup/install.sh"
+    fi
+    if [ "${FAIL_FAM}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash fam-setup/install.sh"
+    fi
+    if [ "${FAIL_MONITORING}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash monitoring-setup/install.sh"
+    fi
+    if [ "${FAIL_MCP}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash mcp-server-setup/install.sh"
+    fi
+    if [ "${FAIL_PIPELINES}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash openshift-pipelines-setup/install.sh"
+    fi
+    print_info "To rerun this verifier: cd \"${REPO_ROOT}\" && bash verify-all-setup.sh"
     exit 1
 }
 

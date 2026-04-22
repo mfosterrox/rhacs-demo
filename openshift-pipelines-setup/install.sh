@@ -32,6 +32,11 @@ MANIFESTS="${SCRIPT_DIR}/manifests"
 PIPELINE_NS="${PIPELINE_NAMESPACE:-pipeline-demo}"
 RHACS_NS="${RHACS_NAMESPACE:-stackrox}"
 
+_RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+
 export_bashrc_vars() {
   [ ! -f ~/.bashrc ] && return 0
   local var line
@@ -110,12 +115,12 @@ main() {
 
   if ! command -v oc &>/dev/null; then
     print_error "oc not found"
-    print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+    setup_rerun_hint_print
     exit 1
   fi
   if ! oc whoami &>/dev/null; then
     print_error "Not logged in. Run: oc login"
-    print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+    setup_rerun_hint_print
     exit 1
   fi
 
@@ -132,7 +137,7 @@ main() {
   fi
   if [ -z "${rox_token}" ] || [ ${#rox_token} -lt 20 ]; then
     print_error "API_TOKEN or ROX_API_TOKEN is required (generate via basic-setup or RHACS UI). Export one in this shell or ~/.bashrc."
-    print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+    setup_rerun_hint_print
     exit 1
   fi
 
@@ -142,14 +147,14 @@ main() {
   else
     endpoint=$(resolve_central_endpoint_port) || {
       print_error "Could not resolve Central endpoint. Set ROXCTL_CENTRAL_ENDPOINT, ROX_CENTRAL_ADDRESS, or ensure route 'central' exists in ${RHACS_NS}."
-      print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+      setup_rerun_hint_print
       exit 1
     }
   fi
 
   if ! oc get crd tasks.tekton.dev &>/dev/null; then
     print_error "Tekton Task CRD (tasks.tekton.dev) not found. Install OpenShift Pipelines from OperatorHub, then retry."
-    print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+    setup_rerun_hint_print
     exit 1
   fi
 
@@ -159,7 +164,7 @@ main() {
   print_step "Applying Secret roxsecrets in ${PIPELINE_NS} (rox_central_endpoint from ROXCTL_CENTRAL_ENDPOINT or route/ROX_CENTRAL_ADDRESS; rox_api_token from API_TOKEN or ROX_API_TOKEN)..."
   if ! command -v python3 &>/dev/null; then
     print_error "python3 is required to render manifests/secrets/rox-secrets.yml for oc apply."
-    print_info "To rerun: bash \"${SCRIPT_DIR}/install.sh\""
+    setup_rerun_hint_print
     exit 1
   fi
   apply_rox_secrets_manifest "${endpoint}" "${rox_token}" "${PIPELINE_NS}"

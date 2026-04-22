@@ -28,9 +28,8 @@ All requirements are configured by the *basic-setup* script and the parallel set
 [source,sh,subs="attributes",role=execute]
 ----
 source ~/.bashrc
-cd ~/
-git clone https://github.com/mfosterrox/rhacs-demo.git 2>/dev/null || true
-cd ~/rhacs-demo && git pull
+git clone https://github.com/mfosterrox/rhacs-demo.git || (cd rhacs-demo && git pull)
+cd rhacs-demo
 chmod +x install-all-setup.sh verify-all-setup.sh
 ./install-all-setup.sh -p {acs_portal_password}
 ----

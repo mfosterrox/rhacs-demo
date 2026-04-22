@@ -22,6 +22,11 @@ MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 
+_RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+
 # Default oc client timeout (0 = no timeout in oc, which can hang silently on API issues)
 MCP_OC_REQUEST_TIMEOUT="${MCP_OC_REQUEST_TIMEOUT:-60s}"
 
@@ -32,7 +37,7 @@ mcp_oc() {
 
 # Surface failures when running under set -e (e.g. sed/oc) — log files stay useful
 # shellcheck disable=SC2154 # LINENO is dynamic when the trap runs
-trap 'e=$?; print_error "mcp-server-setup: command failed (exit ${e}) at line ${LINENO}. Re-run with: bash -x ${BASH_SOURCE[0]} for a trace." >&2; exit "${e}"' ERR
+trap 'e=$?; print_error "mcp-server-setup: command failed (exit ${e}) at line ${LINENO}. Re-run with: bash -x ${BASH_SOURCE[0]} for a trace." >&2; setup_rerun_hint_print; exit "${e}"' ERR
 
 # Namespace placeholder substitution (must be top-level; nested defs can break on older bash)
 mcp_subs_namespace() {
@@ -92,6 +97,7 @@ main() {
     oc_user=$(mcp_oc whoami 2>/dev/null || true)
     if [ -z "${oc_user}" ]; then
         print_error "Not logged into OpenShift. Run: oc login"
+        setup_rerun_hint_print
         exit 1
     fi
     print_info "Logged in as: ${oc_user}"
@@ -104,6 +110,7 @@ main() {
     if [ -z "${ROX_CENTRAL_ADDRESS:-}" ]; then
         print_error "ROX_CENTRAL_ADDRESS not set and could not detect from cluster"
         print_info "Set it: export ROX_CENTRAL_ADDRESS='https://central-stackrox.apps.your-cluster.com'"
+        setup_rerun_hint_print
         exit 1
     fi
 
@@ -124,6 +131,7 @@ main() {
 
     if [ ! -d "${MANIFESTS_DIR}" ]; then
         print_error "Manifests directory not found: ${MANIFESTS_DIR}"
+        setup_rerun_hint_print
         exit 1
     fi
 
@@ -136,6 +144,7 @@ main() {
     for f in "${required[@]}"; do
         if [ ! -f "${MANIFESTS_DIR}/${f}" ]; then
             print_error "Missing manifest file: ${MANIFESTS_DIR}/${f}"
+            setup_rerun_hint_print
             exit 1
         fi
     done
@@ -145,6 +154,7 @@ main() {
     local tmpdir
     tmpdir=$(mktemp -d) || {
         print_error "mktemp -d failed (cannot build rendered manifests)"
+        setup_rerun_hint_print
         exit 1
     }
     trap "rm -rf '${tmpdir}'" EXIT
@@ -155,6 +165,7 @@ main() {
         sed -e "s|CENTRAL_URL|${CENTRAL_URL}|g" -e "s|AUTH_TYPE|${AUTH_TYPE}|g" \
         > "${tmpdir}/configmap.yaml"; then
         print_error "Failed to render configmap (sed pipeline). Check CENTRAL_URL / AUTH_TYPE."
+        setup_rerun_hint_print
         exit 1
     fi
     mcp_subs_namespace "${MANIFESTS_DIR}/service.yaml" > "${tmpdir}/service.yaml"

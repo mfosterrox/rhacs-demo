@@ -21,9 +21,6 @@
 
 set -euo pipefail
 
-# Trap to show error location
-trap 'echo "Error at line $LINENO"' ERR
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,6 +32,12 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_DIR="${SCRIPT_DIR}"  # Scripts are in the same directory
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [ -f "${PROJECT_ROOT}/setup-rerun-hint.sh" ]; then
+    # shellcheck disable=SC1090
+    source "${PROJECT_ROOT}/setup-rerun-hint.sh"
+    setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+fi
 
 # Function to print colored output
 print_info() {
@@ -108,7 +111,7 @@ install_roxctl() {
     case "${arch}" in
         x86_64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;
-        *) print_error "Unsupported architecture: ${arch}"; exit 1 ;;
+        *) print_error "Unsupported architecture: ${arch}"; setup_rerun_hint_print; exit 1 ;;
     esac
     
     # Download to temporary location
@@ -158,6 +161,7 @@ install_roxctl() {
     if [ "$download_success" = false ]; then
         print_error "Failed to download roxctl from all sources"
         rm -rf "${temp_dir}"
+        setup_rerun_hint_print
         print_error "Please install roxctl manually:"
         print_error "  curl -L -o /tmp/roxctl https://mirror.openshift.com/pub/rhacs/assets/latest/bin/Linux/roxctl"
         print_error "  chmod +x /tmp/roxctl"
@@ -172,6 +176,7 @@ install_roxctl() {
     if ! "${temp_dir}/roxctl" version >/dev/null 2>&1; then
         print_error "Downloaded roxctl binary is not working correctly"
         rm -rf "${temp_dir}"
+        setup_rerun_hint_print
         exit 1
     fi
     
@@ -415,7 +420,7 @@ main() {
         set +e
         add_bashrc_vars_from_cluster || true
         set -euo pipefail
-        trap 'echo "Error at line $LINENO"' ERR
+        setup_rerun_restore_trap
         export_bashrc_vars || true
     fi
 
@@ -466,6 +471,7 @@ main() {
         print_error "  - ROX_CENTRAL_ADDRESS"
         print_error "  - ROX_API_TOKEN, or ROX_PASSWORD (to generate a token)"
         print_error ""
+        setup_rerun_hint_print
         exit 1
     fi
     
@@ -490,6 +496,7 @@ main() {
     print_info "Checking for setup directory: ${SETUP_DIR}"
     if [ ! -d "${SETUP_DIR}" ]; then
         print_error "Setup directory not found: ${SETUP_DIR}"
+        setup_rerun_hint_print
         exit 1
     fi
     print_info "✓ Setup directory found"
@@ -532,6 +539,7 @@ main() {
                 print_error "  2. ROX_PASSWORD is correct"
                 print_error "  3. ROX_CENTRAL_ADDRESS is accessible"
                 print_error ""
+                setup_rerun_hint_print
                 exit 1
             else
                 export ROX_API_TOKEN="${token}"
@@ -558,6 +566,7 @@ main() {
             print_error "  - Verify password: oc get secret central-htpasswd -n ${RHACS_NAMESPACE:-stackrox} -o jsonpath='{.data.password}' | base64 -d"
             print_error "  - Test URL: curl -k ${ROX_CENTRAL_ADDRESS:-<CENTRAL_URL>}/v1/ping"
             print_error ""
+            setup_rerun_hint_print
             exit 1
         fi
         print_info ""

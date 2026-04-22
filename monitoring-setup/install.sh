@@ -22,6 +22,11 @@ step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+_RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+
 #================================================================
 # Utility Functions
 #================================================================

@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+_RHACS_DEMO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

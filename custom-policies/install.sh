@@ -36,6 +36,12 @@ print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+
 POLICY_REPO_URL="${POLICY_REPO_URL:-https://github.com/mfosterrox/demo-apps.git}"
 POLICY_REPO_PATH="${POLICY_REPO_PATH:-PaC-custom-policies}"
 POLICY_REPO_REVISION="${POLICY_REPO_REVISION:-main}"
@@ -47,10 +53,12 @@ ARGOCD_PROJECT="${ARGOCD_PROJECT:-default}"
 require_oc() {
     if ! command -v oc &>/dev/null; then
         print_error "oc CLI not found"
+        setup_rerun_hint_print
         exit 1
     fi
     if ! oc whoami &>/dev/null; then
         print_error "Not logged in. Run: oc login"
+        setup_rerun_hint_print
         exit 1
     fi
 }
@@ -113,16 +121,19 @@ main() {
     print_step "Checking namespaces and CRDs..."
     if ! oc get namespace "${RHACS_NAMESPACE}" &>/dev/null; then
         print_error "Namespace '${RHACS_NAMESPACE}' not found. Install RHACS before syncing policies."
+        setup_rerun_hint_print
         exit 1
     fi
     if ! oc get namespace "${GITOPS_NAMESPACE}" &>/dev/null; then
         print_error "Namespace '${GITOPS_NAMESPACE}' not found."
         print_error "Install OpenShift GitOps: OperatorHub → OpenShift GitOps, or see"
         print_error "https://docs.redhat.com/en/documentation/gitops/latest/"
+        setup_rerun_hint_print
         exit 1
     fi
     if ! oc get crd applications.argoproj.io &>/dev/null; then
         print_error "CRD applications.argoproj.io not found. OpenShift GitOps may not be fully installed."
+        setup_rerun_hint_print
         exit 1
     fi
 

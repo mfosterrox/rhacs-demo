@@ -35,6 +35,10 @@ print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_register "${BASH_SOURCE[0]}" "$@"
 FAM_POLICIES=(
     "${SCRIPT_DIR}/fam-basic-node-monitoring.json"
     "${SCRIPT_DIR}/fam-basic-deploy-monitoring.json"
@@ -64,33 +68,39 @@ get_central_url() {
 # Check prerequisites
 if ! oc whoami &>/dev/null; then
     print_error "Not connected to OpenShift cluster. Run: oc login"
+    setup_rerun_hint_print
     exit 1
 fi
 
 for policy_file in "${FAM_POLICIES[@]}"; do
     if [ ! -f "${policy_file}" ]; then
         print_error "FAM policy file not found: ${policy_file}"
+        setup_rerun_hint_print
         exit 1
     fi
 done
 
 if [ ! -f "${FAM_CRON_MANIFEST}" ]; then
     print_error "FAM CronJob manifest not found: ${FAM_CRON_MANIFEST}"
+    setup_rerun_hint_print
     exit 1
 fi
 
 if [ -z "${ROX_API_TOKEN:-}" ]; then
     print_error "ROX_API_TOKEN is required. Set it: export ROX_API_TOKEN='your-token'"
+    setup_rerun_hint_print
     exit 1
 fi
 
 if ! command -v jq &>/dev/null; then
     print_error "jq is required. Install: dnf install jq / brew install jq"
+    setup_rerun_hint_print
     exit 1
 fi
 
 CENTRAL_URL=$(get_central_url) || {
     print_error "Could not determine ROX_CENTRAL_ADDRESS. Set it or ensure RHACS route exists."
+    setup_rerun_hint_print
     exit 1
 }
 
@@ -199,6 +209,7 @@ print_step "1. Enabling file activity monitoring on SecuredCluster..."
 SC_NAME=$(oc get securedcluster -n "${RHACS_NAMESPACE}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 if [ -z "${SC_NAME}" ]; then
     print_error "No SecuredCluster found in ${RHACS_NAMESPACE}"
+    setup_rerun_hint_print
     exit 1
 fi
 
@@ -208,6 +219,7 @@ if ! oc patch securedcluster "${SC_NAME}" \
     --type=merge \
     -p '{"spec":{"perNode":{"fileActivityMonitoring":{"mode":"Enabled"}}}}' 2>/dev/null; then
     print_error "Failed to patch SecuredCluster"
+    setup_rerun_hint_print
     exit 1
 fi
 
@@ -215,6 +227,7 @@ fi
 FAM_MODE=$(oc get securedcluster "${SC_NAME}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.perNode.fileActivityMonitoring.mode}' 2>/dev/null || echo "")
 if [ "${FAM_MODE}" != "Enabled" ]; then
     print_error "Patch verification failed: fileActivityMonitoring.mode is '${FAM_MODE}', expected 'Enabled'"
+    setup_rerun_hint_print
     exit 1
 fi
 print_info "✓ File activity monitoring enabled (verified)"
@@ -253,6 +266,7 @@ for policy_file in "${FAM_POLICIES[@]}"; do
     if [ "${http_code}" != "200" ] && [ "${http_code}" != "201" ]; then
         print_error "Failed to submit policy '${policy_name}' (HTTP ${http_code})"
         print_error "Response: ${body:0:300}"
+        setup_rerun_hint_print
         exit 1
     fi
     print_info "✓ ${policy_name} submitted"
@@ -280,6 +294,7 @@ else
         -e "s#value: \"payments\"#value: \"${FAM_EXEC_NAMESPACE}\"#g" \
         "${FAM_CRON_MANIFEST}" | oc apply -f -; then
         print_error "Failed to apply FAM exec CronJob (is namespace ${FAM_EXEC_NAMESPACE} present? image pull ok?)"
+        setup_rerun_hint_print
         exit 1
     fi
     if [ -n "${FAM_EXEC_CONTAINER}" ]; then
@@ -372,6 +387,7 @@ else
         print_warn "  curl -k -G \"${CENTRAL_URL}/v1/alerts/summary/groups\" -H \"Authorization: Bearer \${ROX_API_TOKEN}\" --data-urlencode 'query=Policy:\"${FAM_DEPLOY_POLICY_NAME}\"' | jq '.alertsByPolicies[] | select(.policy.name==\"${FAM_DEPLOY_POLICY_NAME}\")'"
         if [ "${FAM_REQUIRE_VIOLATION:-0}" = "1" ]; then
             print_error "FAM_REQUIRE_VIOLATION=1 but no matching alert was observed."
+            setup_rerun_hint_print
             exit 1
         fi
     fi

@@ -49,6 +49,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${LOG_DIR:-${REPO_ROOT}/.setup-parallel-logs}"
 mkdir -p "${LOG_DIR}"
 
+if [ -f "${REPO_ROOT}/setup-rerun-hint.sh" ]; then
+    # shellcheck disable=SC1090
+    source "${REPO_ROOT}/setup-rerun-hint.sh"
+    setup_rerun_register "${BASH_SOURCE[0]}" "$@"
+fi
+
 NONINTERACTIVE="${INSTALL_ALL_NONINTERACTIVE:-0}"
 
 usage() {

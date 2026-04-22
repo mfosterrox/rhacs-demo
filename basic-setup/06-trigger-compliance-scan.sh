@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+_RHACS_DEMO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "${_RHACS_DEMO_ROOT}/setup-rerun-hint.sh"
+setup_rerun_set_script "${BASH_SOURCE[0]}" "$@"
+
 # Color codes
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -23,6 +28,7 @@ error_handler() {
     local exit_code=$1
     local line_number=$2
     print_error "Error at line ${line_number} (exit code: ${exit_code})"
+    setup_rerun_hint_print
     exit "${exit_code}"
 }
 
