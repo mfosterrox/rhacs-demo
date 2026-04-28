@@ -9,13 +9,14 @@
 #   SPLUNK_NAMESPACE        Namespace to deploy into (default: splunk)
 #   SPLUNK_NAME             Base name for deployment resources (default: splunk)
 #   SPLUNK_STORAGE_SIZE     PVC size for index data (default: 20Gi)
-#   SPLUNK_PASSWORD         Admin password (default: SPLUNK_PASSWORD_DEFAULT)
-#   SPLUNK_PASSWORD_DEFAULT Default admin password when SPLUNK_PASSWORD is unset
+#   SPLUNK_PASSWORD_DEFAULT Admin password used for every deployment run
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
 #   SPLUNK_RHACS_ADDON_FILE     Path to add-on tgz (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz)
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
+#   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
+#   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
@@ -100,6 +101,38 @@ generate_api_token_from_password() {
     echo "${body}" | jq -r '.token // empty'
 }
 
+generate_analyst_api_token() {
+    local central_url="$1"
+    local admin_token="$2"
+    local api_host="${central_url#https://}"
+    api_host="${api_host#http://}"
+    local response
+    response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -X POST \
+        -H "Authorization: Bearer ${admin_token}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/apitokens/generate" \
+        -d '{"name":"splunk-addon-analyst-'$(date +%s)'","roles":["Analyst"]}' 2>/dev/null)
+    local http_code
+    http_code="$(echo "${response}" | tail -n1)"
+    local body
+    body="$(echo "${response}" | sed '$d')"
+    if [ "${http_code}" != "200" ]; then
+        return 1
+    fi
+    echo "${body}" | jq -r '.token // empty'
+}
+
+to_central_hostport() {
+    local central_url="$1"
+    local hostport="${central_url#https://}"
+    hostport="${hostport#http://}"
+    if ! echo "${hostport}" | grep -q ":"; then
+        hostport="${hostport}:443"
+    fi
+    printf '%s' "${hostport}"
+}
+
 print_deploy_diagnostics() {
     local namespace="$1"
     local name="$2"
@@ -178,7 +211,17 @@ install_rhacs_splunk_addon() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local addon_file="${SPLUNK_RHACS_ADDON_FILE:-${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz}"
     local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-62104fae3307184a16c3a92343aa4a4cd4116aa8df86422e89a6915ff7a28461}"
-    local addon_name
+    local addon_name=""
+
+    # Auto-discover common filename variants when explicit file is missing.
+    if [ ! -f "${addon_file}" ]; then
+        local candidate_tgz="${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204"
+        if [ -f "${candidate_tgz}.tgz" ]; then
+            addon_file="${candidate_tgz}.tgz"
+        elif [ -f "${candidate_tgz}" ]; then
+            addon_file="${candidate_tgz}"
+        fi
+    fi
     addon_name="$(basename "${addon_file}")"
 
     if [ ! -f "${addon_file}" ]; then
@@ -213,6 +256,44 @@ install_rhacs_splunk_addon() {
     print_step "Waiting for Splunk rollout after add-on install"
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
     print_info "RHACS Splunk add-on installation completed."
+}
+
+print_rhacs_addon_configuration_steps() {
+    local rox_central="${ROX_CENTRAL_ADDRESS:-}"
+    local rox_token="${ROX_API_TOKEN:-}"
+    local addon_token="${RHACS_SPLUNK_ADDON_TOKEN:-}"
+    local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
+    local central_hostport=""
+
+    if [ -n "${rox_central}" ]; then
+        central_hostport="$(to_central_hostport "${rox_central}")"
+    fi
+
+    # RH docs recommend a read-scoped token (Analyst role) for the Splunk add-on.
+    if [ -z "${addon_token}" ] && [ -n "${rox_central}" ] && [ -n "${rox_token}" ]; then
+        print_step "Generating read-scoped (Analyst) RHACS token for Splunk add-on"
+        addon_token="$(generate_analyst_api_token "${rox_central}" "${rox_token}" || true)"
+    fi
+
+    print_step "RHACS 4.10 doc-aligned Splunk add-on configuration"
+    print_info "In Splunk UI: Apps -> Red Hat Advanced Cluster Security for Kubernetes"
+    print_info "Then: Configuration -> Add-on Settings"
+    if [ -n "${central_hostport}" ]; then
+        print_info "  Central Endpoint: ${central_hostport}"
+    else
+        print_warn "  Central Endpoint: <set ROX_CENTRAL_ADDRESS to auto-populate>"
+    fi
+    if [ -n "${addon_token}" ]; then
+        print_info "  API token (Analyst/read): ${addon_token}"
+    else
+        print_warn "  API token (Analyst/read): <set RHACS_SPLUNK_ADDON_TOKEN or ROX_* vars>"
+    fi
+    print_info "After saving Add-on Settings, create these inputs in Splunk (Inputs -> Create New Input):"
+    print_info "  - ACS Compliance"
+    print_info "  - ACS Violations"
+    print_info "  - ACS Vulnerability Management"
+    print_info "Suggested polling interval: ${interval} seconds"
+    print_info "Verification search: index=* sourcetype=\"stackrox-*\""
 }
 
 integrate_rhacs_with_splunk() {
@@ -322,12 +403,7 @@ main() {
     local storage_size="${SPLUNK_STORAGE_SIZE:-20Gi}"
     local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
-    local password_default="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
-    local password="${SPLUNK_PASSWORD:-${password_default}}"
-
-    if [ -z "${SPLUNK_PASSWORD:-}" ]; then
-        print_warn "SPLUNK_PASSWORD not set. Using repeatable default from SPLUNK_PASSWORD_DEFAULT."
-    fi
+    local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
 
     print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
@@ -479,6 +555,7 @@ EOF
     echo ""
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
+    print_rhacs_addon_configuration_steps
     integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
 }
 
