@@ -338,12 +338,32 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Configuring RHACS add-on settings in Splunk"
-    oc -n "${namespace}" exec "${pod}" -- sh -c "mkdir -p /opt/splunk/etc/apps/TA-stackrox/local"
-    cat <<EOF | oc -n "${namespace}" exec -i "${pod}" -- sh -c "cat > /opt/splunk/etc/apps/TA-stackrox/local/ta_stackrox_settings.conf"
-[additional_parameters]
-central_endpoint = ${central_hostport}
-api_token = ${addon_token}
-EOF
+    # Use Splunk management API instead of filesystem writes (works with restricted container permissions).
+    # 1) Try to update existing stanza.
+    local settings_code
+    settings_code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s -o /tmp/stackrox-settings.out -w "%{http_code}" \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters" \
+        -d "central_endpoint=${central_hostport}" \
+        -d "api_token=${addon_token}" 2>/dev/null || true)"
+
+    # 2) If stanza does not exist yet, create it.
+    if ! echo "${settings_code}" | grep -qE "^(200|201)$"; then
+        settings_code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s -o /tmp/stackrox-settings.out -w "%{http_code}" \
+            -u "admin:${splunk_password}" \
+            -X POST \
+            "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings" \
+            -d "name=additional_parameters" \
+            -d "central_endpoint=${central_hostport}" \
+            -d "api_token=${addon_token}" 2>/dev/null || true)"
+    fi
+
+    if ! echo "${settings_code}" | grep -qE "^(200|201)$"; then
+        print_warn "Could not configure add-on settings automatically (HTTP ${settings_code})."
+        print_warn "Proceed in Splunk UI: Configuration -> Add-on Settings."
+        return 0
+    fi
 
     print_step "Restarting Splunk to apply add-on settings"
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
