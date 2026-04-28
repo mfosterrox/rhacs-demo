@@ -44,6 +44,32 @@ require_cmd() {
     fi
 }
 
+load_env_from_bashrc_if_missing() {
+    local var_name="$1"
+    if [ -n "${!var_name:-}" ]; then
+        return 0
+    fi
+    if [ ! -f "${HOME}/.bashrc" ]; then
+        return 0
+    fi
+
+    local raw_line
+    raw_line="$(grep -E "^(export[[:space:]]+)?${var_name}=" "${HOME}/.bashrc" 2>/dev/null | tail -n1 || true)"
+    if [ -z "${raw_line}" ]; then
+        return 0
+    fi
+    raw_line="${raw_line#export }"
+    local value="${raw_line#*=}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    if [ -n "${value}" ]; then
+        printf -v "${var_name}" '%s' "${value}"
+        export "${var_name}"
+    fi
+}
+
 verify_sha256() {
     local file_path="$1"
     local expected="$2"
@@ -276,6 +302,57 @@ install_rhacs_splunk_addon() {
     print_info "RHACS Splunk add-on installation completed."
 }
 
+configure_rhacs_addon_settings() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+
+    local rox_central="${ROX_CENTRAL_ADDRESS:-}"
+    local rox_token="${ROX_API_TOKEN:-}"
+    local addon_token="${RHACS_SPLUNK_ADDON_TOKEN:-}"
+    local central_hostport=""
+
+    if [ -z "${rox_central}" ]; then
+        print_warn "ROX_CENTRAL_ADDRESS not set; skipping add-on settings automation."
+        print_warn "Set ROX_CENTRAL_ADDRESS (for example: central.example.com:443) and rerun."
+        return 0
+    fi
+    central_hostport="$(to_central_hostport "${rox_central}")"
+
+    # Prefer explicit add-on token; otherwise generate Analyst token from ROX_API_TOKEN.
+    if [ -z "${addon_token}" ] && [ -n "${rox_token}" ]; then
+        print_step "Generating read-scoped (Analyst) RHACS token for Splunk add-on"
+        addon_token="$(generate_analyst_api_token "${rox_central}" "${rox_token}" || true)"
+    fi
+    if [ -z "${addon_token}" ]; then
+        print_warn "No add-on token available (set RHACS_SPLUNK_ADDON_TOKEN or ROX_API_TOKEN)."
+        print_warn "Skipping automatic Add-on Settings configuration."
+        return 0
+    fi
+
+    local pod
+    pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pod}" ]; then
+        print_error "No Splunk pod found for add-on settings configuration."
+        return 1
+    fi
+
+    print_step "Configuring RHACS add-on settings in Splunk"
+    oc -n "${namespace}" exec "${pod}" -- sh -c "mkdir -p /opt/splunk/etc/apps/TA-stackrox/local"
+    cat <<EOF | oc -n "${namespace}" exec -i "${pod}" -- sh -c "cat > /opt/splunk/etc/apps/TA-stackrox/local/ta_stackrox_settings.conf"
+[additional_parameters]
+central_endpoint = ${central_hostport}
+api_token = ${addon_token}
+EOF
+
+    print_step "Restarting Splunk to apply add-on settings"
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
+        -uri "https://127.0.0.1:8089" \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+    oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    print_info "Add-on settings saved (Central Endpoint + API token)."
+}
+
 print_rhacs_addon_configuration_steps() {
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
     local rox_token="${ROX_API_TOKEN:-}"
@@ -450,6 +527,11 @@ main() {
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
 
+    # Convenience: pick up RHACS API values from ~/.bashrc if user already saved them there.
+    load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
+    load_env_from_bashrc_if_missing "ROX_API_TOKEN"
+    load_env_from_bashrc_if_missing "RHACS_SPLUNK_ADDON_TOKEN"
+
     print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
     oc get namespace "${namespace}" >/dev/null 2>&1 || oc create namespace "${namespace}"
@@ -600,6 +682,7 @@ EOF
     echo ""
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
+    configure_rhacs_addon_settings "${namespace}" "${name}" "${password}"
     integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
     print_rhacs_addon_configuration_steps
     print_final_details "${namespace}" "${name}" "${route_host}" "${password}"
