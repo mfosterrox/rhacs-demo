@@ -49,7 +49,8 @@ print_deploy_diagnostics() {
     oc -n "${namespace}" get deploy "${name}" -o wide || true
     oc -n "${namespace}" get rs -l "app=${name}" || true
     oc -n "${namespace}" get pods -l "app=${name}" -o wide || true
-    oc -n "${namespace}" get events --sort-by=.lastTimestamp | rg -i "${name}|failed|forbidden|scc|denied" || true
+    # Use grep (not rg) because bastion hosts may not include ripgrep.
+    oc -n "${namespace}" get events --sort-by=.lastTimestamp | grep -Ei "${name}|failed|forbidden|scc|denied" || true
     print_warn "If you see SCC/anyuid errors, run:"
     print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
 }
@@ -137,6 +138,8 @@ spec:
             - containerPort: 9997
               name: s2s
           env:
+            - name: SPLUNK_GENERAL_TERMS
+              value: "--accept-sgt-current-at-splunk-com"
             - name: SPLUNK_START_ARGS
               value: "--accept-license"
             - name: SPLUNK_PASSWORD
