@@ -17,7 +17,7 @@
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
-#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: false)
+#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
@@ -314,12 +314,39 @@ print_rhacs_addon_configuration_steps() {
     print_info "Verification search: index=* sourcetype=\"stackrox-*\""
 }
 
+print_final_details() {
+    local namespace="$1"
+    local name="$2"
+    local route_host="$3"
+    local password="$4"
+    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-62104fae3307184a16c3a92343aa4a4cd4116aa8df86422e89a6915ff7a28461}"
+
+    echo ""
+    print_step "Final details"
+    print_info "Splunk Web URL: https://${route_host}"
+    print_info "Splunk username: admin"
+    print_info "Splunk password: ${password}"
+    print_info "HEC base URL (in-cluster): http://${name}.${namespace}.svc.cluster.local:8088"
+    print_info "Expected add-on package: red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz"
+    print_info "Expected add-on SHA256: ${addon_sha}"
+    print_info "Cleanup script: ./clean.sh"
+    print_info "To fully remove setup: SPLUNK_DELETE_NAMESPACE=true ./clean.sh"
+    echo ""
+    print_info "Manual RHACS integration steps (for validation):"
+    print_info "  1) In Splunk: enable HEC and create a token"
+    print_info "  2) In RHACS: Platform Configuration -> Integrations -> Splunk notifier"
+    print_info "  3) Use URL: https://<splunk-host>:8088/services/collector/event"
+    print_info "  4) Paste HEC token, click Test, then Create"
+    print_info "  5) Enable notifier on policies and trigger a new violation"
+    print_info "  6) In Splunk Search, verify events"
+}
+
 integrate_rhacs_with_splunk() {
     local namespace="$1"
     local name="$2"
     local splunk_password="$3"
 
-    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-false}"
+    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-true}"
     if [ "${do_integration}" != "true" ]; then
         print_info "Skipping RHACS integration (SPLUNK_INTEGRATE_WITH_RHACS=${do_integration})"
         return 0
@@ -573,9 +600,9 @@ EOF
     echo ""
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
-    print_info "RHACS integration automation is disabled by default."
-    print_info "Run manual RHACS + Splunk integration validation steps in UI."
-    print_info "If needed later, enable automation with: SPLUNK_INTEGRATE_WITH_RHACS=true ./setup.sh"
+    integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
+    print_rhacs_addon_configuration_steps
+    print_final_details "${namespace}" "${name}" "${route_host}" "${password}"
 }
 
 main "$@"
