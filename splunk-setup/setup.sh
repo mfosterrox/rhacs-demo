@@ -9,7 +9,8 @@
 #   SPLUNK_NAMESPACE        Namespace to deploy into (default: splunk)
 #   SPLUNK_NAME             Base name for deployment resources (default: splunk)
 #   SPLUNK_STORAGE_SIZE     PVC size for index data (default: 20Gi)
-#   SPLUNK_PASSWORD         Admin password (default: generated)
+#   SPLUNK_PASSWORD         Admin password (default: SPLUNK_PASSWORD_DEFAULT)
+#   SPLUNK_PASSWORD_DEFAULT Default admin password when SPLUNK_PASSWORD is unset
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
@@ -100,10 +101,12 @@ create_or_get_splunk_hec_token() {
 
     # Ensure HEC endpoint is enabled.
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector enable \
+        -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
 
     # Create token if missing (idempotent: ignore if already exists).
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector create "${hec_name}" \
+        -uri "https://127.0.0.1:8089" \
         -description "RHACS notifier token" \
         -index main \
         -sourcetype stackrox \
@@ -127,7 +130,7 @@ create_or_get_splunk_hec_token() {
     if [ -z "${token}" ]; then
         print_error "Failed to discover Splunk HEC token '${hec_name}'"
         print_warn "Troubleshoot with:"
-        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk http-event-collector list -auth admin:<password>"
+        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk http-event-collector list -uri https://127.0.0.1:8089 -auth admin:<password>"
         return 1
     fi
     printf '%s' "${token}"
@@ -240,11 +243,11 @@ main() {
     local storage_size="${SPLUNK_STORAGE_SIZE:-20Gi}"
     local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
-    local password="${SPLUNK_PASSWORD:-}"
+    local password_default="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
+    local password="${SPLUNK_PASSWORD:-${password_default}}"
 
-    if [ -z "${password}" ]; then
-        password="$(generate_password)"
-        print_warn "SPLUNK_PASSWORD not set. Generated a password for this deployment."
+    if [ -z "${SPLUNK_PASSWORD:-}" ]; then
+        print_warn "SPLUNK_PASSWORD not set. Using repeatable default from SPLUNK_PASSWORD_DEFAULT."
     fi
 
     print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
