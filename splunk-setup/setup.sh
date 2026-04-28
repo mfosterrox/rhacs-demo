@@ -17,7 +17,7 @@
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
-#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
+#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: false)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
@@ -159,18 +159,24 @@ create_or_get_splunk_hec_token() {
         return 1
     fi
 
-    # Ensure HEC endpoint is enabled.
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector enable \
-        -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+    # Enable HEC globally via management REST API.
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/services/data/inputs/http/http" \
+        -d "disabled=0" >/dev/null 2>&1 || true
 
-    # Create token if missing (idempotent: ignore if already exists).
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector create "${hec_name}" \
-        -uri "https://127.0.0.1:8089" \
-        -description "RHACS notifier token" \
-        -index main \
-        -sourcetype stackrox \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+    # Create/update HEC input via management REST API.
+    # If it already exists, Splunk returns an error; that's fine for idempotency.
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/services/data/inputs/http" \
+        -d "name=${hec_name}" \
+        -d "description=RHACS notifier token" \
+        -d "index=main" \
+        -d "sourcetype=stackrox" \
+        -d "disabled=0" >/dev/null 2>&1 || true
 
     # Read token value from Splunk REST API (JSON output is the most stable format).
     local token
@@ -188,9 +194,21 @@ create_or_get_splunk_hec_token() {
     fi
 
     if [ -z "${token}" ]; then
+        # Last fallback: parse token from CLI list output.
+        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector list \
+            -uri "https://127.0.0.1:8089" \
+            -auth "admin:${splunk_password}" 2>/dev/null | \
+            awk -v n="${hec_name}" '
+                $0 ~ "name:" && $0 ~ n {seen=1}
+                seen && $0 ~ "token:" {print $2; exit}
+            ' || true)"
+    fi
+
+    if [ -z "${token}" ]; then
         print_error "Failed to discover Splunk HEC token '${hec_name}'"
         print_warn "Troubleshoot with:"
         print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk http-event-collector list -uri https://127.0.0.1:8089 -auth admin:<password>"
+        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk cmd curl -k -u admin:<password> https://127.0.0.1:8089/services/data/inputs/http?output_mode=json"
         return 1
     fi
     printf '%s' "${token}"
@@ -301,7 +319,7 @@ integrate_rhacs_with_splunk() {
     local name="$2"
     local splunk_password="$3"
 
-    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-true}"
+    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-false}"
     if [ "${do_integration}" != "true" ]; then
         print_info "Skipping RHACS integration (SPLUNK_INTEGRATE_WITH_RHACS=${do_integration})"
         return 0
@@ -555,8 +573,9 @@ EOF
     echo ""
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
-    print_rhacs_addon_configuration_steps
-    integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
+    print_info "RHACS integration automation is disabled by default."
+    print_info "Run manual RHACS + Splunk integration validation steps in UI."
+    print_info "If needed later, enable automation with: SPLUNK_INTEGRATE_WITH_RHACS=true ./setup.sh"
 }
 
 main "$@"
