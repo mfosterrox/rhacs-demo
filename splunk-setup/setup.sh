@@ -338,22 +338,32 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Configuring RHACS add-on settings in Splunk"
-    # Use properties endpoint to set keys in ta_stackrox_settings/[additional_parameters].
-    local code_central code_token
-    code_central="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /dev/null -w "%{http_code}" \
-        -u "admin:${splunk_password}" \
-        -X POST \
-        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/properties/ta_stackrox_settings/additional_parameters/central_endpoint" \
-        --data-urlencode "value=${central_hostport}" 2>/dev/null || true)"
+    # Prefer the TA add-on REST handler endpoint, fallback to conf endpoint.
+    local code=""
+    local endpoint=""
+    local -a endpoints=(
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/TA_stackrox_settings/additional_parameters"
+        "https://127.0.0.1:8089/servicesNS/admin/TA-stackrox/TA_stackrox_settings/additional_parameters"
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/ta_stackrox_settings/additional_parameters"
+        "https://127.0.0.1:8089/servicesNS/admin/TA-stackrox/ta_stackrox_settings/additional_parameters"
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters"
+        "https://127.0.0.1:8089/servicesNS/admin/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters"
+    )
 
-    code_token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /dev/null -w "%{http_code}" \
-        -u "admin:${splunk_password}" \
-        -X POST \
-        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/properties/ta_stackrox_settings/additional_parameters/api_token" \
-        --data-urlencode "value=${addon_token}" 2>/dev/null || true)"
+    for endpoint in "${endpoints[@]}"; do
+        code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /tmp/stackrox-settings.out -w "%{http_code}" \
+            -u "admin:${splunk_password}" \
+            -X POST \
+            "${endpoint}" \
+            --data-urlencode "central_endpoint=${central_hostport}" \
+            --data-urlencode "api_token=${addon_token}" 2>/dev/null || true)"
+        if echo "${code}" | grep -qE "^(200|201)$"; then
+            break
+        fi
+    done
 
-    if ! echo "${code_central}" | grep -qE "^(200|201)$" || ! echo "${code_token}" | grep -qE "^(200|201)$"; then
-        print_warn "Could not configure add-on settings automatically (central_endpoint HTTP ${code_central}, api_token HTTP ${code_token})."
+    if ! echo "${code}" | grep -qE "^(200|201)$"; then
+        print_warn "Could not configure add-on settings automatically (last endpoint: ${endpoint}, HTTP ${code:-n/a})."
         print_warn "Proceed in Splunk UI: Configuration -> Add-on Settings."
         return 0
     fi
