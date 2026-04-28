@@ -109,14 +109,25 @@ create_or_get_splunk_hec_token() {
         -sourcetype stackrox \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
 
-    # Read token value from Splunk REST API.
+    # Read token value from Splunk REST API (JSON output is the most stable format).
     local token
-    token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk search \
-        "| rest /services/data/inputs/http | search name=\"${hec_name}\" | table token | head 1" \
-        -auth "admin:${splunk_password}" -output csv 2>/dev/null | awk -F',' 'NR==2 {gsub(/\r/,"",$1); print $1}')"
+    token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+        -u "admin:${splunk_password}" \
+        "https://127.0.0.1:8089/services/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
+        jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
+
+    # Fallback: list all HEC inputs and match by name.
+    if [ -z "${token}" ]; then
+        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+            -u "admin:${splunk_password}" \
+            "https://127.0.0.1:8089/services/data/inputs/http?output_mode=json&count=0" 2>/dev/null | \
+            jq -r --arg n "${hec_name}" '.entry[]? | select(.name==$n) | .content.token' 2>/dev/null | head -n1 || true)"
+    fi
 
     if [ -z "${token}" ]; then
         print_error "Failed to discover Splunk HEC token '${hec_name}'"
+        print_warn "Troubleshoot with:"
+        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk http-event-collector list -auth admin:<password>"
         return 1
     fi
     printf '%s' "${token}"
