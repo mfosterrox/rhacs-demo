@@ -12,6 +12,10 @@
 #   SPLUNK_PASSWORD         Admin password (default: generated)
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
+#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
+#   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
+#   ROX_API_TOKEN           RHACS API token (preferred for integration)
+#   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
 #
 
 set -euo pipefail
@@ -35,11 +39,37 @@ require_cmd() {
     fi
 }
 
+escape_sed_replacement() {
+    printf '%s' "$1" | sed 's/[\/&]/\\&/g'
+}
+
 generate_password() {
     # 20 chars, includes upper/lower/digit and safe specials for shell/env usage.
     local raw
     raw="$(LC_ALL=C tr -dc 'A-Za-z0-9@#%+=' </dev/urandom | head -c 20)"
     printf 'Rhacs%s1!' "${raw}"
+}
+
+generate_api_token_from_password() {
+    local central_url="$1"
+    local password="$2"
+    local api_host="${central_url#https://}"
+    api_host="${api_host#http://}"
+    local response
+    response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -X POST \
+        -u "admin:${password}" \
+        -H "Content-Type: application/json" \
+        "https://${api_host}/v1/apitokens/generate" \
+        -d '{"name":"splunk-setup-'$(date +%s)'","roles":["Admin"]}' 2>/dev/null)
+    local http_code
+    http_code="$(echo "${response}" | tail -n1)"
+    local body
+    body="$(echo "${response}" | sed '$d')"
+    if [ "${http_code}" != "200" ]; then
+        return 1
+    fi
+    echo "${body}" | jq -r '.token // empty'
 }
 
 print_deploy_diagnostics() {
@@ -55,8 +85,139 @@ print_deploy_diagnostics() {
     print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
 }
 
+create_or_get_splunk_hec_token() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+    local hec_name="$4"
+
+    local pod
+    pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pod}" ]; then
+        print_error "No Splunk pod found in namespace ${namespace}"
+        return 1
+    fi
+
+    # Ensure HEC endpoint is enabled.
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector enable \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+
+    # Create token if missing (idempotent: ignore if already exists).
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector create "${hec_name}" \
+        -description "RHACS notifier token" \
+        -index main \
+        -sourcetype stackrox \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+
+    # Read token value from Splunk REST API.
+    local token
+    token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk search \
+        "| rest /services/data/inputs/http | search name=\"${hec_name}\" | table token | head 1" \
+        -auth "admin:${splunk_password}" -output csv 2>/dev/null | awk -F',' 'NR==2 {gsub(/\r/,"",$1); print $1}')"
+
+    if [ -z "${token}" ]; then
+        print_error "Failed to discover Splunk HEC token '${hec_name}'"
+        return 1
+    fi
+    printf '%s' "${token}"
+}
+
+integrate_rhacs_with_splunk() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+
+    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-true}"
+    if [ "${do_integration}" != "true" ]; then
+        print_info "Skipping RHACS integration (SPLUNK_INTEGRATE_WITH_RHACS=${do_integration})"
+        return 0
+    fi
+
+    local rox_central="${ROX_CENTRAL_ADDRESS:-}"
+    local rox_token="${ROX_API_TOKEN:-}"
+    local rox_password="${ROX_PASSWORD:-}"
+    local splunk_service_url="http://${name}.${namespace}.svc.cluster.local:8088"
+    local hec_name="${SPLUNK_HEC_NAME:-rhacs-hec}"
+    local notifier_name="${SPLUNK_NOTIFIER_NAME:-Splunk SIEM (local)}"
+
+    if [ -z "${rox_central}" ]; then
+        print_warn "ROX_CENTRAL_ADDRESS is not set; skipping RHACS notifier integration."
+        return 0
+    fi
+
+    if [ -z "${rox_token}" ] && [ -n "${rox_password}" ]; then
+        print_step "Generating ROX_API_TOKEN from ROX_PASSWORD for integration"
+        rox_token="$(generate_api_token_from_password "${rox_central}" "${rox_password}" || true)"
+    fi
+
+    if [ -z "${rox_token}" ]; then
+        print_warn "ROX_API_TOKEN is not set and could not be generated; skipping RHACS notifier integration."
+        return 0
+    fi
+
+    print_step "Creating/reading Splunk HEC token"
+    local hec_token
+    hec_token="$(create_or_get_splunk_hec_token "${namespace}" "${name}" "${splunk_password}" "${hec_name}")"
+
+    print_step "Creating/updating RHACS Splunk notifier via API"
+    local notifiers_json
+    notifiers_json="$(curl -k -s \
+        -H "Authorization: Bearer ${rox_token}" \
+        "${rox_central}/v1/notifiers" 2>/dev/null || true)"
+
+    local notifier_id
+    notifier_id="$(echo "${notifiers_json}" | jq -r --arg n "${notifier_name}" '.notifiers[]? | select(.name==$n) | .id' 2>/dev/null || true)"
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "name": "__NOTIFIER_NAME__",
+  "uiEndpoint": "__HEC_ENDPOINT__",
+  "type": "splunk",
+  "splunk": {
+    "httpEndpoint": "__HEC_ENDPOINT__/services/collector/event",
+    "httpToken": "__HEC_TOKEN__",
+    "sourceTypes": ["stackrox"],
+    "skipTlsVerify": true
+  }
+}
+EOF
+)
+    payload="$(echo "${payload}" | sed "s/__NOTIFIER_NAME__/$(escape_sed_replacement "${notifier_name}")/g")"
+    payload="$(echo "${payload}" | sed "s/__HEC_ENDPOINT__/$(escape_sed_replacement "${splunk_service_url}")/g")"
+    payload="$(echo "${payload}" | sed "s/__HEC_TOKEN__/$(escape_sed_replacement "${hec_token}")/g")"
+
+    local code
+    if [ -n "${notifier_id}" ]; then
+        code="$(curl -k -s -o /tmp/rhacs-splunk-notifier.out -w "%{http_code}" \
+            -X PUT "${rox_central}/v1/notifiers/${notifier_id}" \
+            -H "Authorization: Bearer ${rox_token}" \
+            -H "Content-Type: application/json" \
+            --data "${payload}")"
+    else
+        code="$(curl -k -s -o /tmp/rhacs-splunk-notifier.out -w "%{http_code}" \
+            -X POST "${rox_central}/v1/notifiers" \
+            -H "Authorization: Bearer ${rox_token}" \
+            -H "Content-Type: application/json" \
+            --data "${payload}")"
+    fi
+
+    if ! echo "${code}" | grep -qE "^(200|201)$"; then
+        print_warn "RHACS notifier API call returned HTTP ${code}."
+        print_warn "Response: $(cat /tmp/rhacs-splunk-notifier.out 2>/dev/null || echo '<empty>')"
+        print_warn "You can still configure this notifier manually in RHACS UI."
+        return 0
+    fi
+
+    print_info "RHACS Splunk notifier configured: ${notifier_name}"
+    print_info "Splunk HEC endpoint: ${splunk_service_url}/services/collector/event"
+    print_info "HEC token name in Splunk: ${hec_name}"
+}
+
 main() {
     require_cmd oc
+    require_cmd curl
+    require_cmd jq
 
     if ! oc whoami >/dev/null 2>&1; then
         print_error "You are not logged in to OpenShift. Run: oc login"
@@ -222,6 +383,9 @@ EOF
     echo ""
     print_info "RHACS SIEM tip: use Splunk HEC on port 8088 with a token created in Splunk."
     print_info "If using in-cluster endpoint, use: http://${name}.${namespace}.svc.cluster.local:8088"
+    echo ""
+
+    integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
 }
 
 main "$@"
