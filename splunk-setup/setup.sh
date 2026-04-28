@@ -42,6 +42,18 @@ generate_password() {
     printf 'Rhacs%s1!' "${raw}"
 }
 
+print_deploy_diagnostics() {
+    local namespace="$1"
+    local name="$2"
+    print_warn "Deployment diagnostics for ${namespace}/${name}:"
+    oc -n "${namespace}" get deploy "${name}" -o wide || true
+    oc -n "${namespace}" get rs -l "app=${name}" || true
+    oc -n "${namespace}" get pods -l "app=${name}" -o wide || true
+    oc -n "${namespace}" get events --sort-by=.lastTimestamp | rg -i "${name}|failed|forbidden|scc|denied" || true
+    print_warn "If you see SCC/anyuid errors, run:"
+    print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
+}
+
 main() {
     require_cmd oc
 
@@ -65,6 +77,14 @@ main() {
     print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
     oc get namespace "${namespace}" >/dev/null 2>&1 || oc create namespace "${namespace}"
+
+    print_step "Creating service account and granting SCC (anyuid)"
+    oc -n "${namespace}" create serviceaccount "${name}-sa" --dry-run=client -o yaml | oc apply -f -
+    if ! oc adm policy add-scc-to-user anyuid -z "${name}-sa" -n "${namespace}" >/dev/null 2>&1; then
+        print_warn "Could not grant anyuid SCC automatically (insufficient permissions?)."
+        print_warn "If rollout fails with SCC errors, grant it as a cluster admin:"
+        print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
+    fi
 
     print_step "Creating/updating Splunk secret"
     oc -n "${namespace}" create secret generic "${name}-auth" \
@@ -102,6 +122,7 @@ spec:
     spec:
       securityContext:
         fsGroup: 41812
+      serviceAccountName: ${name}-sa
       containers:
         - name: splunk
           image: ${image}
@@ -181,7 +202,11 @@ spec:
 EOF
 
     print_step "Waiting for Splunk deployment rollout"
-    oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m; then
+        print_error "Splunk deployment rollout did not complete."
+        print_deploy_diagnostics "${namespace}" "${name}"
+        exit 1
+    fi
 
     local route_host
     route_host="$(oc -n "${namespace}" get route "${name}-web" -o jsonpath='{.spec.host}')"
