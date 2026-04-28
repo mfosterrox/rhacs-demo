@@ -13,6 +13,9 @@
 #   SPLUNK_PASSWORD_DEFAULT Default admin password when SPLUNK_PASSWORD is unset
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
+#   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
+#   SPLUNK_RHACS_ADDON_FILE     Path to add-on tgz (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz)
+#   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
@@ -38,6 +41,30 @@ require_cmd() {
         print_error "Required command not found: ${cmd}"
         exit 1
     fi
+}
+
+verify_sha256() {
+    local file_path="$1"
+    local expected="$2"
+    local actual=""
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual="$(sha256sum "${file_path}" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        actual="$(shasum -a 256 "${file_path}" | awk '{print $1}')"
+    elif command -v sha256 >/dev/null 2>&1; then
+        actual="$(sha256 -q "${file_path}")"
+    else
+        print_warn "No SHA256 tool found (sha256sum/shasum/sha256). Skipping checksum verification."
+        return 0
+    fi
+
+    if [ "${actual}" != "${expected}" ]; then
+        print_error "SHA256 mismatch for ${file_path}"
+        print_error "Expected: ${expected}"
+        print_error "Actual:   ${actual}"
+        return 1
+    fi
+    print_info "Checksum verified for $(basename "${file_path}")"
 }
 
 escape_sed_replacement() {
@@ -134,6 +161,58 @@ create_or_get_splunk_hec_token() {
         return 1
     fi
     printf '%s' "${token}"
+}
+
+install_rhacs_splunk_addon() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+
+    local do_install="${SPLUNK_INSTALL_RHACS_ADDON:-true}"
+    if [ "${do_install}" != "true" ]; then
+        print_info "Skipping RHACS Splunk add-on install (SPLUNK_INSTALL_RHACS_ADDON=${do_install})"
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local addon_file="${SPLUNK_RHACS_ADDON_FILE:-${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz}"
+    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-62104fae3307184a16c3a92343aa4a4cd4116aa8df86422e89a6915ff7a28461}"
+    local addon_name
+    addon_name="$(basename "${addon_file}")"
+
+    if [ ! -f "${addon_file}" ]; then
+        print_warn "RHACS Splunk add-on package not found at: ${addon_file}"
+        print_warn "Place the .tgz there or set SPLUNK_RHACS_ADDON_FILE. Skipping add-on install."
+        return 0
+    fi
+
+    print_step "Verifying RHACS Splunk add-on checksum"
+    verify_sha256 "${addon_file}" "${addon_sha}" || return 1
+
+    local pod
+    pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pod}" ]; then
+        print_error "No Splunk pod found for add-on installation."
+        return 1
+    fi
+
+    print_step "Copying RHACS Splunk add-on into pod"
+    oc -n "${namespace}" cp "${addon_file}" "${pod}:/tmp/${addon_name}"
+
+    print_step "Installing RHACS Splunk add-on package"
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+        -uri "https://127.0.0.1:8089" \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+
+    print_step "Restarting Splunk to activate add-on"
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
+        -uri "https://127.0.0.1:8089" \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+
+    print_step "Waiting for Splunk rollout after add-on install"
+    oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    print_info "RHACS Splunk add-on installation completed."
 }
 
 integrate_rhacs_with_splunk() {
@@ -399,6 +478,7 @@ EOF
     print_info "If using in-cluster endpoint, use: http://${name}.${namespace}.svc.cluster.local:8088"
     echo ""
 
+    install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
     integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
 }
 
