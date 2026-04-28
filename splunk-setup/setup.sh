@@ -17,7 +17,7 @@
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
-#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS notifier via API (default: true)
+#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS Splunk notifier via API (default: false)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
@@ -186,23 +186,23 @@ create_or_get_splunk_hec_token() {
     fi
 
     # Enable HEC globally via management REST API.
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
         -u "admin:${splunk_password}" \
         -X POST \
-        "https://127.0.0.1:8089/services/data/inputs/http/http" \
-        -d "disabled=0" >/dev/null 2>&1 || true
+        "https://127.0.0.1:8089/services/data/inputs/http/http?output_mode=json" \
+        --data-urlencode "disabled=0" >/dev/null 2>&1 || true
 
     # Create/update HEC input via management REST API.
     # If it already exists, Splunk returns an error; that's fine for idempotency.
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
         -u "admin:${splunk_password}" \
         -X POST \
-        "https://127.0.0.1:8089/services/data/inputs/http" \
-        -d "name=${hec_name}" \
-        -d "description=RHACS notifier token" \
-        -d "index=main" \
-        -d "sourcetype=stackrox" \
-        -d "disabled=0" >/dev/null 2>&1 || true
+        "https://127.0.0.1:8089/services/data/inputs/http?output_mode=json" \
+        --data-urlencode "name=${hec_name}" \
+        --data-urlencode "description=RHACS notifier token" \
+        --data-urlencode "index=main" \
+        --data-urlencode "sourcetype=stackrox" \
+        --data-urlencode "disabled=0" >/dev/null 2>&1 || true
 
     # Read token value from Splunk REST API (JSON output is the most stable format).
     local token
@@ -213,7 +213,7 @@ create_or_get_splunk_hec_token() {
 
     # Fallback: list all HEC inputs and match by name.
     if [ -z "${token}" ]; then
-        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
+        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
             -u "admin:${splunk_password}" \
             "https://127.0.0.1:8089/services/data/inputs/http?output_mode=json&count=0" 2>/dev/null | \
             jq -r --arg n "${hec_name}" '.entry[]? | select(.name==$n) | .content.token' 2>/dev/null | head -n1 || true)"
@@ -338,29 +338,22 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Configuring RHACS add-on settings in Splunk"
-    # Use Splunk management API instead of filesystem writes (works with restricted container permissions).
-    # 1) Try to update existing stanza.
-    local settings_code
-    settings_code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s -o /tmp/stackrox-settings.out -w "%{http_code}" \
+    # Use properties endpoint to set keys in ta_stackrox_settings/[additional_parameters].
+    local code_central code_token
+    code_central="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /dev/null -w "%{http_code}" \
         -u "admin:${splunk_password}" \
         -X POST \
-        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters" \
-        -d "central_endpoint=${central_hostport}" \
-        -d "api_token=${addon_token}" 2>/dev/null || true)"
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/properties/ta_stackrox_settings/additional_parameters/central_endpoint" \
+        --data-urlencode "value=${central_hostport}" 2>/dev/null || true)"
 
-    # 2) If stanza does not exist yet, create it.
-    if ! echo "${settings_code}" | grep -qE "^(200|201)$"; then
-        settings_code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s -o /tmp/stackrox-settings.out -w "%{http_code}" \
-            -u "admin:${splunk_password}" \
-            -X POST \
-            "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings" \
-            -d "name=additional_parameters" \
-            -d "central_endpoint=${central_hostport}" \
-            -d "api_token=${addon_token}" 2>/dev/null || true)"
-    fi
+    code_token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /dev/null -w "%{http_code}" \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/properties/ta_stackrox_settings/additional_parameters/api_token" \
+        --data-urlencode "value=${addon_token}" 2>/dev/null || true)"
 
-    if ! echo "${settings_code}" | grep -qE "^(200|201)$"; then
-        print_warn "Could not configure add-on settings automatically (HTTP ${settings_code})."
+    if ! echo "${code_central}" | grep -qE "^(200|201)$" || ! echo "${code_token}" | grep -qE "^(200|201)$"; then
+        print_warn "Could not configure add-on settings automatically (central_endpoint HTTP ${code_central}, api_token HTTP ${code_token})."
         print_warn "Proceed in Splunk UI: Configuration -> Add-on Settings."
         return 0
     fi
@@ -429,13 +422,12 @@ print_final_details() {
     print_info "Cleanup script: ./clean.sh"
     print_info "To fully remove setup: SPLUNK_DELETE_NAMESPACE=true ./clean.sh"
     echo ""
-    print_info "Manual RHACS integration steps (for validation):"
-    print_info "  1) In Splunk: enable HEC and create a token"
-    print_info "  2) In RHACS: Platform Configuration -> Integrations -> Splunk notifier"
-    print_info "  3) Use URL: https://<splunk-host>:8088/services/collector/event"
-    print_info "  4) Paste HEC token, click Test, then Create"
-    print_info "  5) Enable notifier on policies and trigger a new violation"
-    print_info "  6) In Splunk Search, verify events"
+    print_info "Add-on integration steps (RHACS data pull into Splunk):"
+    print_info "  1) Splunk app -> Configuration -> Add-on Settings"
+    print_info "  2) Set Central Endpoint and RHACS API token, then Save"
+    print_info "  3) Inputs -> Create New Input: ACS Compliance / ACS Violations / ACS Vulnerability Management"
+    print_info "  4) In Splunk Search, verify data: index=* sourcetype=\"stackrox-*\""
+    print_info "Notifier/HEC integration is optional and disabled by default."
 }
 
 integrate_rhacs_with_splunk() {
@@ -443,7 +435,7 @@ integrate_rhacs_with_splunk() {
     local name="$2"
     local splunk_password="$3"
 
-    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-true}"
+    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-false}"
     if [ "${do_integration}" != "true" ]; then
         print_info "Skipping RHACS integration (SPLUNK_INTEGRATE_WITH_RHACS=${do_integration})"
         return 0
