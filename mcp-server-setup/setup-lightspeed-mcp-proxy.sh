@@ -18,7 +18,7 @@ MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
 PROXY_NAME="${LIGHTSPEED_MCP_PROXY_NAME:-stackrox-mcp-lightspeed-proxy}"
 UPSTREAM_SERVICE="${LIGHTSPEED_MCP_PROXY_UPSTREAM_SERVICE:-stackrox-mcp}"
 UPSTREAM_PORT="${LIGHTSPEED_MCP_PROXY_UPSTREAM_PORT:-8080}"
-PROXY_IMAGE="${LIGHTSPEED_MCP_PROXY_IMAGE:-registry.access.redhat.com/ubi9/nginx-124:latest}"
+PROXY_IMAGE="${LIGHTSPEED_MCP_PROXY_IMAGE:-quay.io/nginx/nginx-unprivileged:stable-alpine}"
 MCP_OC_REQUEST_TIMEOUT="${MCP_OC_REQUEST_TIMEOUT:-60s}"
 
 mcp_oc() {
