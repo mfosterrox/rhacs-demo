@@ -50,7 +50,7 @@ cd mcp-server-setup
 | `LIGHTSPEED_NAMESPACE` | No | OpenShift Lightspeed namespace (default: `openshift-lightspeed`). |
 | `LIGHTSPEED_OLSCONFIG_NAME` | No | OLSConfig name to inspect (default: `cluster`). |
 | `LIGHTSPEED_MCP_SERVER_NAME` | No | MCP server entry name in OLSConfig (default: `stackrox-mcp`). |
-| `LIGHTSPEED_MCP_PROXY_ENABLE` | No | Deploy compatibility proxy for `GET /mcp` session handling (`true` by default). |
+| `LIGHTSPEED_MCP_PROXY_ENABLE` | No | Deploy compatibility proxy for `GET /mcp` session handling (`false` by default). |
 | `LIGHTSPEED_MCP_PROXY_NAME` | No | Compatibility proxy Service/Deployment name (default: `stackrox-mcp-lightspeed-proxy`). |
 
 ## MCP Client Configuration
