@@ -17,7 +17,10 @@
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
+#   SPLUNK_CONFIGURE_ADDON_INPUTS Configure TA-stackrox inputs via API (default: true)
+#   SPLUNK_ADDON_INDEX         Splunk index for add-on pulled data (default: main)
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create HEC token + RHACS Splunk notifier via API (default: true)
+#   SPLUNK_HEC_SCHEME          HEC URL scheme for RHACS notifier (default: https)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
@@ -420,6 +423,70 @@ configure_rhacs_addon_settings() {
     print_info "Add-on settings saved (Central Endpoint + API token)."
 }
 
+ensure_stackrox_input() {
+    local namespace="$1"
+    local pod="$2"
+    local splunk_password="$3"
+    local stanza="$4"
+    local interval="$5"
+    local index_name="$6"
+
+    local get_code
+    get_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w "%{http_code}" \
+        -u "admin:${splunk_password}" \
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs/${stanza}?output_mode=json" 2>/dev/null || true)"
+
+    if echo "${get_code}" | grep -qE "^(200|201)$"; then
+        print_info "Add-on input exists: ${stanza}"
+        return 0
+    fi
+
+    local create_code
+    create_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /tmp/stackrox-input-create.out -w "%{http_code}" \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs?output_mode=json" \
+        --data-urlencode "name=${stanza}" \
+        --data-urlencode "index=${index_name}" \
+        --data-urlencode "interval=${interval}" \
+        --data-urlencode "disabled=0" 2>/dev/null || true)"
+
+    if ! echo "${create_code}" | grep -qE "^(200|201)$"; then
+        print_warn "Failed to create add-on input ${stanza} (HTTP ${create_code:-n/a})."
+        print_warn "Response: $(cat /tmp/stackrox-input-create.out 2>/dev/null || echo '<empty>')"
+        return 1
+    fi
+    print_info "Created add-on input: ${stanza}"
+    return 0
+}
+
+configure_rhacs_addon_inputs() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+    local do_inputs="${SPLUNK_CONFIGURE_ADDON_INPUTS:-true}"
+
+    if [ "${do_inputs}" != "true" ]; then
+        print_info "Skipping add-on input API configuration (SPLUNK_CONFIGURE_ADDON_INPUTS=${do_inputs})."
+        return 0
+    fi
+
+    local pod
+    pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pod}" ]; then
+        print_warn "No Splunk pod found for add-on inputs configuration."
+        return 0
+    fi
+
+    local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
+    local index_name="${SPLUNK_ADDON_INDEX:-main}"
+
+    print_step "Configuring RHACS Splunk add-on inputs via API"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval}" "${index_name}" || true
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval}" "${index_name}" || true
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval}" "${index_name}" || true
+}
+
 print_rhacs_addon_configuration_steps() {
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
     local rox_token="${ROX_API_TOKEN:-}"
@@ -450,10 +517,8 @@ print_rhacs_addon_configuration_steps() {
     else
         print_warn "  API token (Analyst/read): <set RHACS_SPLUNK_ADDON_TOKEN or ROX_* vars>"
     fi
-    print_info "After saving Add-on Settings, create these inputs in Splunk (Inputs -> Create New Input):"
-    print_info "  - ACS Compliance"
-    print_info "  - ACS Violations"
-    print_info "  - ACS Vulnerability Management"
+    print_info "Add-on inputs are configured via API by default (can be disabled)."
+    print_info "Inputs created: ACS Compliance, ACS Violations, ACS Vulnerability Management."
     print_info "Suggested polling interval: ${interval} seconds"
     print_info "Verification search: index=* sourcetype=\"stackrox-*\""
 }
@@ -479,7 +544,7 @@ print_final_details() {
     print_info "Add-on integration steps (RHACS data pull into Splunk):"
     print_info "  1) Splunk app -> Configuration -> Add-on Settings"
     print_info "  2) Set Central Endpoint and RHACS API token, then Save"
-    print_info "  3) Inputs -> Create New Input: ACS Compliance / ACS Violations / ACS Vulnerability Management"
+    print_info "  3) Inputs are created via API by script (override with SPLUNK_CONFIGURE_ADDON_INPUTS=false)"
     print_info "  4) In Splunk Search, verify data: index=* sourcetype=\"stackrox-*\""
     print_info "HEC + RHACS notifier: set SPLUNK_INTEGRATE_WITH_RHACS=false to skip API integration."
 }
@@ -498,7 +563,8 @@ integrate_rhacs_with_splunk() {
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
     local rox_token="${ROX_API_TOKEN:-}"
     local rox_password="${ROX_PASSWORD:-}"
-    local splunk_service_url="http://${name}.${namespace}.svc.cluster.local:8088"
+    local hec_scheme="${SPLUNK_HEC_SCHEME:-https}"
+    local splunk_service_url="${hec_scheme}://${name}.${namespace}.svc.cluster.local:8088"
     local hec_name="${SPLUNK_HEC_NAME:-rhacs-hec}"
     local notifier_name="${SPLUNK_NOTIFIER_NAME:-Splunk SIEM (local)}"
     local source_type_alert="${SPLUNK_SOURCE_TYPE_ALERT:-stackrox-alert}"
@@ -563,6 +629,23 @@ EOF
             -H "Authorization: Bearer ${rox_token}" \
             -H "Content-Type: application/json" \
             --data "${payload}")"
+        # RHACS may require credential re-entry for certain Splunk field changes.
+        # If update is rejected, recreate notifier to apply endpoint/token together.
+        if ! echo "${code}" | grep -qE "^(200|201)$"; then
+            local update_err
+            update_err="$(cat /tmp/rhacs-splunk-notifier.out 2>/dev/null || true)"
+            if echo "${update_err}" | grep -qi "credentials required to update field"; then
+                print_warn "Existing notifier cannot be updated in-place; recreating it."
+                curl -k -s -o /tmp/rhacs-splunk-notifier-delete.out -w "%{http_code}" \
+                    -X DELETE "${rox_central}/v1/notifiers/${notifier_id}" \
+                    -H "Authorization: Bearer ${rox_token}" >/dev/null || true
+                code="$(curl -k -s -o /tmp/rhacs-splunk-notifier.out -w "%{http_code}" \
+                    -X POST "${rox_central}/v1/notifiers" \
+                    -H "Authorization: Bearer ${rox_token}" \
+                    -H "Content-Type: application/json" \
+                    --data "${payload}")"
+            fi
+        fi
     else
         code="$(curl -k -s -o /tmp/rhacs-splunk-notifier.out -w "%{http_code}" \
             -X POST "${rox_central}/v1/notifiers" \
@@ -762,6 +845,7 @@ EOF
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
     configure_rhacs_addon_settings "${namespace}" "${name}" "${password}"
+    configure_rhacs_addon_inputs "${namespace}" "${name}" "${password}"
     integrate_rhacs_with_splunk "${namespace}" "${name}" "${password}"
     print_rhacs_addon_configuration_steps
     print_final_details "${namespace}" "${name}" "${route_host}" "${password}"
