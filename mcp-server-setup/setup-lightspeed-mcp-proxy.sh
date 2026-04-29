@@ -119,7 +119,7 @@ spec:
             periodSeconds: 15
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             runAsNonRoot: true
             capabilities:
               drop: ["ALL"]
@@ -149,7 +149,8 @@ spec:
       protocol: TCP
 EOF
 
-    mcp_oc rollout status deployment/"${PROXY_NAME}" -n "${MCP_NAMESPACE}" --timeout=120s >/dev/null || {
+    print_info "Waiting for proxy rollout (timeout 120s)..."
+    mcp_oc rollout status deployment/"${PROXY_NAME}" -n "${MCP_NAMESPACE}" --timeout=120s || {
         print_warn "Proxy deployment rollout did not complete within timeout"
     }
 
