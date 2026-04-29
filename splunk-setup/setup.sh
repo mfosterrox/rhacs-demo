@@ -508,7 +508,6 @@ integrate_rhacs_with_splunk() {
   "splunk": {
     "httpEndpoint": "__HEC_ENDPOINT__/services/collector/event",
     "httpToken": "__HEC_TOKEN__",
-    "sourceTypes": ["stackrox"],
     "skipTlsVerify": true
   }
 }
