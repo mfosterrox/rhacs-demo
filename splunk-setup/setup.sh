@@ -187,6 +187,24 @@ is_splunk_deployment_ready() {
     return 1
 }
 
+wait_for_namespace_deleted() {
+    local namespace="$1"
+    local timeout_sec="${2:-300}"
+    local elapsed=0
+    local sleep_sec=5
+
+    while oc get namespace "${namespace}" >/dev/null 2>&1; do
+        if [ "${elapsed}" -ge "${timeout_sec}" ]; then
+            print_error "Timed out waiting for namespace '${namespace}' deletion."
+            return 1
+        fi
+        print_info "Waiting for namespace '${namespace}' deletion... (${elapsed}s/${timeout_sec}s)"
+        sleep "${sleep_sec}"
+        elapsed=$((elapsed + sleep_sec))
+    done
+    return 0
+}
+
 run_splunk_curl() {
     local namespace="$1"
     local pod="$2"
@@ -719,6 +737,9 @@ main() {
         if [ -x "${clean_script}" ]; then
             print_step "Running clean.sh before setup"
             bash "${clean_script}"
+            wait_for_namespace_deleted "${namespace}" 300 || exit 1
+            # After clean-and-wait, always perform full deploy path.
+            skip_if_ready="false"
         else
             print_warn "SPLUNK_RUN_CLEAN_FIRST=true but clean.sh is missing or not executable: ${clean_script}"
         fi
@@ -774,6 +795,8 @@ spec:
         app: ${name}
     spec:
       securityContext:
+        runAsUser: 41812
+        runAsGroup: 41812
         fsGroup: 41812
       serviceAccountName: ${name}-sa
       containers:
