@@ -46,6 +46,48 @@ print_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
+print_access_summary() {
+    local rhacs_ns="${RHACS_NAMESPACE:-stackrox}"
+    local splunk_ns="${SPLUNK_NAMESPACE:-splunk}"
+    local rhacs_url="${ROX_CENTRAL_ADDRESS:-}"
+    local splunk_url=""
+    local acm_url=""
+    local grafana_url=""
+    local argo_url=""
+
+    if [ -z "${rhacs_url}" ]; then
+        rhacs_url="$(oc get route central -n "${rhacs_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
+    fi
+    splunk_url="$(oc get route splunk-web -n "${splunk_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
+    acm_url="$(oc get route multicloud-console -n open-cluster-management -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
+    grafana_url="$(oc get route -n openshift-monitoring grafana -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
+    argo_url="$(oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
+
+    echo ""
+    print_info "======================================"
+    print_info "Access details"
+    print_info "======================================"
+    print_info ""
+    print_info "RHACS Central:"
+    print_info "  URL      : ${rhacs_url:-<not found>}"
+    print_info "  Username : admin"
+    if [ -n "${ROX_PASSWORD:-}" ]; then
+        print_info "  Password : ${ROX_PASSWORD}"
+    else
+        print_info "  Password : <set ROX_PASSWORD or retrieve from RHACS secret>"
+    fi
+    echo ""
+    print_info "Splunk:"
+    print_info "  URL      : ${splunk_url:-<not found>}"
+    print_info "  Username : admin"
+    print_info "  Password : ${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
+    echo ""
+    print_info "Other useful URLs:"
+    print_info "  ACM console      : ${acm_url:-<not found>}"
+    print_info "  OpenShift Grafana: ${grafana_url:-<not found>}"
+    print_info "  OpenShift GitOps : ${argo_url:-<not found>}"
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${LOG_DIR:-${REPO_ROOT}/.setup-parallel-logs}"
 mkdir -p "${LOG_DIR}"
@@ -362,6 +404,7 @@ main() {
     echo ""
     if [ "${failed}" -eq 0 ]; then
         print_info "All setup phases completed successfully."
+        print_access_summary
         exit 0
     fi
     print_error "One or more parallel jobs failed. Review logs in ${LOG_DIR}"
