@@ -62,6 +62,17 @@ claude mcp add stackrox --transport http --url https://stackrox-mcp-stackrox-mcp
 
 Or configure in Cursor settings (MCP servers). The MCP server supports HTTP transport for remote clients.
 
+## OpenShift Lightspeed Integration
+
+OpenShift Lightspeed being installed is not enough by itself; the `OLSConfig` must include MCP settings.
+
+Required `OLSConfig` fields:
+- `spec.featureGates` includes `MCPServer`
+- `spec.mcpServers` contains a `stackrox-mcp` entry
+- MCP URL should target the in-cluster endpoint: `http://stackrox-mcp.stackrox-mcp:8080/mcp`
+
+The install script now checks for these fields and prints a patch example if they are missing.
+
 ## Verification
 
 ```bash

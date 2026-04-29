@@ -113,12 +113,52 @@ validate_lightspeed_mcp_integration() {
         ols_cmd=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}")
     fi
 
+    if ! "${ols_cmd[@]}" >/dev/null 2>&1; then
+        local can_get_cluster can_get_ns
+        can_get_cluster="$(mcp_oc auth can-i get olsconfig 2>/dev/null || true)"
+        can_get_ns="$(mcp_oc auth can-i get olsconfig -n "${LIGHTSPEED_NAMESPACE}" 2>/dev/null || true)"
+        print_warn "Could not read OLSConfig '${LIGHTSPEED_OLSCONFIG_NAME}' (cluster-scoped or namespace ${LIGHTSPEED_NAMESPACE})."
+        print_warn "RBAC check: can-i get olsconfig (cluster)='${can_get_cluster:-unknown}', (ns ${LIGHTSPEED_NAMESPACE})='${can_get_ns:-unknown}'."
+        print_warn "Verify with: oc get olsconfig ${LIGHTSPEED_OLSCONFIG_NAME} || oc get olsconfig ${LIGHTSPEED_OLSCONFIG_NAME} -n ${LIGHTSPEED_NAMESPACE}"
+        return 0
+    fi
+    print_info "Detected OLSConfig scope: ${ols_scope}"
+
+    # OLS MCP configuration lives at top-level spec.featureGates/spec.mcpServers.
+    # If these are absent, Lightspeed may be installed but MCP integration is not configured.
+    local has_featuregates_key has_mcpservers_key
+    has_featuregates_key=$("${ols_cmd[@]}" -o jsonpath='{.spec.featureGates}' 2>/dev/null || true)
+    has_mcpservers_key=$("${ols_cmd[@]}" -o jsonpath='{.spec.mcpServers}' 2>/dev/null || true)
+    if [ -z "${has_featuregates_key}" ] && [ -z "${has_mcpservers_key}" ]; then
+        print_warn "OLSConfig exists, but MCP integration fields are not configured yet."
+        print_warn "Missing: spec.featureGates and spec.mcpServers."
+        print_info "Apply MCP config to OLSConfig (example):"
+        echo "  oc patch olsconfig ${LIGHTSPEED_OLSCONFIG_NAME} --type merge -p '{"
+        echo "    \"spec\": {"
+        echo "      \"featureGates\": [\"MCPServer\"],"
+        echo "      \"mcpServers\": [{"
+        echo "        \"name\": \"${LIGHTSPEED_MCP_SERVER_NAME}\","
+        echo "        \"streamableHTTP\": {"
+        echo "          \"enableSSE\": false,"
+        echo "          \"sseReadTimeout\": 30,"
+        echo "          \"timeout\": 60,"
+        echo "          \"url\": \"http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp\","
+        echo "          \"headers\": {\"authorization\": \"stackrox-mcp-authorization-header\"}"
+        echo "        }"
+        echo "      }]"
+        echo "    }"
+        echo "  }'"
+        print_info "Then restart Lightspeed API deployment:"
+        print_info "  oc rollout restart deployment/lightspeed-app-server -n ${LIGHTSPEED_NAMESPACE}"
+        return 0
+    fi
+
     # 1) OLSConfig should include MCP server feature gate.
     local feature_gates
     feature_gates=$("${ols_cmd[@]}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
     if [ -z "${feature_gates}" ]; then
-        print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} not found (cluster-scope or namespace ${LIGHTSPEED_NAMESPACE}), or featureGates is empty."
-        print_warn "If you use OpenShift Lightspeed, configure OLSConfig with featureGates: [MCPServer]."
+        print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} found, but spec.featureGates is empty."
+        print_warn "If you use OpenShift Lightspeed MCP integration, set spec.featureGates to include MCPServer."
         return 0
     fi
     if [[ " ${feature_gates} " =~ [[:space:]]MCPServer[[:space:]] ]]; then
