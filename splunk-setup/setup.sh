@@ -12,6 +12,8 @@
 #   SPLUNK_PASSWORD_DEFAULT Admin password used for every deployment run
 #   SPLUNK_RUN_CLEAN_FIRST  Run ./clean.sh before setup (default: true)
 #   SPLUNK_FORCE_DELETE_NAMESPACE  Remove namespace finalizers if delete is stuck (default: false). Also auto-tried once after wait timeout.
+#   SPLUNK_ROLLOUT_TIMEOUT  Max wait for oc rollout status (default: 25m; must be >= first-boot window).
+#   SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD  startupProbe checks at 15s interval (default: 100 => 25m max before probe fails).
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
@@ -396,7 +398,7 @@ install_rhacs_splunk_addon() {
     fi
 
     print_step "Waiting for Splunk rollout after add-on install"
-    oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     # Verify app is truly installed after restart.
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -z "${pod}" ] || ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
@@ -486,7 +488,7 @@ configure_rhacs_addon_settings() {
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
-    oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     print_info "Add-on settings saved (Central Endpoint + API token)."
 }
 
@@ -759,6 +761,7 @@ main() {
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
     local skip_if_ready="${SPLUNK_SKIP_IF_READY:-true}"
     local run_clean_first="${SPLUNK_RUN_CLEAN_FIRST:-true}"
+    local splunk_startup_failures="${SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD:-100}"
 
     # Convenience: pick up RHACS API values from ~/.bashrc if user already saved them there.
     load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
@@ -871,7 +874,7 @@ spec:
               port: 8000
             periodSeconds: 15
             timeoutSeconds: 5
-            failureThreshold: 60
+            failureThreshold: ${splunk_startup_failures}
           readinessProbe:
             tcpSocket:
               port: 8000
@@ -924,8 +927,8 @@ spec:
     termination: ${route_termination}
 EOF
 
-        print_step "Waiting for Splunk deployment rollout"
-        if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m; then
+        print_step "Waiting for Splunk deployment rollout (timeout ${SPLUNK_ROLLOUT_TIMEOUT:-25m}, Splunk first boot can exceed 10m)"
+        if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"; then
             print_error "Splunk deployment rollout did not complete."
             print_deploy_diagnostics "${namespace}" "${name}"
             exit 1
