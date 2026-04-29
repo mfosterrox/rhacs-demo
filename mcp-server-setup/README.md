@@ -35,6 +35,7 @@ cd mcp-server-setup
 2. Deploys the MCP server to `stackrox-mcp` namespace
 3. Creates an OpenShift Route for external access
 4. Configures connection to RHACS Central (auto-detected or from `ROX_CENTRAL_ADDRESS`)
+5. Validates OpenShift Lightspeed MCP wiring (when OLSConfig is present): feature gate, MCP URL/transport, auth header mode, route reachability, and Lightspeed readiness
 
 ## Environment Variables
 
@@ -45,6 +46,10 @@ cd mcp-server-setup
 | `RHACS_NAMESPACE` | No | RHACS namespace (default: `stackrox`) |
 | `MCP_NAMESPACE` | No | MCP server namespace (default: `stackrox-mcp`) |
 | `MCP_ROUTE_HOST` | No | Custom Route hostname (default: auto-assigned) |
+| `LIGHTSPEED_VALIDATE` | No | Validate OpenShift Lightspeed integration during install (`true` by default). |
+| `LIGHTSPEED_NAMESPACE` | No | OpenShift Lightspeed namespace (default: `openshift-lightspeed`). |
+| `LIGHTSPEED_OLSCONFIG_NAME` | No | OLSConfig name to inspect (default: `cluster`). |
+| `LIGHTSPEED_MCP_SERVER_NAME` | No | MCP server entry name in OLSConfig (default: `stackrox-mcp`). |
 
 ## Connecting Cursor to the MCP Server
 
@@ -94,7 +99,7 @@ The install script substitutes `ROX_CENTRAL_ADDRESS`, `ROX_API_TOKEN`, and `MCP_
 
 | Script | Description |
 |--------|-------------|
-| `install.sh` | Main deployment |
+| `install.sh` | Main deployment plus OpenShift Lightspeed integration validation |
 | `test-mcp-server.sh` | Smoke test for deployment and `/health` route response |
 
 ## References

@@ -21,6 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
+LIGHTSPEED_NAMESPACE="${LIGHTSPEED_NAMESPACE:-openshift-lightspeed}"
+LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
+LIGHTSPEED_MCP_SERVER_NAME="${LIGHTSPEED_MCP_SERVER_NAME:-stackrox-mcp}"
+LIGHTSPEED_VALIDATE="${LIGHTSPEED_VALIDATE:-true}"
 
 _RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1090
@@ -81,6 +85,112 @@ get_central_url_for_mcp() {
         echo "central.${RHACS_NAMESPACE}.svc.cluster.local:443"
     else
         get_central_host_port
+    fi
+}
+
+validate_lightspeed_mcp_integration() {
+    [ "${LIGHTSPEED_VALIDATE}" = "true" ] || {
+        print_warn "Skipping OpenShift Lightspeed validation (LIGHTSPEED_VALIDATE=${LIGHTSPEED_VALIDATE})"
+        return 0
+    }
+
+    print_step "Validating OpenShift Lightspeed MCP integration..."
+    local route_host
+    route_host=$(mcp_oc get route stackrox-mcp -n "${MCP_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)
+    local expected_internal_url expected_route_url
+    expected_internal_url="http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp"
+    expected_route_url=""
+    if [ -n "${route_host}" ]; then
+        expected_route_url="https://${route_host}/mcp"
+    fi
+
+    # 1) OLSConfig should include MCP server feature gate.
+    local feature_gates
+    feature_gates=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
+    if [ -z "${feature_gates}" ]; then
+        print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} not found in ${LIGHTSPEED_NAMESPACE} (or featureGates empty)."
+        print_warn "If you use OpenShift Lightspeed, configure OLSConfig with featureGates: [MCPServer]."
+        return 0
+    fi
+    if [[ " ${feature_gates} " =~ [[:space:]]MCPServer[[:space:]] ]]; then
+        print_info "✓ OLSConfig feature gate MCPServer is enabled"
+    else
+        print_error "OLSConfig found, but MCPServer feature gate is not enabled."
+        print_info "Add MCPServer to spec.featureGates in olsconfig/${LIGHTSPEED_OLSCONFIG_NAME}."
+        return 1
+    fi
+
+    # 2) MCP server entry should exist and use streamableHTTP / URL.
+    local has_server_entry server_url streamable_url
+    has_server_entry=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        -o jsonpath="{range .spec.mcpServers[*]}{.name}{'\n'}{end}" 2>/dev/null | grep -x "${LIGHTSPEED_MCP_SERVER_NAME}" || true)
+    if [ -z "${has_server_entry}" ]; then
+        print_error "spec.mcpServers does not contain '${LIGHTSPEED_MCP_SERVER_NAME}' in olsconfig/${LIGHTSPEED_OLSCONFIG_NAME}."
+        print_info "Add mcpServers entry name='${LIGHTSPEED_MCP_SERVER_NAME}' and point it at ${expected_internal_url}."
+        return 1
+    fi
+
+    server_url=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.url}{end}" 2>/dev/null || true)
+    streamable_url=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.url}{end}" 2>/dev/null || true)
+    local configured_url
+    configured_url="${streamable_url:-$server_url}"
+    if [ -z "${configured_url}" ]; then
+        print_error "No MCP URL configured for '${LIGHTSPEED_MCP_SERVER_NAME}' (expected .streamableHTTP.url or .url)."
+        return 1
+    fi
+    if [ "${configured_url}" = "${expected_internal_url}" ] || [ -n "${expected_route_url}" ] && [ "${configured_url}" = "${expected_route_url}" ]; then
+        print_info "✓ Lightspeed MCP URL matches expected endpoint: ${configured_url}"
+    else
+        print_warn "Lightspeed MCP URL is '${configured_url}' (expected '${expected_internal_url}'"
+        [ -n "${expected_route_url}" ] && print_warn "or '${expected_route_url}')."
+    fi
+
+    # 3) Auth consistency: static MCP auth should have header-based auth in OLSConfig.
+    local has_auth_header
+    has_auth_header=""
+    has_auth_header=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.headers.authorization}{end}" 2>/dev/null || true)
+    if [ -z "${has_auth_header}" ]; then
+        has_auth_header=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+            -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')].headers[*]}{.name}:{.valueFrom.type}:{.valueFrom.secretRef.name}{'\n'}{end}" 2>/dev/null || true)
+    fi
+    if [ "${USE_STATIC_AUTH}" = true ] && [ -z "${has_auth_header}" ]; then
+        print_error "MCP server uses static auth but no Lightspeed MCP auth header is configured."
+        print_info "Add Authorization header in OLSConfig (secretRef or streamableHTTP.headers.authorization)."
+        return 1
+    fi
+    if [ "${USE_STATIC_AUTH}" = false ] && [ -n "${has_auth_header}" ]; then
+        print_warn "MCP server is in passthrough mode; verify Lightspeed auth header settings are intentional."
+    else
+        print_info "✓ Lightspeed auth/header configuration is present for current MCP auth mode"
+    fi
+
+    # 4) Connectivity from OLS namespace to MCP route.
+    if [ -n "${route_host}" ]; then
+        if mcp_oc run lightspeed-mcp-route-check -n "${LIGHTSPEED_NAMESPACE}" --rm -i --restart=Never \
+            --image=curlimages/curl:8.8.0 --quiet -- \
+            curl -k -sS --max-time 15 "https://${route_host}/health" >/dev/null 2>&1; then
+            print_info "✓ Lightspeed namespace can reach MCP route health endpoint"
+        else
+            print_warn "Could not verify route reachability from ${LIGHTSPEED_NAMESPACE}."
+            print_warn "Check NetworkPolicy / EgressFirewall / proxy configuration."
+        fi
+    fi
+
+    # 5) Ensure Lightspeed deployment is present and ready (restart if needed after config changes).
+    if mcp_oc get deployment lightspeed-app-server -n "${LIGHTSPEED_NAMESPACE}" &>/dev/null; then
+        local ls_ready ls_desired
+        ls_ready=$(mcp_oc get deployment lightspeed-app-server -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        ls_desired=$(mcp_oc get deployment lightspeed-app-server -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+        if [ "${ls_ready:-0}" -ge 1 ] 2>/dev/null; then
+            print_info "✓ lightspeed-app-server is ready (${ls_ready}/${ls_desired})"
+        else
+            print_warn "lightspeed-app-server not ready (${ls_ready}/${ls_desired})."
+        fi
+        print_info "If OLSConfig was updated, restart to pick up changes:"
+        print_info "  oc rollout restart deployment/lightspeed-app-server -n ${LIGHTSPEED_NAMESPACE}"
     fi
 }
 
@@ -193,6 +303,9 @@ main() {
     fi
 
     print_info "✓ StackRox MCP server deployed"
+    echo ""
+
+    validate_lightspeed_mcp_integration
     echo ""
 
     # Wait for rollout
