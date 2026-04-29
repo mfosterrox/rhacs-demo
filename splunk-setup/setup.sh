@@ -10,6 +10,7 @@
 #   SPLUNK_NAME             Base name for deployment resources (default: splunk)
 #   SPLUNK_STORAGE_SIZE     PVC size for index data (default: 20Gi)
 #   SPLUNK_PASSWORD_DEFAULT Admin password used for every deployment run
+#   SPLUNK_RUN_CLEAN_FIRST  Run ./clean.sh before setup (default: true)
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
@@ -298,9 +299,9 @@ install_rhacs_splunk_addon() {
     addon_name="$(basename "${addon_file}")"
 
     if [ ! -f "${addon_file}" ]; then
-        print_warn "RHACS Splunk add-on package not found at: ${addon_file}"
-        print_warn "Place the .tgz there or set SPLUNK_RHACS_ADDON_FILE. Skipping add-on install."
-        return 0
+        print_error "RHACS Splunk add-on package not found at: ${addon_file}"
+        print_error "Place the .tgz there or set SPLUNK_RHACS_ADDON_FILE."
+        return 1
     fi
 
     print_step "Verifying RHACS Splunk add-on checksum"
@@ -327,15 +328,22 @@ install_rhacs_splunk_addon() {
     print_step "Installing RHACS Splunk add-on package"
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+        -auth "admin:${splunk_password}" >/dev/null 2>&1
 
     print_step "Restarting Splunk to activate add-on"
     oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+        -auth "admin:${splunk_password}" >/dev/null 2>&1
 
     print_step "Waiting for Splunk rollout after add-on install"
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
+    # Verify app is truly installed after restart.
+    pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+        -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
+        print_error "RHACS Splunk add-on is not installed or not visible in Splunk."
+        return 1
+    fi
     print_info "RHACS Splunk add-on installation completed."
 }
 
@@ -350,9 +358,9 @@ configure_rhacs_addon_settings() {
     local central_hostport=""
 
     if [ -z "${rox_central}" ]; then
-        print_warn "ROX_CENTRAL_ADDRESS not set; skipping add-on settings automation."
-        print_warn "Set ROX_CENTRAL_ADDRESS (for example: central.example.com:443) and rerun."
-        return 0
+        print_error "ROX_CENTRAL_ADDRESS not set; cannot configure add-on settings."
+        print_error "Set ROX_CENTRAL_ADDRESS (for example: central.example.com:443) and rerun."
+        return 1
     fi
     central_hostport="$(to_central_hostport "${rox_central}")"
 
@@ -362,9 +370,9 @@ configure_rhacs_addon_settings() {
         addon_token="$(generate_analyst_api_token "${rox_central}" "${rox_token}" || true)"
     fi
     if [ -z "${addon_token}" ]; then
-        print_warn "No add-on token available (set RHACS_SPLUNK_ADDON_TOKEN or ROX_API_TOKEN)."
-        print_warn "Skipping automatic Add-on Settings configuration."
-        return 0
+        print_error "No add-on token available (set RHACS_SPLUNK_ADDON_TOKEN or ROX_API_TOKEN)."
+        print_error "Cannot continue without add-on settings token."
+        return 1
     fi
 
     local pod
@@ -410,9 +418,8 @@ configure_rhacs_addon_settings() {
     done
 
     if ! echo "${code}" | grep -qE "^(200|201)$"; then
-        print_warn "Could not configure add-on settings automatically (last endpoint: ${endpoint}, HTTP ${code:-n/a})."
-        print_warn "Proceed in Splunk UI: Configuration -> Add-on Settings."
-        return 0
+        print_error "Could not configure add-on settings automatically (last endpoint: ${endpoint}, HTTP ${code:-n/a})."
+        return 1
     fi
 
     print_step "Restarting Splunk to apply add-on settings"
@@ -474,17 +481,17 @@ configure_rhacs_addon_inputs() {
     local pod
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -z "${pod}" ]; then
-        print_warn "No Splunk pod found for add-on inputs configuration."
-        return 0
+        print_error "No Splunk pod found for add-on inputs configuration."
+        return 1
     fi
 
     local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
     local index_name="${SPLUNK_ADDON_INDEX:-main}"
 
     print_step "Configuring RHACS Splunk add-on inputs via API"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval}" "${index_name}" || true
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval}" "${index_name}" || true
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval}" "${index_name}" || true
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval}" "${index_name}"
 }
 
 print_rhacs_addon_configuration_steps() {
@@ -691,12 +698,25 @@ main() {
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
     local skip_if_ready="${SPLUNK_SKIP_IF_READY:-true}"
+    local run_clean_first="${SPLUNK_RUN_CLEAN_FIRST:-true}"
 
     # Convenience: pick up RHACS API values from ~/.bashrc if user already saved them there.
     load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
     load_env_from_bashrc_if_missing "ROX_API_TOKEN"
     load_env_from_bashrc_if_missing "RHACS_SPLUNK_ADDON_TOKEN"
     load_env_from_bashrc_if_missing "ROX_PASSWORD"
+
+    if [ "${run_clean_first}" = "true" ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local clean_script="${script_dir}/clean.sh"
+        if [ -x "${clean_script}" ]; then
+            print_step "Running clean.sh before setup"
+            bash "${clean_script}"
+        else
+            print_warn "SPLUNK_RUN_CLEAN_FIRST=true but clean.sh is missing or not executable: ${clean_script}"
+        fi
+    fi
 
     if [ "${skip_if_ready}" = "true" ] && is_splunk_deployment_ready "${namespace}" "${name}"; then
         print_info "Splunk deployment is already ready; skipping base deploy/apply steps."

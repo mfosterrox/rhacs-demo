@@ -51,17 +51,11 @@ print_access_summary() {
     local splunk_ns="${SPLUNK_NAMESPACE:-splunk}"
     local rhacs_url="${ROX_CENTRAL_ADDRESS:-}"
     local splunk_url=""
-    local acm_url=""
-    local grafana_url=""
-    local argo_url=""
 
     if [ -z "${rhacs_url}" ]; then
         rhacs_url="$(oc get route central -n "${rhacs_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
     fi
     splunk_url="$(oc get route splunk-web -n "${splunk_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
-    acm_url="$(oc get route multicloud-console -n open-cluster-management -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
-    grafana_url="$(oc get route -n openshift-monitoring grafana -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
-    argo_url="$(oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
 
     echo ""
     print_info "======================================"
@@ -81,11 +75,6 @@ print_access_summary() {
     print_info "  URL      : ${splunk_url:-<not found>}"
     print_info "  Username : admin"
     print_info "  Password : ${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
-    echo ""
-    print_info "Other useful URLs:"
-    print_info "  ACM console      : ${acm_url:-<not found>}"
-    print_info "  OpenShift Grafana: ${grafana_url:-<not found>}"
-    print_info "  OpenShift GitOps : ${argo_url:-<not found>}"
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
