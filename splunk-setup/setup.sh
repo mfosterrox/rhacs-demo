@@ -795,8 +795,6 @@ spec:
         app: ${name}
     spec:
       securityContext:
-        runAsUser: 41812
-        runAsGroup: 41812
         fsGroup: 41812
       serviceAccountName: ${name}-sa
       containers:
@@ -825,20 +823,26 @@ spec:
           volumeMounts:
             - name: var
               mountPath: /opt/splunk/var
+          # Splunk Web can take several minutes on first start (license, PVC). Startup probe
+          # prevents liveness from killing the container while splunkd is still coming up.
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             tcpSocket:
               port: 8000
-            initialDelaySeconds: 45
-            periodSeconds: 10
+            periodSeconds: 15
             timeoutSeconds: 5
-            failureThreshold: 12
+            failureThreshold: 6
           livenessProbe:
             tcpSocket:
               port: 8000
-            initialDelaySeconds: 90
-            periodSeconds: 20
+            periodSeconds: 30
             timeoutSeconds: 5
-            failureThreshold: 6
+            failureThreshold: 5
       volumes:
         - name: var
           persistentVolumeClaim:
