@@ -26,6 +26,8 @@ LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
 LIGHTSPEED_MCP_SERVER_NAME="${LIGHTSPEED_MCP_SERVER_NAME:-stackrox-mcp}"
 LIGHTSPEED_AUTH_SECRET_NAME="${LIGHTSPEED_AUTH_SECRET_NAME:-stackrox-mcp-authorization-header}"
 LIGHTSPEED_VALIDATE="${LIGHTSPEED_VALIDATE:-true}"
+LIGHTSPEED_MCP_PROXY_ENABLE="${LIGHTSPEED_MCP_PROXY_ENABLE:-true}"
+LIGHTSPEED_MCP_PROXY_NAME="${LIGHTSPEED_MCP_PROXY_NAME:-stackrox-mcp-lightspeed-proxy}"
 
 _RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1090
@@ -121,6 +123,28 @@ ensure_lightspeed_auth_secret() {
     print_info "✓ Lightspeed auth secret is present: ${LIGHTSPEED_NAMESPACE}/${LIGHTSPEED_AUTH_SECRET_NAME}"
 }
 
+ensure_lightspeed_mcp_proxy() {
+    [ "${LIGHTSPEED_MCP_PROXY_ENABLE}" = "true" ] || {
+        print_warn "Skipping Lightspeed MCP proxy deployment (LIGHTSPEED_MCP_PROXY_ENABLE=${LIGHTSPEED_MCP_PROXY_ENABLE})"
+        return 0
+    }
+
+    if [ ! -x "${SCRIPT_DIR}/setup-lightspeed-mcp-proxy.sh" ]; then
+        chmod +x "${SCRIPT_DIR}/setup-lightspeed-mcp-proxy.sh" 2>/dev/null || true
+    fi
+    if [ ! -f "${SCRIPT_DIR}/setup-lightspeed-mcp-proxy.sh" ]; then
+        print_warn "Proxy setup script not found: ${SCRIPT_DIR}/setup-lightspeed-mcp-proxy.sh"
+        return 0
+    fi
+
+    print_step "Deploying Lightspeed MCP compatibility proxy..."
+    MCP_NAMESPACE="${MCP_NAMESPACE}" \
+    LIGHTSPEED_MCP_PROXY_NAME="${LIGHTSPEED_MCP_PROXY_NAME}" \
+    LIGHTSPEED_MCP_PROXY_UPSTREAM_SERVICE="stackrox-mcp" \
+    MCP_OC_REQUEST_TIMEOUT="${MCP_OC_REQUEST_TIMEOUT}" \
+        bash "${SCRIPT_DIR}/setup-lightspeed-mcp-proxy.sh"
+}
+
 validate_lightspeed_mcp_integration() {
     [ "${LIGHTSPEED_VALIDATE}" = "true" ] || {
         print_warn "Skipping OpenShift Lightspeed validation (LIGHTSPEED_VALIDATE=${LIGHTSPEED_VALIDATE})"
@@ -130,8 +154,12 @@ validate_lightspeed_mcp_integration() {
     print_step "Validating OpenShift Lightspeed MCP integration..."
     local route_host
     route_host=$(mcp_oc get route stackrox-mcp -n "${MCP_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)
-    local expected_internal_url expected_route_url
-    expected_internal_url="http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp"
+    local target_service expected_internal_url expected_route_url
+    target_service="stackrox-mcp"
+    if [ "${LIGHTSPEED_MCP_PROXY_ENABLE}" = "true" ] && mcp_oc get service "${LIGHTSPEED_MCP_PROXY_NAME}" -n "${MCP_NAMESPACE}" &>/dev/null; then
+        target_service="${LIGHTSPEED_MCP_PROXY_NAME}"
+    fi
+    expected_internal_url="http://${target_service}.${MCP_NAMESPACE}:8080/mcp"
     expected_route_url=""
     if [ -n "${route_host}" ]; then
         expected_route_url="https://${route_host}/mcp"
@@ -171,7 +199,7 @@ validate_lightspeed_mcp_integration() {
         echo "      \"featureGates\": [\"MCPServer\"],"
         echo "      \"mcpServers\": [{"
         echo "        \"name\": \"${LIGHTSPEED_MCP_SERVER_NAME}\","
-        echo "        \"url\": \"http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp\","
+        echo "        \"url\": \"http://${target_service}.${MCP_NAMESPACE}:8080/mcp\","
         echo "        \"timeout\": 60,"
         echo "        \"headers\": [{"
         echo "          \"name\": \"Authorization\","
@@ -386,6 +414,7 @@ main() {
             --overwrite
         ensure_lightspeed_auth_secret
     fi
+    ensure_lightspeed_mcp_proxy
 
     print_info "✓ StackRox MCP server deployed"
     echo ""

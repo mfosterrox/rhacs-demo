@@ -50,6 +50,8 @@ cd mcp-server-setup
 | `LIGHTSPEED_NAMESPACE` | No | OpenShift Lightspeed namespace (default: `openshift-lightspeed`). |
 | `LIGHTSPEED_OLSCONFIG_NAME` | No | OLSConfig name to inspect (default: `cluster`). |
 | `LIGHTSPEED_MCP_SERVER_NAME` | No | MCP server entry name in OLSConfig (default: `stackrox-mcp`). |
+| `LIGHTSPEED_MCP_PROXY_ENABLE` | No | Deploy compatibility proxy for `GET /mcp` session handling (`true` by default). |
+| `LIGHTSPEED_MCP_PROXY_NAME` | No | Compatibility proxy Service/Deployment name (default: `stackrox-mcp-lightspeed-proxy`). |
 
 ## MCP Client Configuration
 
@@ -69,9 +71,11 @@ OpenShift Lightspeed being installed is not enough by itself; the `OLSConfig` mu
 Required `OLSConfig` fields:
 - `spec.featureGates` includes `MCPServer`
 - `spec.mcpServers` contains a `stackrox-mcp` entry
-- MCP URL should target the in-cluster endpoint: `http://stackrox-mcp.stackrox-mcp:8080/mcp`
+- MCP URL should target the in-cluster endpoint:
+  - default (with proxy): `http://stackrox-mcp-lightspeed-proxy.stackrox-mcp:8080/mcp`
+  - direct (no proxy): `http://stackrox-mcp.stackrox-mcp:8080/mcp`
 
-The install script now checks for these fields and prints a patch example if they are missing.
+The install script now checks for these fields, deploys the compatibility proxy, and prints a patch example if fields are missing.
 
 ## Verification
 
@@ -111,6 +115,7 @@ The install script substitutes `ROX_CENTRAL_ADDRESS`, `ROX_API_TOKEN`, and `MCP_
 | Script | Description |
 |--------|-------------|
 | `install.sh` | Main deployment plus OpenShift Lightspeed integration validation |
+| `setup-lightspeed-mcp-proxy.sh` | Deploys compatibility proxy that maps `GET /mcp` to upstream `/sse` for Lightspeed session flow |
 | `test-mcp-server.sh` | Smoke test for deployment and `/health` route response |
 
 ## References
