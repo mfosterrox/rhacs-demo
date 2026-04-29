@@ -172,6 +172,17 @@ print_deploy_diagnostics() {
     print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
 }
 
+is_splunk_deployment_ready() {
+    local namespace="$1"
+    local name="$2"
+    local available
+    available="$(oc -n "${namespace}" get deploy "${name}" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
+    if [ "${available}" = "1" ]; then
+        return 0
+    fi
+    return 1
+}
+
 run_splunk_curl() {
     local namespace="$1"
     local pod="$2"
@@ -264,6 +275,8 @@ install_rhacs_splunk_addon() {
         return 0
     fi
 
+    local reinstall="${SPLUNK_REINSTALL_ADDON:-false}"
+
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local addon_file="${SPLUNK_RHACS_ADDON_FILE:-${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz}"
@@ -295,6 +308,14 @@ install_rhacs_splunk_addon() {
     if [ -z "${pod}" ]; then
         print_error "No Splunk pod found for add-on installation."
         return 1
+    fi
+
+    if [ "${reinstall}" != "true" ]; then
+        if oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+            -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
+            print_info "RHACS Splunk add-on already installed; skipping reinstall."
+            return 0
+        fi
     fi
 
     print_step "Copying RHACS Splunk add-on into pod"
@@ -348,6 +369,16 @@ configure_rhacs_addon_settings() {
     if [ -z "${pod}" ]; then
         print_error "No Splunk pod found for add-on settings configuration."
         return 1
+    fi
+
+    # Skip updating if the configured endpoint already matches.
+    local current_endpoint
+    current_endpoint="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
+        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters?output_mode=json" 2>/dev/null | \
+        jq -r '.entry[0].content.central_endpoint // empty' 2>/dev/null || true)"
+    if [ -n "${current_endpoint}" ] && [ "${current_endpoint}" = "${central_hostport}" ] && [ "${SPLUNK_FORCE_ADDON_SETTINGS_UPDATE:-false}" != "true" ]; then
+        print_info "RHACS add-on settings already configured for ${central_hostport}; skipping update."
+        return 0
     fi
 
     print_step "Configuring RHACS add-on settings in Splunk"
@@ -470,6 +501,8 @@ integrate_rhacs_with_splunk() {
     local splunk_service_url="http://${name}.${namespace}.svc.cluster.local:8088"
     local hec_name="${SPLUNK_HEC_NAME:-rhacs-hec}"
     local notifier_name="${SPLUNK_NOTIFIER_NAME:-Splunk SIEM (local)}"
+    local source_type_alert="${SPLUNK_SOURCE_TYPE_ALERT:-stackrox-alert}"
+    local source_type_audit="${SPLUNK_SOURCE_TYPE_AUDIT:-stackrox-audit}"
 
     if [ -z "${rox_central}" ]; then
         print_warn "ROX_CENTRAL_ADDRESS is not set; skipping RHACS notifier integration."
@@ -508,6 +541,10 @@ integrate_rhacs_with_splunk() {
   "splunk": {
     "httpEndpoint": "__HEC_ENDPOINT__/services/collector/event",
     "httpToken": "__HEC_TOKEN__",
+    "sourceTypes": {
+      "alert": "__SOURCE_TYPE_ALERT__",
+      "audit": "__SOURCE_TYPE_AUDIT__"
+    },
     "skipTlsVerify": true
   }
 }
@@ -516,6 +553,8 @@ EOF
     payload="$(echo "${payload}" | sed "s/__NOTIFIER_NAME__/$(escape_sed_replacement "${notifier_name}")/g")"
     payload="$(echo "${payload}" | sed "s/__HEC_ENDPOINT__/$(escape_sed_replacement "${splunk_service_url}")/g")"
     payload="$(echo "${payload}" | sed "s/__HEC_TOKEN__/$(escape_sed_replacement "${hec_token}")/g")"
+    payload="$(echo "${payload}" | sed "s/__SOURCE_TYPE_ALERT__/$(escape_sed_replacement "${source_type_alert}")/g")"
+    payload="$(echo "${payload}" | sed "s/__SOURCE_TYPE_AUDIT__/$(escape_sed_replacement "${source_type_audit}")/g")"
 
     local code
     if [ -n "${notifier_id}" ]; then
@@ -560,6 +599,7 @@ main() {
     local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
+    local skip_if_ready="${SPLUNK_SKIP_IF_READY:-true}"
 
     # Convenience: pick up RHACS API values from ~/.bashrc if user already saved them there.
     load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
@@ -567,25 +607,28 @@ main() {
     load_env_from_bashrc_if_missing "RHACS_SPLUNK_ADDON_TOKEN"
     load_env_from_bashrc_if_missing "ROX_PASSWORD"
 
-    print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
+    if [ "${skip_if_ready}" = "true" ] && is_splunk_deployment_ready "${namespace}" "${name}"; then
+        print_info "Splunk deployment is already ready; skipping base deploy/apply steps."
+    else
+        print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
-    oc get namespace "${namespace}" >/dev/null 2>&1 || oc create namespace "${namespace}"
+        oc get namespace "${namespace}" >/dev/null 2>&1 || oc create namespace "${namespace}"
 
-    print_step "Creating service account and granting SCC (anyuid)"
-    oc -n "${namespace}" create serviceaccount "${name}-sa" --dry-run=client -o yaml | oc apply -f -
-    if ! oc adm policy add-scc-to-user anyuid -z "${name}-sa" -n "${namespace}" >/dev/null 2>&1; then
-        print_warn "Could not grant anyuid SCC automatically (insufficient permissions?)."
-        print_warn "If rollout fails with SCC errors, grant it as a cluster admin:"
-        print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
-    fi
+        print_step "Creating service account and granting SCC (anyuid)"
+        oc -n "${namespace}" create serviceaccount "${name}-sa" --dry-run=client -o yaml | oc apply -f -
+        if ! oc adm policy add-scc-to-user anyuid -z "${name}-sa" -n "${namespace}" >/dev/null 2>&1; then
+            print_warn "Could not grant anyuid SCC automatically (insufficient permissions?)."
+            print_warn "If rollout fails with SCC errors, grant it as a cluster admin:"
+            print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
+        fi
 
-    print_step "Creating/updating Splunk secret"
-    oc -n "${namespace}" create secret generic "${name}-auth" \
-        --from-literal=password="${password}" \
-        --dry-run=client -o yaml | oc apply -f -
+        print_step "Creating/updating Splunk secret"
+        oc -n "${namespace}" create secret generic "${name}-auth" \
+            --from-literal=password="${password}" \
+            --dry-run=client -o yaml | oc apply -f -
 
-    print_step "Applying PVC, Deployment, Service, and Route"
-    cat <<EOF | oc -n "${namespace}" apply -f -
+        print_step "Applying PVC, Deployment, Service, and Route"
+        cat <<EOF | oc -n "${namespace}" apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -696,11 +739,12 @@ spec:
     termination: ${route_termination}
 EOF
 
-    print_step "Waiting for Splunk deployment rollout"
-    if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m; then
-        print_error "Splunk deployment rollout did not complete."
-        print_deploy_diagnostics "${namespace}" "${name}"
-        exit 1
+        print_step "Waiting for Splunk deployment rollout"
+        if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m; then
+            print_error "Splunk deployment rollout did not complete."
+            print_deploy_diagnostics "${namespace}" "${name}"
+            exit 1
+        fi
     fi
 
     local route_host
