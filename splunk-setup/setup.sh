@@ -834,11 +834,11 @@ spec:
         app: ${name}
     spec:
       securityContext:
-        # Splunk Enterprise image files under /opt/splunk/etc are owned by splunk (41812).
-        # Without explicit UID, OpenShift assigns a random namespace UID and splunkd / splunk CLI
-        # hit Permission denied on etc + var. Requires anyuid on ${name}-sa (already applied above).
-        runAsUser: 41812
-        runAsGroup: 41812
+        # Official splunk/splunk image runs Ansible provisioning as root (see pod logs: PLAY ...
+        # splunk_common ... change_splunk_directory_owner). Setting runAsUser: 41812 breaks that
+        # phase (cannot chown / finish provisioning). Do NOT pin UID here.
+        # OpenShift "restricted" SCC assigns a random UID → Permission denied on /opt/splunk/* —
+        # grant anyuid to ${name}-sa so the image can run its intended root→splunk startup.
         fsGroup: 41812
       serviceAccountName: ${name}-sa
       containers:
