@@ -70,6 +70,9 @@ oc get route -n stackrox-mcp
 # Test health endpoint
 curl -k https://$(oc get route stackrox-mcp -n stackrox-mcp -o jsonpath='{.spec.host}')/health
 # Expected: {"status":"ok"}
+
+# Run smoke test script
+./mcp-server-setup/test-mcp-server.sh
 ```
 
 ## Manifests
@@ -92,6 +95,7 @@ The install script substitutes `ROX_CENTRAL_ADDRESS`, `ROX_API_TOKEN`, and `MCP_
 | Script | Description |
 |--------|-------------|
 | `install.sh` | Main deployment |
+| `test-mcp-server.sh` | Smoke test for deployment and `/health` route response |
 
 ## References
 
