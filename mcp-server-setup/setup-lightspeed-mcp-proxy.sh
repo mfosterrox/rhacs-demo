@@ -69,6 +69,11 @@ data:
       server {
         listen 8080;
 
+        location = /healthz {
+          return 200 "ok";
+          add_header Content-Type text/plain;
+        }
+
         location = /mcp {
           proxy_http_version 1.1;
           proxy_buffering off;
@@ -116,13 +121,13 @@ spec:
               name: http
           readinessProbe:
             httpGet:
-              path: /mcp
+              path: /healthz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /mcp
+              path: /healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
