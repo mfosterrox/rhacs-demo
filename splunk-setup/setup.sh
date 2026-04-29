@@ -172,6 +172,18 @@ print_deploy_diagnostics() {
     print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
 }
 
+run_splunk_curl() {
+    local namespace="$1"
+    local pod="$2"
+    shift 2
+    # Prefer container curl; fallback to Splunk-bundled curl.
+    if oc -n "${namespace}" exec "${pod}" -- sh -c "command -v curl >/dev/null 2>&1"; then
+        oc -n "${namespace}" exec "${pod}" -- curl "$@"
+    else
+        oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl "$@"
+    fi
+}
+
 # Splunk Enterprise: HEC tokens are HTTP inputs under the splunk_httpinput app.
 # Create: POST .../servicesNS/admin/splunk_httpinput/data/inputs/http
 # Token value is returned in the POST response .entry[0].content.token (and can be re-fetched with GET).
@@ -188,17 +200,16 @@ create_or_get_splunk_hec_token() {
         return 1
     fi
 
-    local curl_base=(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS)
     local auth_u="admin:${splunk_password}"
 
     # Enable HEC globally (splunk_httpinput app).
-    "${curl_base[@]}" -u "${auth_u}" -X POST \
+    run_splunk_curl "${namespace}" "${pod}" -k -sS -u "${auth_u}" -X POST \
         "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http/http?output_mode=json" \
         --data-urlencode "disabled=0" >/dev/null 2>&1 || true
 
     # Create new HEC token; response includes the generated token.
     local create_body create_code
-    create_body="$("${curl_base[@]}" -u "${auth_u}" -w "\n%{http_code}" -X POST \
+    create_body="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "${auth_u}" -w "\n%{http_code}" -X POST \
         "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http?output_mode=json" \
         --data-urlencode "name=${hec_name}" \
         --data-urlencode "index=main" \
@@ -214,21 +225,21 @@ create_or_get_splunk_hec_token() {
 
     # If input already exists, POST may fail — fetch token via GET on the named input.
     if [ -z "${token}" ]; then
-        token="$("${curl_base[@]}" -u "${auth_u}" \
+        token="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "${auth_u}" \
             "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
             jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
     fi
 
     # List all HEC inputs (splunk_httpinput) and match by name.
     if [ -z "${token}" ]; then
-        token="$("${curl_base[@]}" -u "${auth_u}" \
+        token="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "${auth_u}" \
             "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http?output_mode=json&count=0" 2>/dev/null | \
             jq -r --arg n "${hec_name}" '.entry[]? | select(.name==$n) | .content.token' 2>/dev/null | head -n1 || true)"
     fi
 
     # Fallback: global data/inputs/http (some Splunk builds).
     if [ -z "${token}" ]; then
-        token="$("${curl_base[@]}" -u "${auth_u}" \
+        token="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "${auth_u}" \
             "https://127.0.0.1:8089/services/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
             jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
     fi
@@ -353,7 +364,7 @@ configure_rhacs_addon_settings() {
     )
 
     for endpoint in "${endpoints[@]}"; do
-        code="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS -o /tmp/stackrox-settings.out -w "%{http_code}" \
+        code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /tmp/stackrox-settings.out -w "%{http_code}" \
             -u "admin:${splunk_password}" \
             -X POST \
             "${endpoint}" \
