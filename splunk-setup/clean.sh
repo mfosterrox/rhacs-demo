@@ -9,6 +9,7 @@
 #   SPLUNK_NAMESPACE            Namespace used by setup (default: splunk)
 #   SPLUNK_NAME                 Base resource name (default: splunk)
 #   SPLUNK_DELETE_NAMESPACE     Delete namespace entirely (default: true)
+#   SPLUNK_FORCE_DELETE_NAMESPACE After requesting delete, remove namespace finalizers (stuck Terminating) (default: false)
 #   SPLUNK_CLEAN_RHACS_NOTIFIER Delete RHACS notifier via API (default: true)
 #   SPLUNK_NOTIFIER_NAME        RHACS notifier name (default: Splunk SIEM (local))
 #   ROX_CENTRAL_ADDRESS         RHACS Central URL for notifier cleanup
@@ -34,6 +35,19 @@ require_cmd() {
         print_error "Required command not found: ${cmd}"
         exit 1
     fi
+}
+
+force_finalize_namespace() {
+    local namespace="$1"
+    if ! oc get namespace "${namespace}" >/dev/null 2>&1; then
+        return 0
+    fi
+    print_warn "Removing finalizers on namespace '${namespace}' (Kubernetes force finalize)"
+    if ! oc get namespace "${namespace}" -o json | jq '.spec.finalizers = []' | oc replace --raw "/api/v1/namespaces/${namespace}/finalize" -f - >/dev/null 2>&1; then
+        print_error "Could not finalize namespace '${namespace}'."
+        return 1
+    fi
+    return 0
 }
 
 delete_rhacs_notifier() {
@@ -102,6 +116,11 @@ main() {
         print_step "Deleting namespace '${namespace}' (removes all Splunk resources)"
         oc delete namespace "${namespace}" --wait=false
         print_info "Namespace delete requested. Monitor with: oc get ns ${namespace}"
+        if [ "${SPLUNK_FORCE_DELETE_NAMESPACE:-false}" = "true" ] || [ "${SPLUNK_FORCE_DELETE_NAMESPACE:-}" = "1" ]; then
+            print_warn "SPLUNK_FORCE_DELETE_NAMESPACE is set: removing namespace finalizers after grace period."
+            sleep 6
+            force_finalize_namespace "${namespace}" || print_warn "Force finalize failed; you may need cluster-admin."
+        fi
         exit 0
     fi
 

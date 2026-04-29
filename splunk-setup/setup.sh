@@ -11,6 +11,7 @@
 #   SPLUNK_STORAGE_SIZE     PVC size for index data (default: 20Gi)
 #   SPLUNK_PASSWORD_DEFAULT Admin password used for every deployment run
 #   SPLUNK_RUN_CLEAN_FIRST  Run ./clean.sh before setup (default: true)
+#   SPLUNK_FORCE_DELETE_NAMESPACE  Remove namespace finalizers if delete is stuck (default: false). Also auto-tried once after wait timeout.
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
@@ -187,14 +188,49 @@ is_splunk_deployment_ready() {
     return 1
 }
 
+force_finalize_namespace() {
+    local namespace="$1"
+    if ! oc get namespace "${namespace}" >/dev/null 2>&1; then
+        return 0
+    fi
+    print_warn "Removing finalizers on namespace '${namespace}' (Kubernetes force finalize)"
+    if ! oc get namespace "${namespace}" -o json | jq '.spec.finalizers = []' | oc replace --raw "/api/v1/namespaces/${namespace}/finalize" -f - >/dev/null 2>&1; then
+        print_error "Could not finalize namespace '${namespace}' (need cluster admin or namespace edit permission?)."
+        return 1
+    fi
+    return 0
+}
+
 wait_for_namespace_deleted() {
     local namespace="$1"
     local timeout_sec="${2:-300}"
     local elapsed=0
     local sleep_sec=5
+    local force_opt="${SPLUNK_FORCE_DELETE_NAMESPACE:-false}"
+
+    if [ "${force_opt}" = "true" ] || [ "${force_opt}" = "1" ]; then
+        print_warn "SPLUNK_FORCE_DELETE_NAMESPACE is set: forcing namespace finalize after short grace period."
+        sleep 5
+        force_finalize_namespace "${namespace}" || true
+    fi
 
     while oc get namespace "${namespace}" >/dev/null 2>&1; do
         if [ "${elapsed}" -ge "${timeout_sec}" ]; then
+            print_warn "Timed out waiting for namespace '${namespace}' deletion; trying force finalize once."
+            if force_finalize_namespace "${namespace}"; then
+                local extra=0
+                local extra_max=120
+                while oc get namespace "${namespace}" >/dev/null 2>&1; do
+                    if [ "${extra}" -ge "${extra_max}" ]; then
+                        print_error "Namespace '${namespace}' still present after force finalize (${extra_max}s)."
+                        return 1
+                    fi
+                    print_info "Waiting for namespace '${namespace}' to disappear after finalize... (${extra}s/${extra_max}s)"
+                    sleep 5
+                    extra=$((extra + 5))
+                done
+                return 0
+            fi
             print_error "Timed out waiting for namespace '${namespace}' deletion."
             return 1
         fi
