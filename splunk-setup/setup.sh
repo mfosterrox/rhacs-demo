@@ -17,7 +17,7 @@
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
-#   SPLUNK_INTEGRATE_WITH_RHACS  Create RHACS Splunk notifier via API (default: false)
+#   SPLUNK_INTEGRATE_WITH_RHACS  Create HEC token + RHACS Splunk notifier via API (default: true)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
 #   ROX_API_TOKEN           RHACS API token (preferred for integration)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
@@ -172,6 +172,9 @@ print_deploy_diagnostics() {
     print_warn "  oc adm policy add-scc-to-user anyuid -z ${name}-sa -n ${namespace}"
 }
 
+# Splunk Enterprise: HEC tokens are HTTP inputs under the splunk_httpinput app.
+# Create: POST .../servicesNS/admin/splunk_httpinput/data/inputs/http
+# Token value is returned in the POST response .entry[0].content.token (and can be re-fetched with GET).
 create_or_get_splunk_hec_token() {
     local namespace="$1"
     local name="$2"
@@ -185,56 +188,55 @@ create_or_get_splunk_hec_token() {
         return 1
     fi
 
-    # Enable HEC globally via management REST API.
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
-        -u "admin:${splunk_password}" \
-        -X POST \
-        "https://127.0.0.1:8089/services/data/inputs/http/http?output_mode=json" \
+    local curl_base=(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS)
+    local auth_u="admin:${splunk_password}"
+
+    # Enable HEC globally (splunk_httpinput app).
+    "${curl_base[@]}" -u "${auth_u}" -X POST \
+        "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http/http?output_mode=json" \
         --data-urlencode "disabled=0" >/dev/null 2>&1 || true
 
-    # Create/update HEC input via management REST API.
-    # If it already exists, Splunk returns an error; that's fine for idempotency.
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
-        -u "admin:${splunk_password}" \
-        -X POST \
-        "https://127.0.0.1:8089/services/data/inputs/http?output_mode=json" \
+    # Create new HEC token; response includes the generated token.
+    local create_body create_code
+    create_body="$("${curl_base[@]}" -u "${auth_u}" -w "\n%{http_code}" -X POST \
+        "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http?output_mode=json" \
         --data-urlencode "name=${hec_name}" \
-        --data-urlencode "description=RHACS notifier token" \
         --data-urlencode "index=main" \
+        --data-urlencode "indexes=main" \
         --data-urlencode "sourcetype=stackrox" \
-        --data-urlencode "disabled=0" >/dev/null 2>&1 || true
+        --data-urlencode "description=RHACS notifier" \
+        --data-urlencode "disabled=0" 2>/dev/null || true)"
+    create_code="$(echo "${create_body}" | tail -n1)"
+    create_body="$(echo "${create_body}" | sed '$d')"
 
-    # Read token value from Splunk REST API (JSON output is the most stable format).
     local token
-    token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -s \
-        -u "admin:${splunk_password}" \
-        "https://127.0.0.1:8089/services/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
-        jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
+    token="$(echo "${create_body}" | jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
 
-    # Fallback: list all HEC inputs and match by name.
+    # If input already exists, POST may fail — fetch token via GET on the named input.
     if [ -z "${token}" ]; then
-        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl -k -sS \
-            -u "admin:${splunk_password}" \
-            "https://127.0.0.1:8089/services/data/inputs/http?output_mode=json&count=0" 2>/dev/null | \
+        token="$("${curl_base[@]}" -u "${auth_u}" \
+            "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
+            jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
+    fi
+
+    # List all HEC inputs (splunk_httpinput) and match by name.
+    if [ -z "${token}" ]; then
+        token="$("${curl_base[@]}" -u "${auth_u}" \
+            "https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http?output_mode=json&count=0" 2>/dev/null | \
             jq -r --arg n "${hec_name}" '.entry[]? | select(.name==$n) | .content.token' 2>/dev/null | head -n1 || true)"
     fi
 
+    # Fallback: global data/inputs/http (some Splunk builds).
     if [ -z "${token}" ]; then
-        # Last fallback: parse token from CLI list output.
-        token="$(oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk http-event-collector list \
-            -uri "https://127.0.0.1:8089" \
-            -auth "admin:${splunk_password}" 2>/dev/null | \
-            awk -v n="${hec_name}" '
-                $0 ~ "name:" && $0 ~ n {seen=1}
-                seen && $0 ~ "token:" {print $2; exit}
-            ' || true)"
+        token="$("${curl_base[@]}" -u "${auth_u}" \
+            "https://127.0.0.1:8089/services/data/inputs/http/${hec_name}?output_mode=json" 2>/dev/null | \
+            jq -r '.entry[0].content.token // empty' 2>/dev/null || true)"
     fi
 
     if [ -z "${token}" ]; then
-        print_error "Failed to discover Splunk HEC token '${hec_name}'"
-        print_warn "Troubleshoot with:"
-        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk http-event-collector list -uri https://127.0.0.1:8089 -auth admin:<password>"
-        print_warn "  oc -n ${namespace} exec ${pod} -- /opt/splunk/bin/splunk cmd curl -k -u admin:<password> https://127.0.0.1:8089/services/data/inputs/http?output_mode=json"
+        print_error "Failed to create or read Splunk HEC token '${hec_name}' (create HTTP ${create_code:-n/a})"
+        print_warn "Troubleshoot (inside pod):"
+        print_warn "  splunk cmd curl -k -u admin:<password> https://127.0.0.1:8089/servicesNS/admin/splunk_httpinput/data/inputs/http?output_mode=json"
         return 1
     fi
     printf '%s' "${token}"
@@ -437,7 +439,7 @@ print_final_details() {
     print_info "  2) Set Central Endpoint and RHACS API token, then Save"
     print_info "  3) Inputs -> Create New Input: ACS Compliance / ACS Violations / ACS Vulnerability Management"
     print_info "  4) In Splunk Search, verify data: index=* sourcetype=\"stackrox-*\""
-    print_info "Notifier/HEC integration is optional and disabled by default."
+    print_info "HEC + RHACS notifier: set SPLUNK_INTEGRATE_WITH_RHACS=false to skip API integration."
 }
 
 integrate_rhacs_with_splunk() {
@@ -445,7 +447,7 @@ integrate_rhacs_with_splunk() {
     local name="$2"
     local splunk_password="$3"
 
-    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-false}"
+    local do_integration="${SPLUNK_INTEGRATE_WITH_RHACS:-true}"
     if [ "${do_integration}" != "true" ]; then
         print_info "Skipping RHACS integration (SPLUNK_INTEGRATE_WITH_RHACS=${do_integration})"
         return 0
@@ -553,6 +555,7 @@ main() {
     load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
     load_env_from_bashrc_if_missing "ROX_API_TOKEN"
     load_env_from_bashrc_if_missing "RHACS_SPLUNK_ADDON_TOKEN"
+    load_env_from_bashrc_if_missing "ROX_PASSWORD"
 
     print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
