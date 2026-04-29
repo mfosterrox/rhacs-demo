@@ -326,14 +326,20 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" cp "${addon_file}" "${pod}:/tmp/${addon_name}"
 
     print_step "Installing RHACS Splunk add-on package"
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+    if ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1
+        -auth "admin:${splunk_password}"; then
+        print_error "Failed to install RHACS Splunk add-on package."
+        return 1
+    fi
 
     print_step "Restarting Splunk to activate add-on"
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
+    if ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1
+        -auth "admin:${splunk_password}"; then
+        print_error "Failed to restart Splunk after add-on install."
+        return 1
+    fi
 
     print_step "Waiting for Splunk rollout after add-on install"
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout=10m
