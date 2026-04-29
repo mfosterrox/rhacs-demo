@@ -104,11 +104,20 @@ validate_lightspeed_mcp_integration() {
         expected_route_url="https://${route_host}/mcp"
     fi
 
+    # OLSConfig can be cluster-scoped (common) or namespaced (future/operator-specific).
+    local ols_scope ols_cmd
+    ols_scope="cluster"
+    ols_cmd=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}")
+    if ! "${ols_cmd[@]}" >/dev/null 2>&1; then
+        ols_scope="namespaced"
+        ols_cmd=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}")
+    fi
+
     # 1) OLSConfig should include MCP server feature gate.
     local feature_gates
-    feature_gates=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
+    feature_gates=$("${ols_cmd[@]}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
     if [ -z "${feature_gates}" ]; then
-        print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} not found in ${LIGHTSPEED_NAMESPACE} (or featureGates empty)."
+        print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} not found (cluster-scope or namespace ${LIGHTSPEED_NAMESPACE}), or featureGates is empty."
         print_warn "If you use OpenShift Lightspeed, configure OLSConfig with featureGates: [MCPServer]."
         return 0
     fi
@@ -122,7 +131,7 @@ validate_lightspeed_mcp_integration() {
 
     # 2) MCP server entry should exist and use streamableHTTP / URL.
     local has_server_entry server_url streamable_url
-    has_server_entry=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+    has_server_entry=$("${ols_cmd[@]}" \
         -o jsonpath="{range .spec.mcpServers[*]}{.name}{'\n'}{end}" 2>/dev/null | grep -x "${LIGHTSPEED_MCP_SERVER_NAME}" || true)
     if [ -z "${has_server_entry}" ]; then
         print_error "spec.mcpServers does not contain '${LIGHTSPEED_MCP_SERVER_NAME}' in olsconfig/${LIGHTSPEED_OLSCONFIG_NAME}."
@@ -130,9 +139,9 @@ validate_lightspeed_mcp_integration() {
         return 1
     fi
 
-    server_url=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+    server_url=$("${ols_cmd[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.url}{end}" 2>/dev/null || true)
-    streamable_url=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+    streamable_url=$("${ols_cmd[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.url}{end}" 2>/dev/null || true)
     local configured_url
     configured_url="${streamable_url:-$server_url}"
@@ -150,10 +159,10 @@ validate_lightspeed_mcp_integration() {
     # 3) Auth consistency: static MCP auth should have header-based auth in OLSConfig.
     local has_auth_header
     has_auth_header=""
-    has_auth_header=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+    has_auth_header=$("${ols_cmd[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.headers.authorization}{end}" 2>/dev/null || true)
     if [ -z "${has_auth_header}" ]; then
-        has_auth_header=$(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        has_auth_header=$("${ols_cmd[@]}" \
             -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')].headers[*]}{.name}:{.valueFrom.type}:{.valueFrom.secretRef.name}{'\n'}{end}" 2>/dev/null || true)
     fi
     if [ "${USE_STATIC_AUTH}" = true ] && [ -z "${has_auth_header}" ]; then
@@ -189,7 +198,7 @@ validate_lightspeed_mcp_integration() {
         else
             print_warn "lightspeed-app-server not ready (${ls_ready}/${ls_desired})."
         fi
-        print_info "If OLSConfig was updated, restart to pick up changes:"
+        print_info "If OLSConfig (${ols_scope}-scoped) was updated, restart to pick up changes:"
         print_info "  oc rollout restart deployment/lightspeed-app-server -n ${LIGHTSPEED_NAMESPACE}"
     fi
 }
