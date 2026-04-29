@@ -1,6 +1,6 @@
 # StackRox MCP Server Setup
 
-Deploy the [StackRox MCP](https://github.com/stackrox/stackrox-mcp) server to provide AI assistants (e.g., Cursor, Claude Code) with access to RHACS/StackRox via the Model Context Protocol.
+Deploy the [StackRox MCP](https://github.com/stackrox/stackrox-mcp) server to provide AI assistants with access to RHACS/StackRox via the Model Context Protocol.
 
 ## Overview
 
@@ -51,16 +51,16 @@ cd mcp-server-setup
 | `LIGHTSPEED_OLSCONFIG_NAME` | No | OLSConfig name to inspect (default: `cluster`). |
 | `LIGHTSPEED_MCP_SERVER_NAME` | No | MCP server entry name in OLSConfig (default: `stackrox-mcp`). |
 
-## Connecting Cursor to the MCP Server
+## MCP Client Configuration
 
-After deployment, the script prints the Route URL. Add it to Cursor:
+After deployment, the script prints the MCP endpoint URL:
 
 ```bash
-# HTTP transport (when MCP server is accessible via URL)
-claude mcp add stackrox --transport http --url https://stackrox-mcp-stackrox-mcp.apps.example.com
+# Example endpoint format
+https://stackrox-mcp-stackrox-mcp.apps.example.com/mcp
 ```
 
-Or configure in Cursor settings (MCP servers). The MCP server supports HTTP transport for remote clients.
+Configure your MCP client to use HTTP transport with that endpoint.
 
 ## OpenShift Lightspeed Integration
 

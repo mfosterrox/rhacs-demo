@@ -24,6 +24,7 @@ RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 LIGHTSPEED_NAMESPACE="${LIGHTSPEED_NAMESPACE:-openshift-lightspeed}"
 LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
 LIGHTSPEED_MCP_SERVER_NAME="${LIGHTSPEED_MCP_SERVER_NAME:-stackrox-mcp}"
+LIGHTSPEED_AUTH_SECRET_NAME="${LIGHTSPEED_AUTH_SECRET_NAME:-stackrox-mcp-authorization-header}"
 LIGHTSPEED_VALIDATE="${LIGHTSPEED_VALIDATE:-true}"
 
 _RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -88,6 +89,34 @@ get_central_url_for_mcp() {
     fi
 }
 
+ensure_lightspeed_auth_secret() {
+    # Only required for static auth mode. In passthrough mode, users may rely on user token forwarding.
+    [ "${USE_STATIC_AUTH}" = true ] || return 0
+
+    if ! mcp_oc get namespace "${LIGHTSPEED_NAMESPACE}" &>/dev/null; then
+        print_warn "Lightspeed namespace ${LIGHTSPEED_NAMESPACE} not found; skipping auth secret creation."
+        return 0
+    fi
+
+    if [ -z "${ROX_API_TOKEN:-}" ]; then
+        print_warn "ROX_API_TOKEN is empty; cannot create Lightspeed auth secret."
+        return 0
+    fi
+
+    print_info "Ensuring Lightspeed auth header secret exists (${LIGHTSPEED_AUTH_SECRET_NAME})..."
+    mcp_oc create secret generic "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+        --from-literal=header="Bearer ${ROX_API_TOKEN}" \
+        --dry-run=client -o yaml | mcp_oc apply -f -
+
+    local header_b64
+    header_b64=$(mcp_oc get secret "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.data.header}' 2>/dev/null || true)
+    if [ -z "${header_b64}" ]; then
+        print_warn "Secret ${LIGHTSPEED_AUTH_SECRET_NAME} was applied but key 'header' is empty/missing."
+        return 0
+    fi
+    print_info "✓ Lightspeed auth secret is present: ${LIGHTSPEED_NAMESPACE}/${LIGHTSPEED_AUTH_SECRET_NAME}"
+}
+
 validate_lightspeed_mcp_integration() {
     [ "${LIGHTSPEED_VALIDATE}" = "true" ] || {
         print_warn "Skipping OpenShift Lightspeed validation (LIGHTSPEED_VALIDATE=${LIGHTSPEED_VALIDATE})"
@@ -144,7 +173,7 @@ validate_lightspeed_mcp_integration() {
         echo "          \"name\": \"Authorization\","
         echo "          \"valueFrom\": {"
         echo "            \"type\": \"secret\","
-        echo "            \"secretRef\": {\"name\": \"stackrox-mcp-authorization-header\"}"
+        echo "            \"secretRef\": {\"name\": \"${LIGHTSPEED_AUTH_SECRET_NAME}\"}"
         echo "          }"
         echo "        }]"
         echo "      }]"
@@ -351,6 +380,7 @@ main() {
             STACKROX_MCP__CENTRAL__AUTH_TYPE=static \
             STACKROX_MCP__CENTRAL__API_TOKEN="${ROX_API_TOKEN}" \
             --overwrite
+        ensure_lightspeed_auth_secret
     fi
 
     print_info "✓ StackRox MCP server deployed"
@@ -374,8 +404,8 @@ main() {
     if [ -n "${actual_route_host}" ]; then
         print_info "Route: https://${actual_route_host}"
         echo ""
-        print_info "Add to Cursor MCP (HTTP transport):"
-        echo "  claude mcp add stackrox --transport http --url https://${actual_route_host}"
+        print_info "MCP endpoint for client configuration (HTTP transport):"
+        echo "  https://${actual_route_host}/mcp"
     else
         echo ""
         print_info "For external access, create a Route or check: oc get route -n ${MCP_NAMESPACE}"
