@@ -618,6 +618,7 @@ integrate_rhacs_with_splunk() {
       "alert": "__SOURCE_TYPE_ALERT__",
       "audit": "__SOURCE_TYPE_AUDIT__"
     },
+    "insecure": true,
     "skipTlsVerify": true
   }
 }
