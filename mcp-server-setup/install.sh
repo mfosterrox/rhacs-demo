@@ -104,9 +104,13 @@ ensure_lightspeed_auth_secret() {
     fi
 
     print_info "Ensuring Lightspeed auth header secret exists (${LIGHTSPEED_AUTH_SECRET_NAME})..."
-    mcp_oc create secret generic "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
-        --from-literal=header="Bearer ${ROX_API_TOKEN}" \
-        --dry-run=client -o yaml | mcp_oc apply -f -
+    if mcp_oc get secret "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" &>/dev/null; then
+        mcp_oc patch secret "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" --type=merge \
+            -p "{\"stringData\":{\"header\":\"Bearer ${ROX_API_TOKEN}\"}}" >/dev/null
+    else
+        mcp_oc create secret generic "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" \
+            --from-literal=header="Bearer ${ROX_API_TOKEN}" >/dev/null
+    fi
 
     local header_b64
     header_b64=$(mcp_oc get secret "${LIGHTSPEED_AUTH_SECRET_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o jsonpath='{.data.header}' 2>/dev/null || true)
