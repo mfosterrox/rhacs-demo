@@ -118,7 +118,7 @@ main() {
         print_info "Namespace delete requested. Monitor with: oc get ns ${namespace}"
         if [ "${SPLUNK_FORCE_DELETE_NAMESPACE:-false}" = "true" ] || [ "${SPLUNK_FORCE_DELETE_NAMESPACE:-}" = "1" ]; then
             print_warn "SPLUNK_FORCE_DELETE_NAMESPACE is set: removing namespace finalizers after grace period."
-            sleep 6
+            sleep 10
             force_finalize_namespace "${namespace}" || print_warn "Force finalize failed; you may need cluster-admin."
         fi
         exit 0
