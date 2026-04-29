@@ -52,8 +52,15 @@ metadata:
   name: ${PROXY_NAME}-nginx
 data:
   nginx.conf: |
+    pid /tmp/nginx.pid;
     events {}
     http {
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
       map \$request_method \$mcp_target_path {
         default /mcp;
         GET /sse;
@@ -102,6 +109,8 @@ spec:
         - name: nginx
           image: ${PROXY_IMAGE}
           imagePullPolicy: IfNotPresent
+          command: ["/usr/sbin/nginx"]
+          args: ["-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
           ports:
             - containerPort: 8080
               name: http
@@ -128,10 +137,14 @@ spec:
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: nginx-conf
           configMap:
             name: ${PROXY_NAME}-nginx
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
