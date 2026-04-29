@@ -831,6 +831,11 @@ spec:
         app: ${name}
     spec:
       securityContext:
+        # Splunk Enterprise image files under /opt/splunk/etc are owned by splunk (41812).
+        # Without explicit UID, OpenShift assigns a random namespace UID and splunkd / splunk CLI
+        # hit Permission denied on etc + var. Requires anyuid on ${name}-sa (already applied above).
+        runAsUser: 41812
+        runAsGroup: 41812
         fsGroup: 41812
       serviceAccountName: ${name}-sa
       containers:
