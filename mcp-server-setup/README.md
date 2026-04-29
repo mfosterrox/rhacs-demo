@@ -100,7 +100,7 @@ The `manifests/` directory contains Kubernetes resources:
 | `namespace.yaml` | Creates `stackrox-mcp` namespace |
 | `serviceaccount.yaml` | Service account for the deployment |
 | `configmap.yaml.template` | Config template (Central URL, auth type) |
-| `deployment.yaml` | Deployment (2 replicas, quay.io/stackrox-io/mcp:latest) |
+| `deployment.yaml` | Deployment (1 replica, quay.io/stackrox-io/mcp:latest) |
 | `service.yaml` | ClusterIP service on port 8080 |
 | `route.yaml` | OpenShift Route for external access |
 

@@ -224,11 +224,14 @@ validate_lightspeed_mcp_integration() {
         print_error "No MCP URL configured for '${LIGHTSPEED_MCP_SERVER_NAME}' (expected .streamableHTTP.url or .url)."
         return 1
     fi
-    if [ "${configured_url}" = "${expected_internal_url}" ] || [ -n "${expected_route_url}" ] && [ "${configured_url}" = "${expected_route_url}" ]; then
+    if [[ "${configured_url}" = "${expected_internal_url}" || ( -n "${expected_route_url}" && "${configured_url}" = "${expected_route_url}" ) ]]; then
         print_info "✓ Lightspeed MCP URL matches expected endpoint: ${configured_url}"
     else
-        print_warn "Lightspeed MCP URL is '${configured_url}' (expected '${expected_internal_url}'"
-        [ -n "${expected_route_url}" ] && print_warn "or '${expected_route_url}')."
+        if [ -n "${expected_route_url}" ]; then
+            print_warn "Lightspeed MCP URL is '${configured_url}' (expected '${expected_internal_url}' or '${expected_route_url}')."
+        else
+            print_warn "Lightspeed MCP URL is '${configured_url}' (expected '${expected_internal_url}')."
+        fi
     fi
 
     # 3) Auth consistency: static MCP auth should have header-based auth in OLSConfig.
@@ -251,8 +254,17 @@ validate_lightspeed_mcp_integration() {
         print_info "✓ Lightspeed auth/header configuration is present for current MCP auth mode"
     fi
 
-    # 4) Connectivity from OLS namespace to MCP route.
-    if [ -n "${route_host}" ]; then
+    # 4) Connectivity check from OLS namespace to the endpoint style in use.
+    if [ "${configured_url}" = "${expected_internal_url}" ]; then
+        if mcp_oc run lightspeed-mcp-service-check -n "${LIGHTSPEED_NAMESPACE}" --rm -i --restart=Never \
+            --image=curlimages/curl:8.8.0 --quiet -- \
+            curl -sS --max-time 15 "http://stackrox-mcp.${MCP_NAMESPACE}:8080/health" >/dev/null 2>&1; then
+            print_info "✓ Lightspeed namespace can reach MCP service health endpoint"
+        else
+            print_warn "Could not verify in-cluster MCP service reachability from ${LIGHTSPEED_NAMESPACE}."
+            print_warn "Check NetworkPolicy / EgressFirewall / connectivity configuration."
+        fi
+    elif [ -n "${route_host}" ] && [ "${configured_url}" = "${expected_route_url}" ]; then
         if mcp_oc run lightspeed-mcp-route-check -n "${LIGHTSPEED_NAMESPACE}" --rm -i --restart=Never \
             --image=curlimages/curl:8.8.0 --quiet -- \
             curl -k -sS --max-time 15 "https://${route_host}/health" >/dev/null 2>&1; then
@@ -261,6 +273,8 @@ validate_lightspeed_mcp_integration() {
             print_warn "Could not verify route reachability from ${LIGHTSPEED_NAMESPACE}."
             print_warn "Check NetworkPolicy / EgressFirewall / connectivity configuration."
         fi
+    else
+        print_info "Skipping endpoint reachability probe for non-standard MCP URL: ${configured_url}"
     fi
 
     # 5) Ensure Lightspeed deployment is present and ready (restart if needed after config changes).
@@ -409,6 +423,12 @@ main() {
         echo ""
         print_info "MCP endpoint for client configuration (HTTP transport):"
         echo "  https://${actual_route_host}/mcp"
+        echo ""
+        print_info "Optional: use Claude CLI to query ACS via MCP"
+        echo "  claude mcp add --transport http stackrox https://${actual_route_host}/mcp"
+        echo "  claude mcp list"
+        echo "  # In Claude, ask:"
+        echo "  # Use MCP server stackrox-mcp and run list_clusters"
     else
         echo ""
         print_info "For external access, create a Route or check: oc get route -n ${MCP_NAMESPACE}"
