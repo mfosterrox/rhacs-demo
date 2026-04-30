@@ -266,6 +266,8 @@ run_splunk_curl() {
 
 # Kubernetes may mark the pod Ready when TCP :8000 answers; the Splunk image can still be running
 # Ansible provisioning or splunkd may not yet accept "splunk install app". Wait for CLI + mgmt REST.
+# Note: Route exposes :8000 (Web). Mgmt API is :8089 inside the pod — UI up does not mean our checks ran.
+# Note: "splunk status" can fail (permissions) while splunkd is healthy; do not gate only on that.
 wait_for_splunk_cli_ready() {
     local namespace="$1"
     local name="$2"
@@ -282,32 +284,61 @@ wait_for_splunk_cli_ready() {
     local pod=""
     local http_code=""
     local unauth_code=""
+    local web_code=""
+    local status_ok="0"
 
     print_step "Waiting until Splunk accepts CLI and REST (after Ready, first boot may still run Ansible)"
     while [ "${elapsed}" -lt "${timeout_sec}" ]; do
         pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        status_ok="0"
+        web_code=""
+        unauth_code=""
+        http_code=""
         if [ -n "${pod}" ]; then
             if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk status >/dev/null 2>&1; then
-                http_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
-                    -u "admin:${splunk_password}" "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
-                if [ "${http_code}" = "200" ]; then
-                    print_info "Splunk is operational (splunk status OK, authenticated REST OK)."
-                    return 0
-                fi
+                status_ok="1"
+            fi
 
-                # Some starts are healthy but auth endpoint is not ready yet or credentials were changed.
-                # 401/403 still prove mgmt REST is listening; proceed and let later steps show exact auth errors.
-                unauth_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
-                    "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
-                if echo "${unauth_code}" | grep -qE '^(200|401|403)$'; then
-                    print_warn "Splunk mgmt REST is reachable (HTTP ${unauth_code}) but authenticated check returned ${http_code:-n/a}."
-                    print_warn "Proceeding; add-on install will report clear auth/API errors if credentials are wrong."
-                    return 0
+            # Mgmt REST on 8089 (inside pod). Splunk often returns 302/303 to login, not only 401.
+            unauth_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
+            http_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                -u "admin:${splunk_password}" "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
+
+            if echo "${unauth_code}" | grep -qE '^(200|302|303|307|401|403)$'; then
+                if [ "${http_code}" = "200" ]; then
+                    print_info "Splunk mgmt REST OK (unauth ${unauth_code}, auth 200)."
+                else
+                    print_warn "Splunk mgmt REST listening (unauth HTTP ${unauth_code}); auth check HTTP ${http_code:-n/a}."
+                    print_warn "If add-on install fails, verify SPLUNK_PASSWORD_DEFAULT matches the Splunk admin password."
                 fi
+                return 0
+            fi
+
+            # Splunk Web inside container (:8000) — aligns with what you see from the Route.
+            web_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                "https://127.0.0.1:8000/" 2>/dev/null || true)"
+            if echo "${web_code}" | grep -qE '^(200|302|303|401)$'; then
+                print_warn "Splunk Web responds inside pod (HTTP ${web_code}) but mgmt check got HTTP ${unauth_code:-n/a}."
+                print_warn "Proceeding; add-on uses mgmt :8089 — if install fails, check logs and password."
+                return 0
+            fi
+
+            if [ "${status_ok}" = "1" ]; then
+                print_warn "splunk status OK but mgmt probe inconclusive (HTTP ${unauth_code:-n/a}); proceeding."
+                return 0
             fi
         fi
         if [ "${elapsed}" -ge 60 ] && [ "$((elapsed % 60))" -eq 0 ]; then
             print_info "Still waiting for Splunk CLI/REST... (${elapsed}s / ${timeout_sec}s)"
+            if [ -n "${pod}" ]; then
+                print_warn "diag: splunk status exit=$([ "${status_ok}" = "1" ] && echo 0 || echo 1)"
+                print_warn "diag: mgmt /services/server/info unauth HTTP=${unauth_code:-n/a} auth HTTP=${http_code:-n/a}"
+                print_warn "diag: web https://127.0.0.1:8000/ HTTP=${web_code:-n/a}"
+            fi
         fi
         sleep "${interval}"
         elapsed=$((elapsed + interval))
