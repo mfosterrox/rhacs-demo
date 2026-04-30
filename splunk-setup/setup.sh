@@ -28,8 +28,14 @@
 #   SPLUNK_RHACS_ADDON_FILE     Path to add-on package (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl)
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
-#   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
+#   RHACS_SPLUNK_ADDON_INTERVAL Poll interval (seconds) for Compliance + Vulnerability inputs (default: 14400)
+#   RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS  Poll interval for Violations input (default: 60; ship uses 60; use 300 for demos)
+#   SPLUNK_SKIP_ADDON_SETTINGS_IF_ENDPOINT_MATCHES  If true, skip REST when Central Endpoint already matches (default: false).
+#       Keep false: endpoint match does not mean api_token was persisted (common cause of missing token / no events).
+#   SPLUNK_FORCE_ADDON_SETTINGS_UPDATE  Set true to re-POST settings even when skip logic would apply (default: false).
 #   SPLUNK_CONFIGURE_ADDON_INPUTS Configure TA-stackrox inputs via API (default: true)
+#   SPLUNK_SYNC_ADDON_INPUT_INTERVALS  If true, POST interval/index when inputs exist but drift (default: true)
+#   SPLUNK_FORCE_ADDON_INPUTS_UPDATE   Always POST-update existing inputs (default: false)
 #   SPLUNK_ADDON_INDEX         Splunk index for add-on pulled data (default: main)
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create HEC token + RHACS Splunk notifier via API (default: true)
 #   SPLUNK_HEC_SCHEME          HEC URL scheme for RHACS notifier (default: https)
@@ -697,17 +703,19 @@ configure_rhacs_addon_settings() {
         return 1
     fi
 
-    # Skip updating if the configured endpoint already matches.
-    local current_endpoint
+    # Optional skip: endpoint match alone does NOT prove api_token was saved (token is encrypted in REST/UI).
+    local current_endpoint=""
     current_endpoint="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
         "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-ta_stackrox_settings/additional_parameters?output_mode=json" 2>/dev/null | \
         jq -r '.entry[0].content.central_endpoint // empty' 2>/dev/null || true)"
-    if [ -n "${current_endpoint}" ] && [ "${current_endpoint}" = "${central_hostport}" ] && [ "${SPLUNK_FORCE_ADDON_SETTINGS_UPDATE:-false}" != "true" ]; then
-        print_info "RHACS add-on settings already configured for ${central_hostport}; skipping update."
+    if [ "${SPLUNK_SKIP_ADDON_SETTINGS_IF_ENDPOINT_MATCHES:-false}" = "true" ] && \
+       [ -n "${current_endpoint}" ] && [ "${current_endpoint}" = "${central_hostport}" ] && \
+       [ "${SPLUNK_FORCE_ADDON_SETTINGS_UPDATE:-false}" != "true" ]; then
+        print_info "RHACS add-on endpoint already set to ${central_hostport}; skipping settings REST (SPLUNK_SKIP_ADDON_SETTINGS_IF_ENDPOINT_MATCHES=true)."
         return 0
     fi
 
-    print_step "Configuring RHACS add-on settings in Splunk"
+    print_step "Configuring RHACS add-on settings in Splunk (central_endpoint + api_token)"
     # Prefer the TA add-on REST handler endpoint, fallback to conf endpoint.
     local code=""
     local endpoint=""
@@ -734,6 +742,9 @@ configure_rhacs_addon_settings() {
 
     if ! echo "${code}" | grep -qE "^(200|201)$"; then
         print_error "Could not configure add-on settings automatically (last endpoint: ${endpoint}, HTTP ${code:-n/a})."
+        if [ -f /tmp/stackrox-settings.out ]; then
+            print_warn "REST response tail: $(tail -c 600 /tmp/stackrox-settings.out 2>/dev/null || echo '<none>')"
+        fi
         return 1
     fi
 
@@ -747,7 +758,8 @@ configure_rhacs_addon_settings() {
             -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
         oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     fi
-    print_info "Add-on settings saved (Central Endpoint + API token)."
+    print_info "Add-on settings saved (central_endpoint + api_token in ta_stackrox_settings)."
+    print_info "The UI label is \"API Token\" (conf field api_token). Splunk encrypts it — the field often appears blank after save; that is expected."
 }
 
 ensure_stackrox_input() {
@@ -758,14 +770,57 @@ ensure_stackrox_input() {
     local interval="$5"
     local index_name="$6"
 
-    local get_code
-    get_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w "%{http_code}" \
-        -u "admin:${splunk_password}" \
-        "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs/${stanza}?output_mode=json" 2>/dev/null || true)"
+    local sync_intervals="${SPLUNK_SYNC_ADDON_INPUT_INTERVALS:-true}"
+    local force_update="${SPLUNK_FORCE_ADDON_INPUTS_UPDATE:-false}"
+
+    local inputs_url="https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs/${stanza}?output_mode=json"
+
+    # curl runs in the pod; capture body+code on stdout (do not rely on pod /tmp on the bastion).
+    local combined=""
+    combined="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
+        -w "\n%{http_code}" \
+        "${inputs_url}" 2>/dev/null || true)"
+    local get_code=""
+    get_code="$(echo "${combined}" | tail -n1)"
+    local body=""
+    body="$(echo "${combined}" | sed '$d')"
 
     if echo "${get_code}" | grep -qE "^(200|201)$"; then
-        print_info "Add-on input exists: ${stanza}"
-        return 0
+        local cur_int cur_idx
+        cur_int="$(echo "${body}" | jq -r '.entry[0].content.interval // empty' 2>/dev/null || true)"
+        cur_idx="$(echo "${body}" | jq -r '.entry[0].content.index // empty' 2>/dev/null || true)"
+        cur_int="${cur_int%%.*}"
+
+        local needs_update="false"
+        if [ "${force_update}" = "true" ]; then
+            needs_update="true"
+        elif [ "${sync_intervals}" = "true" ]; then
+            if [ "${cur_idx}" != "${index_name}" ] || [ "${cur_int}" != "${interval}" ]; then
+                needs_update="true"
+            fi
+        fi
+
+        if [ "${needs_update}" != "true" ]; then
+            print_info "Add-on input OK: ${stanza} (interval=${interval}s index=${index_name})"
+            return 0
+        fi
+
+        print_step "Updating add-on input ${stanza} → interval=${interval}s index=${index_name}"
+        local upd_code=""
+        upd_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
+            -o /dev/null -w "%{http_code}" \
+            -X POST \
+            "${inputs_url}" \
+            --data-urlencode "interval=${interval}" \
+            --data-urlencode "index=${index_name}" \
+            --data-urlencode "disabled=0" 2>/dev/null || true)"
+
+        if echo "${upd_code}" | grep -qE "^(200|201)$"; then
+            print_info "Updated add-on input: ${stanza}"
+            return 0
+        fi
+        print_warn "Failed to update input ${stanza} (HTTP ${upd_code:-n/a})."
+        return 1
     fi
 
     local create_code
@@ -805,13 +860,15 @@ configure_rhacs_addon_inputs() {
         return 1
     fi
 
-    local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
+    local interval_slow="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
+    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-60}"
     local index_name="${SPLUNK_ADDON_INDEX:-main}"
 
     print_step "Configuring RHACS Splunk add-on inputs via API"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval}" "${index_name}"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval}" "${index_name}"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval}" "${index_name}"
+    print_info "Input intervals: violations=${interval_violations}s, compliance+vuln_mgmt=${interval_slow}s (override with RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS / RHACS_SPLUNK_ADDON_INTERVAL)"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval_slow}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval_violations}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval_slow}" "${index_name}"
 }
 
 print_rhacs_addon_configuration_steps() {
@@ -819,6 +876,7 @@ print_rhacs_addon_configuration_steps() {
     local rox_token="${ROX_API_TOKEN:-}"
     local addon_token="${RHACS_SPLUNK_ADDON_TOKEN:-}"
     local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
+    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-60}"
     local central_hostport=""
 
     if [ -n "${rox_central}" ]; then
@@ -847,7 +905,7 @@ print_rhacs_addon_configuration_steps() {
     fi
     print_info "Add-on inputs are configured via API by default (can be disabled)."
     print_info "Inputs created: ACS Compliance, ACS Violations, ACS Vulnerability Management."
-    print_info "Suggested polling interval: ${interval} seconds"
+    print_info "Suggested polling: violations every ${interval_violations}s; compliance + vuln_mgmt every ${interval}s"
     print_info "Verification search: index=* sourcetype=\"stackrox-*\""
 }
 
