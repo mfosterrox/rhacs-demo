@@ -15,10 +15,13 @@
 #   SPLUNK_ROLLOUT_TIMEOUT  Max wait for oc rollout status (default: 25m; must be >= first-boot window).
 #   SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD  startupProbe checks at 15s interval (default: 100 => 25m max before probe fails).
 #   SPLUNK_EXEC_USER       UID for oc exec running Splunk CLI/curl (default: 41812 = splunk user; avoids Permission denied under arbitrary UID).
+#   SPLUNK_CLI_READY_TIMEOUT_SEC Max wait for splunkd + REST before add-on install (default: 900).
+#   SPLUNK_CLI_READY_POLL_SEC    Poll interval seconds (default: 10).
+#   SPLUNK_SKIP_CLI_READY_WAIT   Set to 1 to skip the operational wait (default: 0).
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
-#   SPLUNK_RHACS_ADDON_FILE     Path to add-on tgz (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz)
+#   SPLUNK_RHACS_ADDON_FILE     Path to add-on package (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl)
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
 #   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval seconds for add-on inputs (default: 14400)
@@ -261,6 +264,89 @@ run_splunk_curl() {
     fi
 }
 
+# Kubernetes may mark the pod Ready when TCP :8000 answers; the Splunk image can still be running
+# Ansible provisioning or splunkd may not yet accept "splunk install app". Wait for CLI + mgmt REST.
+wait_for_splunk_cli_ready() {
+    local namespace="$1"
+    local name="$2"
+    local splunk_password="$3"
+
+    if [ "${SPLUNK_SKIP_CLI_READY_WAIT:-0}" = "1" ]; then
+        print_info "Skipping Splunk operational wait (SPLUNK_SKIP_CLI_READY_WAIT=1)."
+        return 0
+    fi
+
+    local timeout_sec="${SPLUNK_CLI_READY_TIMEOUT_SEC:-900}"
+    local interval="${SPLUNK_CLI_READY_POLL_SEC:-10}"
+    local elapsed=0
+    local pod=""
+    local http_code=""
+
+    print_step "Waiting until Splunk accepts CLI and REST (after Ready, first boot may still run Ansible)"
+    while [ "${elapsed}" -lt "${timeout_sec}" ]; do
+        pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        if [ -n "${pod}" ]; then
+            if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk status >/dev/null 2>&1; then
+                http_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
+                    -u "admin:${splunk_password}" "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
+                if [ "${http_code}" = "200" ]; then
+                    print_info "Splunk is operational (splunk status OK, REST server/info HTTP 200)."
+                    return 0
+                fi
+            fi
+        fi
+        if [ "${elapsed}" -ge 60 ] && [ "$((elapsed % 60))" -eq 0 ]; then
+            print_info "Still waiting for Splunk CLI/REST... (${elapsed}s / ${timeout_sec}s)"
+        fi
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+
+    print_error "Timed out after ${timeout_sec}s waiting for Splunk (splunk status + server/info)."
+    print_warn "Check: oc logs -n ${namespace} deploy/${name} -c splunk --tail=120"
+    return 1
+}
+
+# Splunk UI lists apps by [launcher] label in app.conf — RHACS TA is "Red Hat Advanced Cluster Security"
+# (id TA-stackrox). Ensure REST/local flags so it appears under Manage Apps / Apps.
+ensure_ta_stackrox_addon_ui_ready() {
+    local namespace="$1"
+    local pod="$2"
+    local splunk_password="$3"
+
+    print_step "Ensuring RHACS add-on (TA-stackrox) is enabled and visible in Splunk Web"
+
+    oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- \
+        /opt/splunk/bin/splunk enable app TA-stackrox \
+        -uri "https://127.0.0.1:8089" \
+        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+
+    local code
+    code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /tmp/ta-stackrox-apps-local.out -w '%{http_code}' \
+        -u "admin:${splunk_password}" \
+        -X POST \
+        "https://127.0.0.1:8089/services/apps/local/TA-stackrox" \
+        --data-urlencode "disabled=false" 2>/dev/null || true)"
+
+    if echo "${code}" | grep -qE '^(200|201)$'; then
+        print_info "apps/local: TA-stackrox updated (disabled=false) HTTP ${code}."
+    else
+        print_warn "apps/local POST returned HTTP ${code:-n/a} (add-on may still be OK if already enabled)."
+        print_warn "Response tail: $(tail -c 400 /tmp/ta-stackrox-apps-local.out 2>/dev/null || echo '<none>')"
+    fi
+
+    local disabled
+    disabled="$(run_splunk_curl "${namespace}" "${pod}" -k -sS \
+        -u "admin:${splunk_password}" \
+        "https://127.0.0.1:8089/services/apps/local/TA-stackrox?output_mode=json" 2>/dev/null | \
+        jq -r '.entry[0].content.disabled // "unknown"' 2>/dev/null || echo "unknown")"
+    if [ "${disabled}" = "false" ] || [ "${disabled}" = "0" ]; then
+        print_info "Confirmed: TA-stackrox disabled=${disabled} in Splunk."
+    else
+        print_warn "TA-stackrox disabled flag from REST: ${disabled} (expect false after enable)."
+    fi
+}
+
 # Splunk Enterprise: HEC tokens are HTTP inputs under the splunk_httpinput app.
 # Create: POST .../servicesNS/admin/splunk_httpinput/data/inputs/http
 # Token value is returned in the POST response .entry[0].content.token (and can be re-fetched with GET).
@@ -345,24 +431,33 @@ install_rhacs_splunk_addon() {
 
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local addon_file="${SPLUNK_RHACS_ADDON_FILE:-${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz}"
-    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-62104fae3307184a16c3a92343aa4a4cd4116aa8df86422e89a6915ff7a28461}"
+    local addon_file="${SPLUNK_RHACS_ADDON_FILE:-${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl}"
+    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-b5a70ae58e185303dd3831a1d9de6db2c92d44f17058a060e04a2430774e8335}"
     local addon_name=""
 
     # Auto-discover common filename variants when explicit file is missing.
     if [ ! -f "${addon_file}" ]; then
-        local candidate_tgz="${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204"
-        if [ -f "${candidate_tgz}.tgz" ]; then
-            addon_file="${candidate_tgz}.tgz"
-        elif [ -f "${candidate_tgz}" ]; then
-            addon_file="${candidate_tgz}"
+        local candidate_300="${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_300"
+        local candidate_204="${script_dir}/red-hat-advanced-cluster-security-splunk-technology-add-on_204"
+        if [ -f "${candidate_300}.spl" ]; then
+            addon_file="${candidate_300}.spl"
+        elif [ -f "${candidate_300}.tgz" ]; then
+            addon_file="${candidate_300}.tgz"
+        elif [ -f "${candidate_300}" ]; then
+            addon_file="${candidate_300}"
+        elif [ -f "${candidate_204}.tgz" ]; then
+            addon_file="${candidate_204}.tgz"
+        elif [ -f "${candidate_204}.spl" ]; then
+            addon_file="${candidate_204}.spl"
+        elif [ -f "${candidate_204}" ]; then
+            addon_file="${candidate_204}"
         fi
     fi
     addon_name="$(basename "${addon_file}")"
 
     if [ ! -f "${addon_file}" ]; then
         print_error "RHACS Splunk add-on package not found at: ${addon_file}"
-        print_error "Place the .tgz there or set SPLUNK_RHACS_ADDON_FILE."
+        print_error "Place the package (.spl/.tgz) there or set SPLUNK_RHACS_ADDON_FILE."
         return 1
     fi
 
@@ -388,12 +483,18 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" cp "${addon_file}" "${pod}:/tmp/${addon_name}"
 
     print_step "Installing RHACS Splunk add-on package"
-    if ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+    local install_ec=0
+    local install_out=""
+    install_out="$(oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}"; then
+        -auth "admin:${splunk_password}" 2>&1)" || install_ec=$?
+    if [ "${install_ec}" -ne 0 ]; then
         print_error "Failed to install RHACS Splunk add-on package."
+        echo "${install_out}" >&2
         return 1
     fi
+
+    ensure_ta_stackrox_addon_ui_ready "${namespace}" "${pod}" "${splunk_password}"
 
     print_step "Restarting Splunk to activate add-on"
     if ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk restart \
@@ -409,10 +510,21 @@ install_rhacs_splunk_addon() {
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -z "${pod}" ] || ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
         -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
-        print_error "RHACS Splunk add-on is not installed or not visible in Splunk."
-        return 1
+        if [ -z "${pod}" ]; then
+            pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        fi
+        if [ -n "${pod}" ]; then
+            ensure_ta_stackrox_addon_ui_ready "${namespace}" "${pod}" "${splunk_password}"
+        fi
+        if [ -z "${pod}" ] || ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+            -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
+            print_error "RHACS Splunk add-on is not installed or not visible to the Splunk CLI."
+            print_warn "In Splunk Web use Settings → Apps → Manage Apps and search for: Red Hat Advanced Cluster Security (id TA-stackrox)."
+            return 1
+        fi
     fi
     print_info "RHACS Splunk add-on installation completed."
+    print_info "Splunk UI: Settings → Apps → Manage Apps → \"Red Hat Advanced Cluster Security\" (package TA-stackrox)."
 }
 
 configure_rhacs_addon_settings() {
@@ -580,8 +692,9 @@ print_rhacs_addon_configuration_steps() {
     fi
 
     print_step "RHACS 4.10 doc-aligned Splunk add-on configuration"
-    print_info "In Splunk UI: Apps -> Red Hat Advanced Cluster Security for Kubernetes"
-    print_info "Then: Configuration -> Add-on Settings"
+    print_info "Open the add-on in Splunk Web: Settings → Apps → Manage Apps → \"Red Hat Advanced Cluster Security\""
+    print_info "(The listing name is not \"RHACS\"; technical id is TA-stackrox.)"
+    print_info "Then on the add-on: Configuration → Add-on Settings (or Configuration tab on the app tile)"
     if [ -n "${central_hostport}" ]; then
         print_info "  Central Endpoint: ${central_hostport}"
     else
@@ -603,7 +716,7 @@ print_final_details() {
     local name="$2"
     local route_host="$3"
     local password="$4"
-    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-62104fae3307184a16c3a92343aa4a4cd4116aa8df86422e89a6915ff7a28461}"
+    local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-b5a70ae58e185303dd3831a1d9de6db2c92d44f17058a060e04a2430774e8335}"
     local hec_scheme="${SPLUNK_HEC_SCHEME:-https}"
 
     echo ""
@@ -614,10 +727,12 @@ print_final_details() {
     print_info "Integration:"
     print_info "  Add-on endpoint : ${name}.${namespace}.svc.cluster.local:443"
     print_info "  HEC endpoint    : ${hec_scheme}://${name}.${namespace}.svc.cluster.local:8088/services/collector/event"
-    print_info "  Add-on package  : red-hat-advanced-cluster-security-splunk-technology-add-on_204.tgz"
+    print_info "  Add-on package  : red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl"
     print_info "  Add-on SHA256   : ${addon_sha}"
     print_info ""
-    print_info "Verify in Splunk:"
+    print_info "RHACS add-on in Splunk Web:"
+    print_info "  Settings → Apps → Manage Apps → search \"Red Hat Advanced Cluster Security\" or TA-stackrox"
+    print_info "Verify data (after inputs run):"
     print_info "  index=* sourcetype=\"stackrox-*\""
     print_info ""
     print_info "Cleanup:"
@@ -953,6 +1068,8 @@ EOF
     print_info "RHACS SIEM tip: use Splunk HEC on port 8088 with a token created in Splunk."
     print_info "If using in-cluster endpoint, use: http://${name}.${namespace}.svc.cluster.local:8088"
     echo ""
+
+    wait_for_splunk_cli_ready "${namespace}" "${name}" "${password}" || exit 1
 
     install_rhacs_splunk_addon "${namespace}" "${name}" "${password}"
     configure_rhacs_addon_settings "${namespace}" "${name}" "${password}"
