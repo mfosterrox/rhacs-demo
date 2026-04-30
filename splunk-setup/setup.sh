@@ -8,7 +8,8 @@
 # Optional environment variables:
 #   SPLUNK_NAMESPACE        Namespace to deploy into (default: splunk)
 #   SPLUNK_NAME             Base name for deployment resources (default: splunk)
-#   SPLUNK_STORAGE_SIZE     PVC size for index data (default: 20Gi)
+#   SPLUNK_STORAGE_SIZE     PVC size for Splunk var/index data (default: 20Gi)
+#   SPLUNK_ETC_STORAGE_SIZE PVC size for /opt/splunk/etc (apps + config; default: 5Gi). Required so TA-stackrox survives pod restarts.
 #   SPLUNK_PASSWORD_DEFAULT Admin password used for every deployment run
 #   SPLUNK_RUN_CLEAN_FIRST  Run ./clean.sh before setup (default: true)
 #   SPLUNK_FORCE_DELETE_NAMESPACE  Remove namespace finalizers if delete is stuck (default: false). Also auto-tried once after wait timeout.
@@ -19,6 +20,8 @@
 #   SPLUNK_CLI_READY_TIMEOUT_SEC Max wait for splunkd + REST before add-on install (default: 900).
 #   SPLUNK_CLI_READY_POLL_SEC    Poll interval seconds (default: 10).
 #   SPLUNK_SKIP_CLI_READY_WAIT   Set to 1 to skip the operational wait (default: 0).
+#   SPLUNK_RECYCLE_POD_AFTER_APP_CHANGE  After add-on install/settings, delete the Splunk pod instead of
+#       blocking in-container "splunk restart" (default: true; avoids failed exec if the container restarts).
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
@@ -98,6 +101,23 @@ splunk_oc_exec() {
                 oc -n "${namespace}" exec "${pod}" -- sudo -u splunk -- "$@"
             ;;
     esac
+}
+
+# "splunk restart" over oc exec blocks until the web port is up; a long run can outlive the container
+# (restart, OOM) and ends with: container is not created or running. Recycle the pod instead.
+recycle_splunk_deployment_pod() {
+    local namespace="$1"
+    local name="$2"
+
+    print_step "Recycling Splunk pod so splunkd loads app changes (avoids long blocking in-exec 'splunk restart')"
+    oc -n "${namespace}" delete pods -l "app=${name}" --grace-period=30 --wait=false
+    print_step "Waiting for Splunk deployment after pod recycle"
+    if ! oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"; then
+        return 1
+    fi
+    _splunk_oc_mode_cached_key=""
+    _splunk_oc_mode_cached_val=""
+    return 0
 }
 
 readonly RED='\033[0;31m'
@@ -256,6 +276,13 @@ is_splunk_deployment_ready() {
         return 0
     fi
     return 1
+}
+
+# Installed apps live under /opt/splunk/etc/apps. Without a PVC, pod recycle deletes TA-stackrox.
+splunk_deployment_mounts_persisted_etc() {
+    local namespace="$1"
+    local name="$2"
+    oc -n "${namespace}" get deploy "${name}" -o jsonpath='{range .spec.template.spec.containers[*].volumeMounts[*]}{.mountPath}{"\n"}{end}' 2>/dev/null | grep -qx '/opt/splunk/etc'
 }
 
 force_finalize_namespace() {
@@ -597,16 +624,23 @@ install_rhacs_splunk_addon() {
 
     ensure_ta_stackrox_addon_ui_ready "${namespace}" "${pod}" "${splunk_password}"
 
-    print_step "Restarting Splunk to activate add-on"
-    if ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
-        -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}"; then
-        print_error "Failed to restart Splunk after add-on install."
-        return 1
+    if [ "${SPLUNK_RECYCLE_POD_AFTER_APP_CHANGE:-true}" = "true" ]; then
+        if ! recycle_splunk_deployment_pod "${namespace}" "${name}"; then
+            print_error "Pod recycle or rollout failed after add-on install."
+            return 1
+        fi
+        wait_for_splunk_cli_ready "${namespace}" "${name}" "${splunk_password}" || return 1
+    else
+        print_step "Restarting Splunk to activate add-on (in-container; may take many minutes over exec)"
+        if ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
+            -uri "https://127.0.0.1:8089" \
+            -auth "admin:${splunk_password}"; then
+            print_error "Failed to restart Splunk after add-on install."
+            return 1
+        fi
+        print_step "Waiting for Splunk rollout after add-on install"
+        oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     fi
-
-    print_step "Waiting for Splunk rollout after add-on install"
-    oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     # Verify app is truly installed after restart.
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -z "${pod}" ] || ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk display app TA-stackrox \
@@ -703,11 +737,16 @@ configure_rhacs_addon_settings() {
         return 1
     fi
 
-    print_step "Restarting Splunk to apply add-on settings"
-    splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
-        -uri "https://127.0.0.1:8089" \
-        -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
-    oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
+    if [ "${SPLUNK_RECYCLE_POD_AFTER_APP_CHANGE:-true}" = "true" ]; then
+        recycle_splunk_deployment_pod "${namespace}" "${name}" || return 1
+        wait_for_splunk_cli_ready "${namespace}" "${name}" "${splunk_password}" || return 1
+    else
+        print_step "Restarting Splunk to apply add-on settings"
+        splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
+            -uri "https://127.0.0.1:8089" \
+            -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
+        oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
+    fi
     print_info "Add-on settings saved (Central Endpoint + API token)."
 }
 
@@ -978,6 +1017,7 @@ main() {
     local namespace="${SPLUNK_NAMESPACE:-splunk}"
     local name="${SPLUNK_NAME:-splunk}"
     local storage_size="${SPLUNK_STORAGE_SIZE:-20Gi}"
+    local etc_storage_size="${SPLUNK_ETC_STORAGE_SIZE:-5Gi}"
     local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
@@ -1006,8 +1046,19 @@ main() {
         fi
     fi
 
+    local skip_base_deploy="false"
     if [ "${skip_if_ready}" = "true" ] && is_splunk_deployment_ready "${namespace}" "${name}"; then
-        print_info "Splunk deployment is already ready; skipping base deploy/apply steps."
+        if splunk_deployment_mounts_persisted_etc "${namespace}" "${name}"; then
+            skip_base_deploy="true"
+            print_info "Splunk deployment is already ready; skipping base deploy/apply steps."
+        else
+            print_warn "Splunk is running but /opt/splunk/etc is not on a PVC — installed apps are lost when the pod is replaced."
+            print_warn "Re-applying manifest (adds ${name}-etc PVC + init seed). Re-run setup with SPLUNK_REINSTALL_ADDON=true if TA-stackrox is missing."
+        fi
+    fi
+
+    if [ "${skip_base_deploy}" = "true" ]; then
+        :
     else
         print_step "Deploying Splunk in OpenShift namespace '${namespace}'"
 
@@ -1039,6 +1090,17 @@ spec:
     requests:
       storage: ${storage_size}
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${name}-etc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${etc_storage_size}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1063,6 +1125,32 @@ spec:
         # grant anyuid to ${name}-sa so the image can run its intended root→splunk startup.
         fsGroup: 41812
       serviceAccountName: ${name}-sa
+      initContainers:
+        # Mounting an empty PVC over /opt/splunk/etc hides the image's factory etc. Seed once from the image.
+        - name: seed-splunk-etc
+          image: ${image}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              dst=/seed/etc
+              marker="\${dst}/.splunk_etc_seeded_v1"
+              if [[ -f "\${marker}" ]]; then
+                echo "splunk etc PVC already seeded"
+                exit 0
+              fi
+              mkdir -p "\${dst}"
+              if [[ -z "\$(ls -A "\${dst}" 2>/dev/null)" ]]; then
+                echo "Seeding /opt/splunk/etc from container image onto PVC (first use only)"
+                cp -a /opt/splunk/etc/. "\${dst}/"
+              else
+                echo "PVC already has splunk etc content; marking seeded without overwrite"
+              fi
+              touch "\${marker}"
+          volumeMounts:
+            - name: etc
+              mountPath: /seed/etc
       containers:
         - name: splunk
           image: ${image}
@@ -1089,6 +1177,8 @@ spec:
           volumeMounts:
             - name: var
               mountPath: /opt/splunk/var
+            - name: etc
+              mountPath: /opt/splunk/etc
           # Splunk Web can take several minutes on first start (license, PVC). Startup probe
           # prevents liveness from killing the container while splunkd is still coming up.
           startupProbe:
@@ -1113,6 +1203,9 @@ spec:
         - name: var
           persistentVolumeClaim:
             claimName: ${name}-var
+        - name: etc
+          persistentVolumeClaim:
+            claimName: ${name}-etc
 ---
 apiVersion: v1
 kind: Service

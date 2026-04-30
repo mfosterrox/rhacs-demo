@@ -129,6 +129,7 @@ main() {
     oc -n "${namespace}" delete service "${name}" --ignore-not-found=true
     oc -n "${namespace}" delete deployment "${name}" --ignore-not-found=true
     oc -n "${namespace}" delete pvc "${name}-var" --ignore-not-found=true
+    oc -n "${namespace}" delete pvc "${name}-etc" --ignore-not-found=true
     oc -n "${namespace}" delete secret "${name}-auth" --ignore-not-found=true
     oc -n "${namespace}" delete serviceaccount "${name}-sa" --ignore-not-found=true
     print_info "Resource cleanup completed in namespace '${namespace}'."
