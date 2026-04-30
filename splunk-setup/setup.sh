@@ -14,6 +14,7 @@
 #   SPLUNK_FORCE_DELETE_NAMESPACE  Remove namespace finalizers if delete is stuck (default: false). Also auto-tried once after wait timeout.
 #   SPLUNK_ROLLOUT_TIMEOUT  Max wait for oc rollout status (default: 25m; must be >= first-boot window).
 #   SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD  startupProbe checks at 15s interval (default: 100 => 25m max before probe fails).
+#   SPLUNK_EXEC_USER       UID for oc exec running Splunk CLI/curl (default: 41812 = splunk user; avoids Permission denied under arbitrary UID).
 #   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
@@ -31,6 +32,10 @@
 #
 
 set -euo pipefail
+
+# splunkd and Splunk config dirs are owned by splunk (41812). OpenShift oc exec without -u
+# often runs as the project's arbitrary UID → Permission denied on install app / REST helpers.
+: "${SPLUNK_EXEC_USER:=41812}"
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -248,10 +253,10 @@ run_splunk_curl() {
     local pod="$2"
     shift 2
     # Prefer container curl; fallback to Splunk-bundled curl.
-    if oc -n "${namespace}" exec "${pod}" -- sh -c "command -v curl >/dev/null 2>&1"; then
-        oc -n "${namespace}" exec "${pod}" -- curl "$@"
+    if oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- sh -c "command -v curl >/dev/null 2>&1"; then
+        oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- curl "$@"
     else
-        oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk cmd curl "$@"
+        oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk cmd curl "$@"
     fi
 }
 
@@ -371,7 +376,7 @@ install_rhacs_splunk_addon() {
     fi
 
     if [ "${reinstall}" != "true" ]; then
-        if oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+        if oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk display app TA-stackrox \
             -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
             print_info "RHACS Splunk add-on already installed; skipping reinstall."
             return 0
@@ -382,7 +387,7 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" cp "${addon_file}" "${pod}:/tmp/${addon_name}"
 
     print_step "Installing RHACS Splunk add-on package"
-    if ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+    if ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}"; then
         print_error "Failed to install RHACS Splunk add-on package."
@@ -390,7 +395,7 @@ install_rhacs_splunk_addon() {
     fi
 
     print_step "Restarting Splunk to activate add-on"
-    if ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
+    if ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}"; then
         print_error "Failed to restart Splunk after add-on install."
@@ -401,7 +406,7 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     # Verify app is truly installed after restart.
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk display app TA-stackrox \
         -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
         print_error "RHACS Splunk add-on is not installed or not visible in Splunk."
         return 1
@@ -485,7 +490,7 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Restarting Splunk to apply add-on settings"
-    oc -n "${namespace}" exec "${pod}" -- /opt/splunk/bin/splunk restart \
+    oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"

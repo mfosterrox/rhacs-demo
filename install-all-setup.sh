@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run basic-setup first (sequential), then the other *-setup installs in parallel (FAM, monitoring,
-# MCP, Splunk, OpenShift Pipelines/Tekton RHACS tasks, and GitOps-deployed RHACS custom policies).
+# MCP, OpenShift Pipelines/Tekton RHACS tasks, and GitOps-deployed RHACS custom policies).
 # Order avoids RHACS Central churn (e.g. upgrades/restarts) while other scripts use the API.
 #
 # Typical usage:
@@ -20,8 +20,6 @@
 # Optional skip flags (export before running):
 #   SKIP_OPENSHIFT_PIPELINES_SETUP=1 — do not run openshift-pipelines-setup/install.sh (Tekton / rox-pipeline)
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
-#   SKIP_SPLUNK_SETUP=1 — do not run splunk-setup/setup.sh
-#
 # After install: ./verify-all-setup.sh
 #
 # On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.
@@ -48,14 +46,11 @@ print_step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 
 print_access_summary() {
     local rhacs_ns="${RHACS_NAMESPACE:-stackrox}"
-    local splunk_ns="${SPLUNK_NAMESPACE:-splunk}"
     local rhacs_url="${ROX_CENTRAL_ADDRESS:-}"
-    local splunk_url=""
 
     if [ -z "${rhacs_url}" ]; then
         rhacs_url="$(oc get route central -n "${rhacs_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
     fi
-    splunk_url="$(oc get route splunk-web -n "${splunk_ns}" -o jsonpath='https://{.spec.host}' 2>/dev/null || true)"
 
     echo ""
     print_info "======================================"
@@ -70,11 +65,6 @@ print_access_summary() {
     else
         print_info "  Password : <set ROX_PASSWORD or retrieve from RHACS secret>"
     fi
-    echo ""
-    print_info "Splunk:"
-    print_info "  URL      : ${splunk_url:-<not found>}"
-    print_info "  Username : admin"
-    print_info "  Password : ${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -301,7 +291,7 @@ main() {
         print_info "Started ${n} (pid ${pid}) → ${lg}"
     }
 
-    print_step "Phase 2: FAM, monitoring, MCP, Splunk, OpenShift Pipelines, custom-policies (parallel)"
+    print_step "Phase 2: FAM, monitoring, MCP, OpenShift Pipelines, custom-policies (parallel)"
     if [ "${SKIP_FAM_SETUP:-0}" != "1" ] && [ "${SKIP_FIM_SETUP:-0}" != "1" ]; then
         add_job fam-setup "${REPO_ROOT}/fam-setup/install.sh"
     fi
@@ -310,9 +300,6 @@ main() {
     fi
     if [ "${SKIP_MCP_SETUP:-0}" != "1" ]; then
         add_job mcp-server-setup "${REPO_ROOT}/mcp-server-setup/install.sh"
-    fi
-    if [ "${SKIP_SPLUNK_SETUP:-0}" != "1" ]; then
-        add_job splunk-setup "${REPO_ROOT}/splunk-setup/setup.sh"
     fi
     if [ "${SKIP_OPENSHIFT_PIPELINES_SETUP:-0}" != "1" ]; then
         add_job openshift-pipelines-setup "${REPO_ROOT}/openshift-pipelines-setup/install.sh"
