@@ -35,6 +35,7 @@ set -euo pipefail
 
 # splunkd and Splunk config dirs are owned by splunk (41812). OpenShift oc exec without -u
 # often runs as the project's arbitrary UID → Permission denied on install app / REST helpers.
+# Use: oc exec -u <uid> <pod> -- ... ( -u must come before the pod name, not after).
 : "${SPLUNK_EXEC_USER:=41812}"
 
 readonly RED='\033[0;31m'
@@ -253,10 +254,10 @@ run_splunk_curl() {
     local pod="$2"
     shift 2
     # Prefer container curl; fallback to Splunk-bundled curl.
-    if oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- sh -c "command -v curl >/dev/null 2>&1"; then
-        oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- curl "$@"
+    if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- sh -c "command -v curl >/dev/null 2>&1"; then
+        oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- curl "$@"
     else
-        oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk cmd curl "$@"
+        oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk cmd curl "$@"
     fi
 }
 
@@ -376,7 +377,7 @@ install_rhacs_splunk_addon() {
     fi
 
     if [ "${reinstall}" != "true" ]; then
-        if oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+        if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
             -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
             print_info "RHACS Splunk add-on already installed; skipping reinstall."
             return 0
@@ -387,7 +388,7 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" cp "${addon_file}" "${pod}:/tmp/${addon_name}"
 
     print_step "Installing RHACS Splunk add-on package"
-    if ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+    if ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}"; then
         print_error "Failed to install RHACS Splunk add-on package."
@@ -395,7 +396,7 @@ install_rhacs_splunk_addon() {
     fi
 
     print_step "Restarting Splunk to activate add-on"
-    if ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk restart \
+    if ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}"; then
         print_error "Failed to restart Splunk after add-on install."
@@ -406,7 +407,7 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     # Verify app is truly installed after restart.
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
         -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
         print_error "RHACS Splunk add-on is not installed or not visible in Splunk."
         return 1
@@ -490,7 +491,7 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Restarting Splunk to apply add-on settings"
-    oc -n "${namespace}" exec "${pod}" -u "${SPLUNK_EXEC_USER}" -- /opt/splunk/bin/splunk restart \
+    oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
