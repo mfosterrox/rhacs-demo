@@ -281,6 +281,7 @@ wait_for_splunk_cli_ready() {
     local elapsed=0
     local pod=""
     local http_code=""
+    local unauth_code=""
 
     print_step "Waiting until Splunk accepts CLI and REST (after Ready, first boot may still run Ansible)"
     while [ "${elapsed}" -lt "${timeout_sec}" ]; do
@@ -290,7 +291,17 @@ wait_for_splunk_cli_ready() {
                 http_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
                     -u "admin:${splunk_password}" "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
                 if [ "${http_code}" = "200" ]; then
-                    print_info "Splunk is operational (splunk status OK, REST server/info HTTP 200)."
+                    print_info "Splunk is operational (splunk status OK, authenticated REST OK)."
+                    return 0
+                fi
+
+                # Some starts are healthy but auth endpoint is not ready yet or credentials were changed.
+                # 401/403 still prove mgmt REST is listening; proceed and let later steps show exact auth errors.
+                unauth_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /dev/null -w '%{http_code}' \
+                    "https://127.0.0.1:8089/services/server/info" 2>/dev/null || true)"
+                if echo "${unauth_code}" | grep -qE '^(200|401|403)$'; then
+                    print_warn "Splunk mgmt REST is reachable (HTTP ${unauth_code}) but authenticated check returned ${http_code:-n/a}."
+                    print_warn "Proceeding; add-on install will report clear auth/API errors if credentials are wrong."
                     return 0
                 fi
             fi
@@ -302,7 +313,7 @@ wait_for_splunk_cli_ready() {
         elapsed=$((elapsed + interval))
     done
 
-    print_error "Timed out after ${timeout_sec}s waiting for Splunk (splunk status + server/info)."
+    print_error "Timed out after ${timeout_sec}s waiting for Splunk (splunk status + REST reachability)."
     print_warn "Check: oc logs -n ${namespace} deploy/${name} -c splunk --tail=120"
     return 1
 }
