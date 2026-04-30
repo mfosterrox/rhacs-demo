@@ -27,7 +27,9 @@
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
 #   SPLUNK_RHACS_ADDON_FILE     Path to add-on package (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl)
 #   SPLUNK_RHACS_ADDON_SHA256   Expected SHA256 for add-on package
-#   RHACS_SPLUNK_ADDON_TOKEN    Read-scoped RHACS token used by Splunk add-on (preferred)
+#   RHACS_SPLUNK_ADDON_TOKEN Fallback for TA-stackrox api_token only when ROX_API_TOKEN is unset.
+#   RHACS_SPLUNK_GENERATE_ANALYST_TOKEN  If true, mint Analyst JWT via Central using the resolved token as bearer.
+#       Default false: write the resolved token into the add-on as-is.
 #   RHACS_SPLUNK_ADDON_INTERVAL Poll interval (seconds) for Compliance + Vulnerability inputs (default: 14400)
 #   RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS  Poll interval for Violations input (default: 60; ship uses 60; use 300 for demos)
 #   SPLUNK_SKIP_ADDON_SETTINGS_IF_ENDPOINT_MATCHES  If true, skip REST when Central Endpoint already matches (default: false).
@@ -40,7 +42,7 @@
 #   SPLUNK_INTEGRATE_WITH_RHACS  Create HEC token + RHACS Splunk notifier via API (default: true)
 #   SPLUNK_HEC_SCHEME          HEC URL scheme for RHACS notifier (default: https)
 #   ROX_CENTRAL_ADDRESS     RHACS Central URL (required for integration)
-#   ROX_API_TOKEN           RHACS API token (preferred for integration)
+#   ROX_API_TOKEN           Preferred for RHACS API + Splunk TA-stackrox api_token (env or ~/.bashrc via loader below)
 #   ROX_PASSWORD            RHACS admin password (used to generate API token if needed)
 #
 
@@ -169,6 +171,19 @@ load_env_from_bashrc_if_missing() {
         printf -v "${var_name}" '%s' "${value}"
         export "${var_name}"
     fi
+}
+
+# TA-stackrox api_token: ROX_API_TOKEN first (shell or ~/.bashrc), else RHACS_SPLUNK_ADDON_TOKEN.
+resolve_ta_stackrox_source_token() {
+    if [ -n "${ROX_API_TOKEN:-}" ]; then
+        printf '%s' "${ROX_API_TOKEN}"
+        return 0
+    fi
+    if [ -n "${RHACS_SPLUNK_ADDON_TOKEN:-}" ]; then
+        printf '%s' "${RHACS_SPLUNK_ADDON_TOKEN}"
+        return 0
+    fi
+    return 1
 }
 
 verify_sha256() {
@@ -674,8 +689,6 @@ configure_rhacs_addon_settings() {
     local splunk_password="$3"
 
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
-    local rox_token="${ROX_API_TOKEN:-}"
-    local addon_token="${RHACS_SPLUNK_ADDON_TOKEN:-}"
     local central_hostport=""
 
     if [ -z "${rox_central}" ]; then
@@ -685,14 +698,25 @@ configure_rhacs_addon_settings() {
     fi
     central_hostport="$(to_central_hostport "${rox_central}")"
 
-    # Prefer explicit add-on token; otherwise generate Analyst token from ROX_API_TOKEN.
-    if [ -z "${addon_token}" ] && [ -n "${rox_token}" ]; then
-        print_step "Generating read-scoped (Analyst) RHACS token for Splunk add-on"
-        addon_token="$(generate_analyst_api_token "${rox_central}" "${rox_token}" || true)"
+    local base_token=""
+    if ! base_token="$(resolve_ta_stackrox_source_token)"; then
+        print_error "No API token for Splunk add-on (set ROX_API_TOKEN in env or ~/.bashrc, or RHACS_SPLUNK_ADDON_TOKEN if ROX is unset)."
+        return 1
+    fi
+
+    local addon_token="${base_token}"
+    if [ "${RHACS_SPLUNK_GENERATE_ANALYST_TOKEN:-false}" = "true" ]; then
+        print_step "Minting read-scoped (Analyst) API token for Splunk add-on via Central"
+        addon_token="$(generate_analyst_api_token "${rox_central}" "${base_token}" || true)"
+    else
+        if [ -n "${ROX_API_TOKEN:-}" ]; then
+            print_info "Using ROX_API_TOKEN for Splunk add-on api_token (no Analyst sub-token)."
+        else
+            print_info "Using RHACS_SPLUNK_ADDON_TOKEN for Splunk add-on api_token (ROX_API_TOKEN unset)."
+        fi
     fi
     if [ -z "${addon_token}" ]; then
-        print_error "No add-on token available (set RHACS_SPLUNK_ADDON_TOKEN or ROX_API_TOKEN)."
-        print_error "Cannot continue without add-on settings token."
+        print_error "Add-on token is empty after resolution (check ROX_API_TOKEN / RHACS_SPLUNK_ADDON_TOKEN and Analyst mint if enabled)."
         return 1
     fi
 
@@ -873,8 +897,6 @@ configure_rhacs_addon_inputs() {
 
 print_rhacs_addon_configuration_steps() {
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
-    local rox_token="${ROX_API_TOKEN:-}"
-    local addon_token="${RHACS_SPLUNK_ADDON_TOKEN:-}"
     local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
     local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-60}"
     local central_hostport=""
@@ -883,10 +905,12 @@ print_rhacs_addon_configuration_steps() {
         central_hostport="$(to_central_hostport "${rox_central}")"
     fi
 
-    # RH docs recommend a read-scoped token (Analyst role) for the Splunk add-on.
-    if [ -z "${addon_token}" ] && [ -n "${rox_central}" ] && [ -n "${rox_token}" ]; then
-        print_step "Generating read-scoped (Analyst) RHACS token for Splunk add-on"
-        addon_token="$(generate_analyst_api_token "${rox_central}" "${rox_token}" || true)"
+    local base_token=""
+    base_token="$(resolve_ta_stackrox_source_token 2>/dev/null || true)"
+    local addon_token="${base_token}"
+    if [ -n "${addon_token}" ] && [ "${RHACS_SPLUNK_GENERATE_ANALYST_TOKEN:-false}" = "true" ] && [ -n "${rox_central}" ]; then
+        print_step "Minting Analyst API token for Splunk add-on via Central"
+        addon_token="$(generate_analyst_api_token "${rox_central}" "${base_token}" || true)"
     fi
 
     print_step "RHACS 4.10 doc-aligned Splunk add-on configuration"
@@ -899,9 +923,15 @@ print_rhacs_addon_configuration_steps() {
         print_warn "  Central Endpoint: <set ROX_CENTRAL_ADDRESS to auto-populate>"
     fi
     if [ -n "${addon_token}" ]; then
-        print_info "  API token (Analyst/read): ${addon_token}"
+        if [ "${RHACS_SPLUNK_GENERATE_ANALYST_TOKEN:-false}" = "true" ]; then
+            print_info "  API token (minted Analyst): ${addon_token}"
+        elif [ -n "${ROX_API_TOKEN:-}" ]; then
+            print_info "  API token (ROX_API_TOKEN): ${addon_token}"
+        else
+            print_info "  API token (RHACS_SPLUNK_ADDON_TOKEN fallback): ${addon_token}"
+        fi
     else
-        print_warn "  API token (Analyst/read): <set RHACS_SPLUNK_ADDON_TOKEN or ROX_* vars>"
+        print_warn "  API token: set ROX_API_TOKEN (preferred) or RHACS_SPLUNK_ADDON_TOKEN in env or ~/.bashrc"
     fi
     print_info "Add-on inputs are configured via API by default (can be disabled)."
     print_info "Inputs created: ACS Compliance, ACS Violations, ACS Vulnerability Management."
@@ -1083,11 +1113,14 @@ main() {
     local run_clean_first="${SPLUNK_RUN_CLEAN_FIRST:-true}"
     local splunk_startup_failures="${SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD:-100}"
 
-    # Convenience: pick up RHACS API values from ~/.bashrc if user already saved them there.
+    # Convenience: pick up RHACS API values from ~/.bashrc when not already exported (non-interactive safe).
     load_env_from_bashrc_if_missing "ROX_CENTRAL_ADDRESS"
     load_env_from_bashrc_if_missing "ROX_API_TOKEN"
     load_env_from_bashrc_if_missing "RHACS_SPLUNK_ADDON_TOKEN"
     load_env_from_bashrc_if_missing "ROX_PASSWORD"
+    if [ -n "${ROX_API_TOKEN:-}" ]; then
+        print_info "ROX_API_TOKEN is set (env or ~/.bashrc); Splunk add-on uses it before RHACS_SPLUNK_ADDON_TOKEN (set RHACS_SPLUNK_GENERATE_ANALYST_TOKEN=true to mint Analyst JWT)."
+    fi
 
     if [ "${run_clean_first}" = "true" ]; then
         local script_dir
