@@ -15,6 +15,7 @@
 #   SPLUNK_ROLLOUT_TIMEOUT  Max wait for oc rollout status (default: 25m; must be >= first-boot window).
 #   SPLUNK_STARTUP_PROBE_FAILURE_THRESHOLD  startupProbe checks at 15s interval (default: 100 => 25m max before probe fails).
 #   SPLUNK_EXEC_USER       UID for oc exec running Splunk CLI/curl (default: 41812 = splunk user; avoids Permission denied under arbitrary UID).
+#   SPLUNK_FORCE_OC_EXEC_MODE  dash_u | long_user | runuser — force how we become splunk inside the pod (default: auto-detect).
 #   SPLUNK_CLI_READY_TIMEOUT_SEC Max wait for splunkd + REST before add-on install (default: 900).
 #   SPLUNK_CLI_READY_POLL_SEC    Poll interval seconds (default: 10).
 #   SPLUNK_SKIP_CLI_READY_WAIT   Set to 1 to skip the operational wait (default: 0).
@@ -38,8 +39,66 @@ set -euo pipefail
 
 # splunkd and Splunk config dirs are owned by splunk (41812). OpenShift oc exec without -u
 # often runs as the project's arbitrary UID → Permission denied on install app / REST helpers.
-# Use: oc exec -u <uid> <pod> -- ... ( -u must come before the pod name, not after).
+# Many oc builds support: oc exec -u <uid> <pod> -- … ; older bastion oc clients have no -u — we fall back to sudo -u splunk.
 : "${SPLUNK_EXEC_USER:=41812}"
+
+_splunk_oc_mode_cached_key=""
+_splunk_oc_mode_cached_val=""
+
+get_splunk_oc_exec_mode() {
+    local namespace="$1"
+    local pod="$2"
+
+    if [ -n "${SPLUNK_FORCE_OC_EXEC_MODE:-}" ]; then
+        printf '%s' "${SPLUNK_FORCE_OC_EXEC_MODE}"
+        return 0
+    fi
+    if [ -z "${pod}" ] || [ -z "${namespace}" ]; then
+        printf 'runuser'
+        return 0
+    fi
+    local key="${namespace}/${pod}"
+    if [ "${key}" = "${_splunk_oc_mode_cached_key}" ] && [ -n "${_splunk_oc_mode_cached_val}" ]; then
+        printf '%s' "${_splunk_oc_mode_cached_val}"
+        return 0
+    fi
+
+    local mode="runuser"
+    if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- true 2>/dev/null; then
+        mode="dash_u"
+    elif oc -n "${namespace}" exec --user="${SPLUNK_EXEC_USER}" "${pod}" -- true 2>/dev/null; then
+        mode="long_user"
+    fi
+    _splunk_oc_mode_cached_key="${key}"
+    _splunk_oc_mode_cached_val="${mode}"
+    printf '%s' "${mode}"
+}
+
+splunk_oc_exec() {
+    local namespace="$1"
+    local pod="$2"
+    shift 2
+    local mode
+    mode="$(get_splunk_oc_exec_mode "${namespace}" "${pod}")"
+
+    case "${mode}" in
+        dash_u)
+            oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- "$@"
+            ;;
+        long_user)
+            oc -n "${namespace}" exec --user="${SPLUNK_EXEC_USER}" "${pod}" -- "$@"
+            ;;
+        runuser)
+            # Bastion oc without exec --user: become splunk like the Splunk image entrypoint (ansible -> sudo -> splunk).
+            oc -n "${namespace}" exec "${pod}" -- sudo -n -u splunk -- "$@" 2>/dev/null || \
+                oc -n "${namespace}" exec "${pod}" -- sudo -u splunk -- "$@"
+            ;;
+        *)
+            oc -n "${namespace}" exec "${pod}" -- sudo -n -u splunk -- "$@" 2>/dev/null || \
+                oc -n "${namespace}" exec "${pod}" -- sudo -u splunk -- "$@"
+            ;;
+    esac
+}
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -257,10 +316,10 @@ run_splunk_curl() {
     local pod="$2"
     shift 2
     # Prefer container curl; fallback to Splunk-bundled curl.
-    if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- sh -c "command -v curl >/dev/null 2>&1"; then
-        oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- curl "$@"
+    if splunk_oc_exec "${namespace}" "${pod}" sh -c "command -v curl >/dev/null 2>&1"; then
+        splunk_oc_exec "${namespace}" "${pod}" curl "$@"
     else
-        oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk cmd curl "$@"
+        splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk cmd curl "$@"
     fi
 }
 
@@ -295,7 +354,7 @@ wait_for_splunk_cli_ready() {
         unauth_code=""
         http_code=""
         if [ -n "${pod}" ]; then
-            if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk status >/dev/null 2>&1; then
+            if splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk status >/dev/null 2>&1; then
                 status_ok="1"
             fi
 
@@ -358,7 +417,7 @@ ensure_ta_stackrox_addon_ui_ready() {
 
     print_step "Ensuring RHACS add-on (TA-stackrox) is enabled and visible in Splunk Web"
 
-    oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- \
+    splunk_oc_exec "${namespace}" "${pod}" \
         /opt/splunk/bin/splunk enable app TA-stackrox \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
@@ -514,7 +573,7 @@ install_rhacs_splunk_addon() {
     fi
 
     if [ "${reinstall}" != "true" ]; then
-        if oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+        if splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk display app TA-stackrox \
             -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
             print_info "RHACS Splunk add-on already installed; skipping reinstall."
             return 0
@@ -527,7 +586,7 @@ install_rhacs_splunk_addon() {
     print_step "Installing RHACS Splunk add-on package"
     local install_ec=0
     local install_out=""
-    install_out="$(oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
+    install_out="$(splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk install app "/tmp/${addon_name}" \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" 2>&1)" || install_ec=$?
     if [ "${install_ec}" -ne 0 ]; then
@@ -539,7 +598,7 @@ install_rhacs_splunk_addon() {
     ensure_ta_stackrox_addon_ui_ready "${namespace}" "${pod}" "${splunk_password}"
 
     print_step "Restarting Splunk to activate add-on"
-    if ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk restart \
+    if ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}"; then
         print_error "Failed to restart Splunk after add-on install."
@@ -550,7 +609,7 @@ install_rhacs_splunk_addon() {
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
     # Verify app is truly installed after restart.
     pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    if [ -z "${pod}" ] || ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+    if [ -z "${pod}" ] || ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk display app TA-stackrox \
         -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
         if [ -z "${pod}" ]; then
             pod="$(oc -n "${namespace}" get pods -l "app=${name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
@@ -558,7 +617,7 @@ install_rhacs_splunk_addon() {
         if [ -n "${pod}" ]; then
             ensure_ta_stackrox_addon_ui_ready "${namespace}" "${pod}" "${splunk_password}"
         fi
-        if [ -z "${pod}" ] || ! oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk display app TA-stackrox \
+        if [ -z "${pod}" ] || ! splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk display app TA-stackrox \
             -uri "https://127.0.0.1:8089" -auth "admin:${splunk_password}" >/dev/null 2>&1; then
             print_error "RHACS Splunk add-on is not installed or not visible to the Splunk CLI."
             print_warn "In Splunk Web use Settings → Apps → Manage Apps and search for: Red Hat Advanced Cluster Security (id TA-stackrox)."
@@ -645,7 +704,7 @@ configure_rhacs_addon_settings() {
     fi
 
     print_step "Restarting Splunk to apply add-on settings"
-    oc -n "${namespace}" exec -u "${SPLUNK_EXEC_USER}" "${pod}" -- /opt/splunk/bin/splunk restart \
+    splunk_oc_exec "${namespace}" "${pod}" /opt/splunk/bin/splunk restart \
         -uri "https://127.0.0.1:8089" \
         -auth "admin:${splunk_password}" >/dev/null 2>&1 || true
     oc -n "${namespace}" rollout status "deployment/${name}" --timeout="${SPLUNK_ROLLOUT_TIMEOUT:-25m}"
