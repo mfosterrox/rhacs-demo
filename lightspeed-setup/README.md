@@ -26,7 +26,27 @@ oc create secret generic anthropic-api-keys \
   --from-literal=apitoken='<YOUR_ANTHROPIC_API_KEY>'
 ```
 
-Then define the provider in **`OLSConfig`** (`spec.llm.providers`, **`spec.ols.defaultProvider`**, **`defaultModel`**) per [OLSConfig API](https://docs.redhat.com/en/documentation/red_hat_openshift_lightspeed/1.0/html/configure/olsconfig-api) — for example **`google_vertex_anthropic`** or **`bam`**.
+### Anthropic (Claude) and supported LLM backends
+
+Red Hat documents **official** OpenShift Lightspeed LLM integrations such as **OpenAI**, **Azure OpenAI**, **IBM watsonx**, and **Red Hat OpenShift AI / RHEL AI** (OpenAI-compatible **`/v1`** endpoints). See [Configuring and deploying OpenShift Lightspeed](https://docs.redhat.com/en/documentation/red_hat_openshift_lightspeed/1.0/html/configure/ols-configuring-openshift-lightspeed).
+
+**Anthropic’s hosted API** (`https://api.anthropic.com`, Messages API) is **not the same wire format** as the **OpenAI Chat Completions** API. The **`openai`** (and typical **`*_vllm`**) provider types in **`OLSConfig`** expect an **OpenAI-compatible** HTTP surface. So you **cannot** reliably set **`type: openai`** and **`url: https://api.anthropic.com/v1`** and expect Lightspeed to work—those paths and payloads differ.
+
+What you **can** do:
+
+| Goal | What to add |
+|------|----------------|
+| **Use your Anthropic Console API key with Claude models** | Usually run an **OpenAI-compatible gateway** on the cluster (or reachable URL) that **translates** OpenAI-style requests to Anthropic—e.g. **LiteLLM**, or another adapter your organization approves. Point **`OLSConfig`** at the **gateway’s** base URL (must end with **`/v1`** per Red Hat’s examples), **`type: openai`** (or the type your gateway matches), **`credentialsSecretRef`** to a Secret whose **`apitoken`** the gateway accepts (or configure the gateway with the Anthropic key separately—follow that product’s docs). |
+| **Use Claude without a custom proxy** | Use a **supported** backend that exposes Claude through Lightspeed’s typed providers—commonly **Claude on Google Vertex AI** (**`google_vertex_anthropic`**) with a **GCP service account JSON** (not the Anthropic Console key alone), or a **`bam`** endpoint your vendor documents. |
+
+**Minimum checklist** (any path):
+
+1. **API key** from [Anthropic Console](https://console.anthropic.com/) when you need Anthropic’s cloud API (often via a proxy or gateway).
+2. **Secret** in **`openshift-lightspeed`** with **`stringData.apitoken`** (name is flexible; **`anthropic-api-keys`** is a common choice).
+3. **`OLSConfig`** **`cluster`**: **`spec.llm.providers`** (correct **`type`**, **`url`**, **`credentialsSecretRef`**, **`models`**) and **`spec.ols.defaultProvider`** / **`defaultModel`**.
+4. **Apply**, restart/reconcile as needed, **`oc get pods -n openshift-lightspeed`**, test the console assistant.
+
+The interactive script in this folder (**`configure-claude-default.sh`**) helps with **Vertex**-style and **BAM**-style providers; it does **not** deploy LiteLLM or other proxies.
 
 ---
 
