@@ -890,9 +890,10 @@ configure_rhacs_addon_inputs() {
 
     print_step "Configuring RHACS Splunk add-on inputs via API"
     print_info "Input intervals: violations=${interval_violations}s, compliance+vuln_mgmt=${interval_slow}s (override with RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS / RHACS_SPLUNK_ADDON_INTERVAL)"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs-compliance" "${interval_slow}" "${index_name}"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs-violations" "${interval_violations}" "${index_name}"
-    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs-vulnerability-management" "${interval_slow}" "${index_name}"
+    # Instance names after :// must be letters, digits, underscores only (Splunk UI validation).
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_compliance://rhacs_compliance" "${interval_slow}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_violations://rhacs_violations" "${interval_violations}" "${index_name}"
+    ensure_stackrox_input "${namespace}" "${pod}" "${splunk_password}" "stackrox_vulnerability_management://rhacs_vulnerability_management" "${interval_slow}" "${index_name}"
 }
 
 print_rhacs_addon_configuration_steps() {
