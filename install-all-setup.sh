@@ -70,6 +70,29 @@ print_access_summary() {
     else
         print_info "  Password : <set ROX_PASSWORD or retrieve from RHACS secret>"
     fi
+
+    local splunk_ns="${SPLUNK_NAMESPACE:-splunk}"
+    local splunk_name="${SPLUNK_NAME:-splunk}"
+    local splunk_host=""
+    splunk_host="$(oc get route "${splunk_name}-web" -n "${splunk_ns}" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+    print_info ""
+    print_info "Splunk:"
+    if [ -n "${splunk_host}" ]; then
+        print_info "  URL      : https://${splunk_host}"
+        print_info "  Username : admin"
+        local splunk_pw=""
+        splunk_pw="$(oc get secret "${splunk_name}-auth" -n "${splunk_ns}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null | tr -d '\r\n' || true)"
+        if [ -z "${splunk_pw}" ]; then
+            splunk_pw="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
+            print_info "  Password : ${splunk_pw}"
+            print_warn "  (could not read secret/${splunk_name}-auth password; showing SPLUNK_PASSWORD_DEFAULT fallback)"
+        else
+            print_info "  Password : ${splunk_pw}"
+        fi
+        print_info "  HEC (in-cluster) : https://${splunk_name}.${splunk_ns}.svc.cluster.local:8088/services/collector/event"
+    else
+        print_info "  <no route ${splunk_name}-web in ${splunk_ns} — deploy Splunk or unset SKIP_SPLUNK_SETUP>"
+    fi
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

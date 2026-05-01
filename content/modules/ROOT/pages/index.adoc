@@ -87,6 +87,21 @@ NOTE: Choose the standard *username* and *password* option, and NOT the monitori
 | *Password:* | {acs_portal_password}
 |===
 
+=== Splunk Console
+
+The splunk console route can be found after a successful installation.
+
+[source,sh,subs="attributes",role=execute]
+----
+oc get route splunk-web -n splunk -o jsonpath='https://{.spec.host}'
+----
+
+[cols="1,1"]
+|===
+| *Username:* | admin
+| *Password:* | RhacsSplunkDemo123!
+|===
+
 === Bastion Host
 
 If you need to access the bastion host, for diagnostics or troubleshooting, use the following SSH command:
