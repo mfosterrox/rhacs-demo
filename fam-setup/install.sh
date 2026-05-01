@@ -2,24 +2,26 @@
 
 # Script: install.sh (fam-setup)
 # Description: Enable file activity monitoring on SecuredCluster, submit FAM policies to ACS via API,
-#              apply fam-cron-exec-target.yaml (CronJob that oc exec’s into the payment processor and
-#              touch /etc/passwd every 10 minutes), and optionally run a one-shot oc exec for an immediate demo.
+#              apply fam-cron-exec-target.yaml (Deployment with a sleep loop: oc exec → touch /etc/passwd
+#              on an interval), and optionally run a one-shot oc exec for an immediate demo.
 # Requires: ROX_CENTRAL_ADDRESS (or auto-detect), ROX_API_TOKEN, oc logged in, jq
 #
 # Optional env:
 #   FAM_SKIP_CRONJOB=1        — do not apply the exec CronJob manifest
 #   FAM_SKIP_WORKLOAD_EXEC=1  — do not run one-shot oc exec into the demo workload
-#   FAM_SKIP_INITIAL_JOB=1    — after CronJob apply, do not create a one-off Job (first scheduled run can be up to 10m)
+#   FAM_SKIP_INITIAL_ROLLOUT_WAIT=1 — do not wait for rhacs-fam-exec-runner Deployment after apply
+#   FAM_LOOP_SLEEP_SEC        — seconds between touch attempts in the runner pod (default 600)
 #   FAM_SKIP_VIOLATION_WAIT=1 — do not poll RHACS for a deploy FAM violation (groups API + fallbacks)
 #   FAM_REQUIRE_VIOLATION=1   — exit non-zero if no alert for the deploy policy before wait timeout
 #   FAM_POST_POLICY_SLEEP_SEC — sleep after policies before triggers (default 15; sensor/policy propagation)
 #   FAM_VIOLATION_WAIT_SEC    — max time to poll APIs (default 420)
 #   FAM_VIOLATION_POLL_SEC    — interval between polls (default 15)
 #   FAM_DEPLOY_POLICY_NAME    — policy to check via API (default fam-basic-deploy-monitoring)
-#   FAM_INITIAL_JOB_TIMEOUT_SEC — oc wait for the immediate Job from CronJob (default 180)
-#   FAM_EXEC_NAMESPACE        — default payments (also rewrites the CronJob manifest on apply)
+#   FAM_INITIAL_ROLLOUT_TIMEOUT_SEC — oc rollout status for rhacs-fam-exec-runner (default 180)
+#   FAM_EXEC_NAMESPACE        — default payments (also rewrites the runner manifest on apply)
 #   FAM_EXEC_WORKLOAD         — default deployment/mastercard-processor
 #   FAM_EXEC_CONTAINER        — optional -c name for multi-container pods
+#   FAM_LOOP_SLEEP_SEC        — optional; sets Deployment env (default in YAML: 600)
 
 set -euo pipefail
 
@@ -280,49 +282,50 @@ fi
 echo ""
 
 #================================================================
-# Step 3: CronJob — periodic oc exec into target workload → touch /etc/passwd
+# Step 3: Deployment — loop: oc exec into target workload → touch /etc/passwd, then sleep
 #================================================================
-print_step "3. Applying FAM exec CronJob (${FAM_CRON_MANIFEST##*/})..."
+print_step "3. Applying FAM exec runner Deployment (${FAM_CRON_MANIFEST##*/})..."
 
 if [ "${FAM_SKIP_CRONJOB:-0}" = "1" ]; then
     print_info "Skipping (FAM_SKIP_CRONJOB=1)"
 else
+    # Remove legacy CronJob from older installs so only the Deployment runs.
+    oc delete cronjob rhacs-fam-exec-trigger -n "${FAM_EXEC_NAMESPACE}" --ignore-not-found &>/dev/null || true
+
     # Rewrite placeholders in the checked-in manifest to match FAM_EXEC_* (defaults: payments / mastercard-processor)
     if ! sed \
         -e "s/namespace: payments/namespace: ${FAM_EXEC_NAMESPACE}/g" \
         -e "s#value: \"deployment/mastercard-processor\"#value: \"${FAM_EXEC_WORKLOAD}\"#g" \
         -e "s#value: \"payments\"#value: \"${FAM_EXEC_NAMESPACE}\"#g" \
         "${FAM_CRON_MANIFEST}" | oc apply -f -; then
-        print_error "Failed to apply FAM exec CronJob (is namespace ${FAM_EXEC_NAMESPACE} present? image pull ok?)"
+        print_error "Failed to apply FAM exec runner (is namespace ${FAM_EXEC_NAMESPACE} present? image pull ok?)"
         setup_rerun_hint_print
         exit 1
     fi
     if [ -n "${FAM_EXEC_CONTAINER}" ]; then
-        if oc set env cronjob/rhacs-fam-exec-trigger -n "${FAM_EXEC_NAMESPACE}" \
+        if oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
             "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" --overwrite &>/dev/null; then
-            print_info "✓ CronJob env TARGET_CONTAINER=${FAM_EXEC_CONTAINER}"
+            print_info "✓ Deployment env TARGET_CONTAINER=${FAM_EXEC_CONTAINER}"
         else
-            print_warn "Could not patch CronJob TARGET_CONTAINER (cronjob missing yet?) — set manually if needed"
+            print_warn "Could not patch Deployment TARGET_CONTAINER — set manually if needed"
         fi
     fi
-    print_info "✓ CronJob rhacs-fam-exec-trigger in ${FAM_EXEC_NAMESPACE} (every 10m → oc exec ${FAM_EXEC_WORKLOAD} -- touch /etc/passwd)"
-
-    # One-off Job uses the same pod spec as the CronJob so the first demo does not wait for the next schedule.
-    if [ "${FAM_SKIP_INITIAL_JOB:-0}" != "1" ] && oc get "${FAM_EXEC_WORKLOAD}" -n "${FAM_EXEC_NAMESPACE}" &>/dev/null; then
-        JOB_NAME="rhacs-fam-exec-initial-$(date +%s)"
-        print_info "Creating immediate Job ${JOB_NAME} from CronJob (same as scheduled exec)..."
-        if oc create job "${JOB_NAME}" --from=cronjob/rhacs-fam-exec-trigger -n "${FAM_EXEC_NAMESPACE}" &>/dev/null; then
-            _ijt="${FAM_INITIAL_JOB_TIMEOUT_SEC:-180}"
-            if oc wait --for=condition=complete "job/${JOB_NAME}" -n "${FAM_EXEC_NAMESPACE}" --timeout="${_ijt}s" &>/dev/null; then
-                print_info "✓ Initial Job completed (CronJob-based oc exec)"
-            else
-                print_warn "Initial Job did not report Complete within ${_ijt}s — check: oc describe job/${JOB_NAME} -n ${FAM_EXEC_NAMESPACE}; oc logs -n ${FAM_EXEC_NAMESPACE} -l job-name=${JOB_NAME} --tail=50"
-            fi
-        else
-            print_warn "Could not create Job from CronJob (rbac or CronJob not ready) — rely on step 4 or next CronJob run"
+    if [ -n "${FAM_LOOP_SLEEP_SEC:-}" ]; then
+        if oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
+            "FAM_LOOP_SLEEP_SEC=${FAM_LOOP_SLEEP_SEC}" --overwrite &>/dev/null; then
+            print_info "✓ Deployment env FAM_LOOP_SLEEP_SEC=${FAM_LOOP_SLEEP_SEC}"
         fi
-    elif [ "${FAM_SKIP_INITIAL_JOB:-0}" != "1" ]; then
-        print_info "Workload ${FAM_EXEC_WORKLOAD} not in ${FAM_EXEC_NAMESPACE} — skipping immediate Job from CronJob"
+    fi
+    print_info "✓ Deployment rhacs-fam-exec-runner in ${FAM_EXEC_NAMESPACE} (loop → oc exec ${FAM_EXEC_WORKLOAD} -- touch /etc/passwd; sleep FAM_LOOP_SLEEP_SEC)"
+
+    if [ "${FAM_SKIP_INITIAL_ROLLOUT_WAIT:-0}" != "1" ]; then
+        _ijt="${FAM_INITIAL_ROLLOUT_TIMEOUT_SEC:-180}"
+        print_info "Waiting for rollout (timeout ${_ijt}s)..."
+        if oc rollout status "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" --timeout="${_ijt}s" &>/dev/null; then
+            print_info "✓ rhacs-fam-exec-runner rollout complete"
+        else
+            print_warn "Deployment rhacs-fam-exec-runner not ready within ${_ijt}s — check: oc describe deployment/rhacs-fam-exec-runner -n ${FAM_EXEC_NAMESPACE}; oc logs -n ${FAM_EXEC_NAMESPACE} -l app.kubernetes.io/name=rhacs-fam-exec-runner --tail=50"
+        fi
     fi
 fi
 echo ""
@@ -402,7 +405,7 @@ WORKER_NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.item
 
 print_step "File activity monitoring (FAM) setup complete"
 echo ""
-print_info "CronJob rhacs-fam-exec-trigger (unless skipped) runs every 10 minutes with oc exec into ${FAM_EXEC_WORKLOAD} (${FAM_EXEC_NAMESPACE})."
+print_info "Deployment rhacs-fam-exec-runner (unless skipped) loops: oc exec into ${FAM_EXEC_WORKLOAD} (${FAM_EXEC_NAMESPACE}), then sleeps FAM_LOOP_SLEEP_SEC (default 600s)."
 print_info "Step 4 runs one immediate oc exec when that workload exists (override with FAM_EXEC_* env)."
 print_info "Step 5 polls GET ${CENTRAL_URL}/v1/alerts/summary/groups?query=Policy:%22${FAM_DEPLOY_POLICY_NAME}%22 (alertsByPolicies / numAlerts), then alertscount / alerts if needed."
 print_info "To trigger node-level FAM manually, run these commands:"
