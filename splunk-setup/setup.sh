@@ -953,6 +953,9 @@ print_final_details() {
     print_info "======================================"
     print_info ""
     print_info "Integration:"
+    print_info "  Splunk Web URL  : https://${route_host}"
+    print_info "  Username        : admin"
+    print_info "  Password        : ${password}"
     print_info "  Add-on endpoint : ${name}.${namespace}.svc.cluster.local:443"
     print_info "  HEC endpoint    : ${hec_scheme}://${name}.${namespace}.svc.cluster.local:8088/services/collector/event"
     print_info "  Add-on package  : red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl"
@@ -966,11 +969,6 @@ print_final_details() {
     print_info "Cleanup:"
     print_info "  ./clean.sh"
     print_info "  SPLUNK_DELETE_NAMESPACE=true ./clean.sh"
-    print_info ""
-    print_info "Sign in:"
-    print_info "  URL      : https://${route_host}"
-    print_info "  Username : admin"
-    print_info "  Password : ${password}"
     echo ""
 }
 
