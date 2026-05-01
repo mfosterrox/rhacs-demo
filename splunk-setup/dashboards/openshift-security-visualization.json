@@ -1,0 +1,146 @@
+{
+    "title": "OpenShift Security Visualization",
+    "description": "RHACS compliance overview (stackrox-compliance). Import via Splunk Dashboard Studio.",
+    "inputs": {
+        "input_global_trp": {
+            "options": {
+                "defaultValue": "-24h@h,now",
+                "token": "global_time"
+            },
+            "title": "Global Time Range",
+            "type": "input.timerange"
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$global_time.earliest$",
+                        "latest": "$global_time.latest$"
+                    }
+                }
+            },
+            "ds.spl2": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$global_time.earliest$",
+                        "latest": "$global_time.latest$"
+                    }
+                }
+            }
+        },
+        "visualizations": {
+            "global": {
+                "showProgressBar": true
+            }
+        }
+    },
+    "visualizations": {
+        "viz_8W92STWp": {
+            "containerOptions": {
+                "visibility": {}
+            },
+            "dataSources": {
+                "primary": "ds_Vrf7Agls"
+            },
+            "options": {
+                "collapseExcludeZero": true,
+                "collapseThreshold": 0,
+                "label": "> primary | seriesByName('Status')",
+                "labelDisplay": "valuesAndPercentage",
+                "seriesColors": [
+                    "#009CEB",
+                    "#4CBB17",
+                    "#EE0000",
+                    "#DD9900",
+                    "#FF677B",
+                    "#CB2196",
+                    "#813193",
+                    "#0051B5",
+                    "#008C80",
+                    "#99B100",
+                    "#FFA476",
+                    "#FF6ACE",
+                    "#AE8CFF",
+                    "#00689D",
+                    "#00490A",
+                    "#465D00",
+                    "#9D6300",
+                    "#F6540B",
+                    "#FF969E",
+                    "#E47BFE"
+                ],
+                "value": "> primary | seriesByName('count')"
+            },
+            "title": "RHACS Compliance Posture",
+            "type": "splunk.pie"
+        }
+    },
+    "dataSources": {
+        "ds_Vrf7Agls": {
+            "name": "Compliance Breakdown",
+            "options": {
+                "enableSmartSources": true,
+                "query": "sourcetype=stackrox-compliance\n| stats latest(compliance_status) as compliance_status by compliance_check_name\n| eval Status = case(\n    compliance_status=\"Pass\", \"✅ Pass\",\n    compliance_status=\"Fail\", \"❌ Fail\",\n    compliance_status=\"Error\", \"⚠️ Error\",\n    compliance_status=\"Inconsistent\", \"❗ Inconsistent\",\n    compliance_status=\"Info\", \"ℹ️ Info\",\n    compliance_status=\"Manual\", \"🔧 Manual\",\n    compliance_status=\"Not Applicable\", \"➖ Not Applicable\",\n    true(), compliance_status\n)\n| stats count by Status",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_qYzKpPa1": {
+            "name": "Compliance Status",
+            "options": {
+                "query": "sourcetype=stackrox-compliance \n| table _time, host, compliance_check_name, compliance_status, description, severity, details\n| sort compliance_status, -_time\n| eval Status_Color = case(\n    compliance_status=\"Pass\", \"green\",\n    compliance_status=\"Fail\", \"red\",\n    compliance_status=\"Error\", \"red\",\n    compliance_status=\"Inconsistent\", \"red\",\n    compliance_status=\"Info\", \"blue\",\n    compliance_status=\"Manual\", \"yellow\",\n    compliance_status=\"Not Applicable\", \"gray\",\n    true(), \"default\"\n)",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        }
+    },
+    "layout": {
+        "globalInputs": [
+            "input_global_trp"
+        ],
+        "layoutDefinitions": {
+            "layout_1": {
+                "options": {
+                    "backgroundColor": "#EE0000",
+                    "height": 960,
+                    "width": 1440
+                },
+                "structure": [
+                    {
+                        "item": "viz_8W92STWp",
+                        "position": {
+                            "h": 400,
+                            "w": 1440,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            }
+        },
+        "options": {},
+        "tabs": {
+            "items": [
+                {
+                    "label": "Compliance",
+                    "layoutId": "layout_1"
+                }
+            ]
+        }
+    },
+    "applicationProperties": {
+        "collapseNavigation": false,
+        "hideEdit": false,
+        "hideExport": false
+    }
+}

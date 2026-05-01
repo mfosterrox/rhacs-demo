@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run basic-setup first (sequential), then the other *-setup installs in parallel (FAM, monitoring,
-# MCP, OpenShift Pipelines/Tekton RHACS tasks, and GitOps-deployed RHACS custom policies).
+# MCP, OpenShift Pipelines/Tekton RHACS tasks, Splunk + RHACS TA, and GitOps-deployed RHACS custom policies).
 # Order avoids RHACS Central churn (e.g. upgrades/restarts) while other scripts use the API.
 #
 # Typical usage:
@@ -19,7 +19,11 @@
 #
 # Optional skip flags (export before running):
 #   SKIP_OPENSHIFT_PIPELINES_SETUP=1 — do not run openshift-pipelines-setup/install.sh (Tekton / rox-pipeline)
+#   SKIP_SPLUNK_SETUP=1 — do not run splunk-setup/install.sh (OpenShift Splunk + RHACS technology add-on)
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
+#
+# Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false when invoked from here so reruns do not
+# wipe the namespace; export SPLUNK_RUN_CLEAN_FIRST=true for a full teardown+reinstall (see splunk-setup/setup.sh).
 # After install: ./verify-all-setup.sh
 #
 # On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.
@@ -291,7 +295,7 @@ main() {
         print_info "Started ${n} (pid ${pid}) → ${lg}"
     }
 
-    print_step "Phase 2: FAM, monitoring, MCP, OpenShift Pipelines, custom-policies (parallel)"
+    print_step "Phase 2: FAM, monitoring, MCP, OpenShift Pipelines, Splunk, custom-policies (parallel)"
     if [ "${SKIP_FAM_SETUP:-0}" != "1" ] && [ "${SKIP_FIM_SETUP:-0}" != "1" ]; then
         add_job fam-setup "${REPO_ROOT}/fam-setup/install.sh"
     fi
@@ -303,6 +307,9 @@ main() {
     fi
     if [ "${SKIP_OPENSHIFT_PIPELINES_SETUP:-0}" != "1" ]; then
         add_job openshift-pipelines-setup "${REPO_ROOT}/openshift-pipelines-setup/install.sh"
+    fi
+    if [ "${SKIP_SPLUNK_SETUP:-0}" != "1" ]; then
+        add_job splunk-setup "${REPO_ROOT}/splunk-setup/install.sh"
     fi
     if [ "${SKIP_CUSTOM_POLICIES_SETUP:-0}" != "1" ]; then
         add_job custom-policies "${REPO_ROOT}/custom-policies/install.sh"

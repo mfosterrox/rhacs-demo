@@ -30,8 +30,8 @@
 #   RHACS_SPLUNK_ADDON_TOKEN Fallback for TA-stackrox api_token only when ROX_API_TOKEN is unset.
 #   RHACS_SPLUNK_GENERATE_ANALYST_TOKEN  If true, mint Analyst JWT via Central using the resolved token as bearer.
 #       Default false: write the resolved token into the add-on as-is.
-#   RHACS_SPLUNK_ADDON_INTERVAL Poll interval (seconds) for Compliance + Vulnerability inputs (default: 14400)
-#   RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS  Poll interval for Violations input (default: 60; ship uses 60; use 300 for demos)
+#   RHACS_SPLUNK_ADDON_INTERVAL Poll interval (seconds) for Compliance + Vulnerability inputs (default: 300)
+#   RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS  Poll interval for Violations input (default: 300; set 60/14400 to match ship or prod)
 #   SPLUNK_SKIP_ADDON_SETTINGS_IF_ENDPOINT_MATCHES  If true, skip REST when Central Endpoint already matches (default: false).
 #       Keep false: endpoint match does not mean api_token was persisted (common cause of missing token / no events).
 #   SPLUNK_FORCE_ADDON_SETTINGS_UPDATE  Set true to re-POST settings even when skip logic would apply (default: false).
@@ -884,8 +884,8 @@ configure_rhacs_addon_inputs() {
         return 1
     fi
 
-    local interval_slow="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
-    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-60}"
+    local interval_slow="${RHACS_SPLUNK_ADDON_INTERVAL:-300}"
+    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-300}"
     local index_name="${SPLUNK_ADDON_INDEX:-main}"
 
     print_step "Configuring RHACS Splunk add-on inputs via API"
@@ -898,8 +898,8 @@ configure_rhacs_addon_inputs() {
 
 print_rhacs_addon_configuration_steps() {
     local rox_central="${ROX_CENTRAL_ADDRESS:-}"
-    local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-14400}"
-    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-60}"
+    local interval="${RHACS_SPLUNK_ADDON_INTERVAL:-300}"
+    local interval_violations="${RHACS_SPLUNK_ADDON_INTERVAL_VIOLATIONS:-300}"
     local central_hostport=""
 
     if [ -n "${rox_central}" ]; then
@@ -947,6 +947,8 @@ print_final_details() {
     local password="$4"
     local addon_sha="${SPLUNK_RHACS_ADDON_SHA256:-b5a70ae58e185303dd3831a1d9de6db2c92d44f17058a060e04a2430774e8335}"
     local hec_scheme="${SPLUNK_HEC_SCHEME:-https}"
+    local script_dir=""
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     echo ""
     print_info "======================================"
@@ -966,6 +968,10 @@ print_final_details() {
     print_info "  Settings → Apps → Manage Apps → search \"Red Hat Advanced Cluster Security\" or TA-stackrox"
     print_info "Verify data (after inputs run):"
     print_info "  index=* sourcetype=\"stackrox-*\""
+    print_info ""
+    print_info "Dashboard Studio (optional):"
+    print_info "  Export JSON: ${script_dir}/dashboards/openshift-security-visualization.json"
+    print_info "  Splunk Web → Dashboards → Create → Dashboard Studio → … → Import (or paste definition)."
     print_info ""
     print_info "Cleanup:"
     print_info "  ./clean.sh"
