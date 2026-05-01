@@ -21,6 +21,12 @@ MCP_ROUTE_NAME="${MCP_ROUTE_NAME:-stackrox-mcp}"
 MCP_HEALTH_PATH="${MCP_HEALTH_PATH:-/health}"
 MCP_ROLLOUT_TIMEOUT="${MCP_ROLLOUT_TIMEOUT:-120s}"
 
+# OpenShift Lightspeed OLSConfig (optional cluster resource — skipped when absent)
+LIGHTSPEED_CHECK_OLSCONFIG="${LIGHTSPEED_CHECK_OLSCONFIG:-true}"
+LIGHTSPEED_NAMESPACE="${LIGHTSPEED_NAMESPACE:-openshift-lightspeed}"
+LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
+LIGHTSPEED_MCP_SERVER_NAME="${LIGHTSPEED_MCP_SERVER_NAME:-stackrox-mcp}"
+
 FAILURES=0
 
 check_prereqs() {
@@ -100,6 +106,71 @@ check_route_health() {
     fi
 }
 
+check_olsconfig_mcp() {
+    if [ "${LIGHTSPEED_CHECK_OLSCONFIG}" != "true" ]; then
+        print_warn "Skipping OLSConfig checks (LIGHTSPEED_CHECK_OLSCONFIG=${LIGHTSPEED_CHECK_OLSCONFIG})"
+        return 0
+    fi
+
+    print_step "Validating OpenShift Lightspeed OLSConfig (MCP wiring)"
+
+    local ols_json scope
+    ols_json=""
+    scope=""
+    if oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -o json &>/dev/null; then
+        ols_json="$(oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -o json)"
+        scope="cluster"
+    elif oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o json &>/dev/null; then
+        ols_json="$(oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" -o json)"
+        scope="namespace/${LIGHTSPEED_NAMESPACE}"
+    else
+        print_ok "OLSConfig not found (OpenShift Lightspeed may not be installed); skipping MCP wiring checks"
+        return 0
+    fi
+
+    print_ok "OLSConfig present (${scope}: ${LIGHTSPEED_OLSCONFIG_NAME})"
+
+    if jq -e '.spec.featureGates // [] | any(. == "MCPServer")' <<< "${ols_json}" >/dev/null 2>&1; then
+        print_ok "spec.featureGates includes MCPServer"
+    else
+        print_fail "spec.featureGates does not include MCPServer (required for Lightspeed MCP)"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    if jq -e --arg n "${LIGHTSPEED_MCP_SERVER_NAME}" '.spec.mcpServers // [] | any(.name == $n)' <<< "${ols_json}" >/dev/null 2>&1; then
+        print_ok "spec.mcpServers includes \"${LIGHTSPEED_MCP_SERVER_NAME}\""
+    else
+        print_fail "spec.mcpServers has no entry named \"${LIGHTSPEED_MCP_SERVER_NAME}\""
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    local configured_url
+    configured_url="$(jq -r --arg n "${LIGHTSPEED_MCP_SERVER_NAME}" \
+        '.spec.mcpServers // [] | map(select(.name == $n)) | .[0] | (.streamableHTTP.url // .url // empty)' <<< "${ols_json}")"
+
+    if [ -z "${configured_url}" ]; then
+        print_fail "No MCP URL (.url / .streamableHTTP.url) for \"${LIGHTSPEED_MCP_SERVER_NAME}\""
+        FAILURES=$((FAILURES + 1))
+        return 0
+    fi
+
+    local expected_internal expected_route route_host
+    expected_internal="http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp"
+    route_host="$(oc get route "${MCP_ROUTE_NAME}" -n "${MCP_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+    expected_route=""
+    if [ -n "${route_host}" ]; then
+        expected_route="https://${route_host}/mcp"
+    fi
+
+    if [ "${configured_url}" = "${expected_internal}" ]; then
+        print_ok "MCP URL matches in-cluster endpoint (${configured_url})"
+    elif [ -n "${expected_route}" ] && [ "${configured_url}" = "${expected_route}" ]; then
+        print_ok "MCP URL matches Route endpoint (${configured_url})"
+    else
+        print_warn "MCP URL is \"${configured_url}\" (expected ${expected_internal} or ${expected_route:-<no route>})"
+    fi
+}
+
 main() {
     echo ""
     print_step "MCP server smoke test"
@@ -108,6 +179,7 @@ main() {
     check_prereqs
     check_namespace_and_deployment
     check_route_health
+    check_olsconfig_mcp
 
     echo ""
     if [ "${FAILURES}" -eq 0 ]; then

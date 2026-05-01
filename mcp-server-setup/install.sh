@@ -26,6 +26,17 @@ LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
 LIGHTSPEED_MCP_SERVER_NAME="${LIGHTSPEED_MCP_SERVER_NAME:-stackrox-mcp}"
 LIGHTSPEED_AUTH_SECRET_NAME="${LIGHTSPEED_AUTH_SECRET_NAME:-stackrox-mcp-authorization-header}"
 LIGHTSPEED_VALIDATE="${LIGHTSPEED_VALIDATE:-true}"
+# Merge-patch OLSConfig with MCPServer gate + StackRox MCP entry (idempotent; preserves other gates/servers).
+LIGHTSPEED_PATCH_OLSCONFIG="${LIGHTSPEED_PATCH_OLSCONFIG:-true}"
+# After a successful patch: restart Lightspeed so it picks up spec changes (set false to restart manually).
+LIGHTSPEED_RESTART_AFTER_PATCH="${LIGHTSPEED_RESTART_AFTER_PATCH:-true}"
+# MCP URL written into OLSConfig: internal (in-cluster) | route (OpenShift Route URL). Route matches typical workshop/docs examples.
+LIGHTSPEED_MCP_URL_STYLE="${LIGHTSPEED_MCP_URL_STYLE:-internal}"
+# Optional override for the MCP URL in OLSConfig (wins over LIGHTSPEED_MCP_URL_STYLE).
+LIGHTSPEED_MCP_OLS_URL="${LIGHTSPEED_MCP_OLS_URL:-}"
+
+declare -a OLS_CMD=()
+OLS_SCOPE=""
 
 _RHACS_DEMO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1090
@@ -121,6 +132,184 @@ ensure_lightspeed_auth_secret() {
     print_info "✓ Lightspeed auth secret is present: ${LIGHTSPEED_NAMESPACE}/${LIGHTSPEED_AUTH_SECRET_NAME}"
 }
 
+# Sets global OLS_CMD (array) and OLS_SCOPE when OLSConfig exists; returns non-zero if not found / unreadable.
+resolve_ols_cmd() {
+    OLS_CMD=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}")
+    if ! "${OLS_CMD[@]}" >/dev/null 2>&1; then
+        OLS_CMD=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}")
+        if ! "${OLS_CMD[@]}" >/dev/null 2>&1; then
+            return 1
+        fi
+        OLS_SCOPE="namespaced"
+    else
+        OLS_SCOPE="cluster"
+    fi
+    return 0
+}
+
+patch_lightspeed_olsconfig() {
+    [ "${LIGHTSPEED_PATCH_OLSCONFIG}" = "true" ] || return 0
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        print_warn "python3 not found; skipping OLSConfig auto-patch (install python3 or patch olsconfig manually)."
+        return 0
+    fi
+
+    print_step "OpenShift Lightspeed: updating OLSConfig for MCP (if needed)..."
+
+    local route_host
+    route_host=$(mcp_oc get route stackrox-mcp -n "${MCP_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)
+    local internal_url route_url mcp_url_for_ols
+    internal_url="http://stackrox-mcp.${MCP_NAMESPACE}:8080/mcp"
+    route_url=""
+    if [ -n "${route_host}" ]; then
+        route_url="https://${route_host}/mcp"
+    fi
+
+    if [ -n "${LIGHTSPEED_MCP_OLS_URL}" ]; then
+        mcp_url_for_ols="${LIGHTSPEED_MCP_OLS_URL}"
+    elif [ "${LIGHTSPEED_MCP_URL_STYLE}" = "route" ] && [ -n "${route_url}" ]; then
+        mcp_url_for_ols="${route_url}"
+    else
+        mcp_url_for_ols="${internal_url}"
+        if [ "${LIGHTSPEED_MCP_URL_STYLE}" = "route" ] && [ -z "${route_url}" ]; then
+            print_warn "LIGHTSPEED_MCP_URL_STYLE=route but no Route host yet; using internal URL ${internal_url}"
+        fi
+    fi
+
+    if ! resolve_ols_cmd; then
+        print_warn "OLSConfig '${LIGHTSPEED_OLSCONFIG_NAME}' not readable; skipping auto-patch."
+        print_warn "When Lightspeed is installed, enable MCP with: oc get olsconfig ${LIGHTSPEED_OLSCONFIG_NAME}"
+        return 0
+    fi
+    print_info "Detected OLSConfig scope: ${OLS_SCOPE}"
+
+    local tmpjson patched
+    tmpjson=$(mktemp) || return 0
+    patched=$(mktemp) || {
+        rm -f "${tmpjson}"
+        return 0
+    }
+    if ! "${OLS_CMD[@]}" -o json > "${tmpjson}" 2>/dev/null; then
+        print_warn "Could not export OLSConfig JSON; skipping auto-patch."
+        rm -f "${tmpjson}" "${patched}"
+        return 0
+    fi
+
+    export _OLS_PATCH_JSON_IN="${tmpjson}"
+    export _OLS_PATCH_JSON_OUT="${patched}"
+    export _OLS_MCP_URL="${mcp_url_for_ols}"
+    export _OLS_USE_STATIC="${USE_STATIC_AUTH}"
+    export _OLS_AUTH_SECRET="${LIGHTSPEED_AUTH_SECRET_NAME}"
+    export _OLS_MCP_NAME="${LIGHTSPEED_MCP_SERVER_NAME}"
+
+    local change_hint py_stat
+    set +e
+    change_hint=$(python3 - <<'PY'
+import copy, json, os, sys
+
+inp_path = os.environ["_OLS_PATCH_JSON_IN"]
+out_path = os.environ["_OLS_PATCH_JSON_OUT"]
+mcp_url = os.environ["_OLS_MCP_URL"]
+use_static = os.environ.get("_OLS_USE_STATIC") == "true"
+auth_secret = os.environ["_OLS_AUTH_SECRET"]
+mcp_name = os.environ["_OLS_MCP_NAME"]
+
+try:
+    with open(inp_path, encoding="utf-8") as f:
+        doc = json.load(f)
+except Exception as e:
+    print(f"error: {e}", file=sys.stderr)
+    sys.exit(1)
+
+orig = copy.deepcopy(doc)
+spec = doc.setdefault("spec", {})
+
+orig_fg = list((orig.get("spec") or {}).get("featureGates") or [])
+orig_srv = copy.deepcopy((orig.get("spec") or {}).get("mcpServers") or [])
+
+fg = list(spec.get("featureGates") or [])
+if "MCPServer" not in fg:
+    fg.append("MCPServer")
+spec["featureGates"] = fg
+
+servers_in = list(spec.get("mcpServers") or [])
+entry = {
+    "name": mcp_name,
+    "url": mcp_url,
+    "timeout": 60,
+}
+if use_static:
+    entry["headers"] = [
+        {
+            "name": "Authorization",
+            "valueFrom": {
+                "type": "secret",
+                "secretRef": {"name": auth_secret},
+            },
+        }
+    ]
+
+servers_out = []
+replaced = False
+for s in servers_in:
+    if isinstance(s, dict) and s.get("name") == mcp_name:
+        merged = {**s, **entry}
+        servers_out.append(merged)
+        replaced = True
+    else:
+        servers_out.append(s)
+if not replaced:
+    servers_out.append(entry)
+spec["mcpServers"] = servers_out
+
+changed = orig_fg != fg or json.dumps(orig_srv, sort_keys=True) != json.dumps(servers_out, sort_keys=True)
+
+fragment = {"spec": {"featureGates": spec["featureGates"], "mcpServers": spec["mcpServers"]}}
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(fragment, f)
+
+print("changed" if changed else "unchanged")
+PY
+)
+    py_stat=$?
+    set -euo pipefail
+
+    if [ "${py_stat}" -ne 0 ] || [ -z "${change_hint}" ]; then
+        print_warn "OLSConfig merge helper failed; skipping auto-patch."
+        rm -f "${tmpjson}" "${patched}"
+        return 0
+    fi
+
+    change_hint=$(printf '%s\n' "${change_hint}" | tail -n1)
+
+    if [ "${change_hint}" = "changed" ]; then
+        print_info "Applying OLSConfig merge patch (MCPServer gate + MCP server '${LIGHTSPEED_MCP_SERVER_NAME}' → ${mcp_url_for_ols})..."
+        local patch_rc=0
+        if [ "${OLS_SCOPE}" = "cluster" ]; then
+            mcp_oc patch olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" --type=merge -p "$(cat "${patched}")" || patch_rc=$?
+        else
+            mcp_oc patch olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}" --type=merge -p "$(cat "${patched}")" || patch_rc=$?
+        fi
+        if [ "${patch_rc}" -ne 0 ]; then
+            print_warn "oc patch olsconfig failed (exit ${patch_rc}); apply the merge patch manually."
+            rm -f "${tmpjson}" "${patched}"
+            return 0
+        fi
+        print_info "✓ OLSConfig updated"
+        if [ "${LIGHTSPEED_RESTART_AFTER_PATCH}" = "true" ]; then
+            if mcp_oc get deployment lightspeed-app-server -n "${LIGHTSPEED_NAMESPACE}" &>/dev/null; then
+                print_info "Restarting lightspeed-app-server so Lightspeed reloads OLSConfig..."
+                mcp_oc rollout restart deployment/lightspeed-app-server -n "${LIGHTSPEED_NAMESPACE}" >/dev/null 2>&1 || true
+            fi
+        fi
+    else
+        print_info "OLSConfig already lists MCPServer and MCP entry '${LIGHTSPEED_MCP_SERVER_NAME}'; no merge patch needed."
+    fi
+
+    rm -f "${tmpjson}" "${patched}"
+}
+
 validate_lightspeed_mcp_integration() {
     [ "${LIGHTSPEED_VALIDATE}" = "true" ] || {
         print_warn "Skipping OpenShift Lightspeed validation (LIGHTSPEED_VALIDATE=${LIGHTSPEED_VALIDATE})"
@@ -138,15 +327,7 @@ validate_lightspeed_mcp_integration() {
     fi
 
     # OLSConfig can be cluster-scoped (common) or namespaced (future/operator-specific).
-    local ols_scope ols_cmd
-    ols_scope="cluster"
-    ols_cmd=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}")
-    if ! "${ols_cmd[@]}" >/dev/null 2>&1; then
-        ols_scope="namespaced"
-        ols_cmd=(mcp_oc get olsconfig "${LIGHTSPEED_OLSCONFIG_NAME}" -n "${LIGHTSPEED_NAMESPACE}")
-    fi
-
-    if ! "${ols_cmd[@]}" >/dev/null 2>&1; then
+    if ! resolve_ols_cmd; then
         local can_get_cluster can_get_ns
         can_get_cluster="$(mcp_oc auth can-i get olsconfig 2>/dev/null || true)"
         can_get_ns="$(mcp_oc auth can-i get olsconfig -n "${LIGHTSPEED_NAMESPACE}" 2>/dev/null || true)"
@@ -155,13 +336,13 @@ validate_lightspeed_mcp_integration() {
         print_warn "Verify with: oc get olsconfig ${LIGHTSPEED_OLSCONFIG_NAME} || oc get olsconfig ${LIGHTSPEED_OLSCONFIG_NAME} -n ${LIGHTSPEED_NAMESPACE}"
         return 0
     fi
-    print_info "Detected OLSConfig scope: ${ols_scope}"
+    print_info "Detected OLSConfig scope: ${OLS_SCOPE}"
 
     # OLS MCP configuration lives at top-level spec.featureGates/spec.mcpServers.
     # If these are absent, Lightspeed may be installed but MCP integration is not configured.
     local has_featuregates_key has_mcpservers_key
-    has_featuregates_key=$("${ols_cmd[@]}" -o jsonpath='{.spec.featureGates}' 2>/dev/null || true)
-    has_mcpservers_key=$("${ols_cmd[@]}" -o jsonpath='{.spec.mcpServers}' 2>/dev/null || true)
+    has_featuregates_key=$("${OLS_CMD[@]}" -o jsonpath='{.spec.featureGates}' 2>/dev/null || true)
+    has_mcpservers_key=$("${OLS_CMD[@]}" -o jsonpath='{.spec.mcpServers}' 2>/dev/null || true)
     if [ -z "${has_featuregates_key}" ] && [ -z "${has_mcpservers_key}" ]; then
         print_warn "OLSConfig exists, but MCP integration fields are not configured yet."
         print_warn "Missing: spec.featureGates and spec.mcpServers."
@@ -190,7 +371,7 @@ validate_lightspeed_mcp_integration() {
 
     # 1) OLSConfig should include MCP server feature gate.
     local feature_gates
-    feature_gates=$("${ols_cmd[@]}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
+    feature_gates=$("${OLS_CMD[@]}" -o jsonpath='{.spec.featureGates[*]}' 2>/dev/null || true)
     if [ -z "${feature_gates}" ]; then
         print_warn "OLSConfig ${LIGHTSPEED_OLSCONFIG_NAME} found, but spec.featureGates is empty."
         print_warn "If you use OpenShift Lightspeed MCP integration, set spec.featureGates to include MCPServer."
@@ -206,7 +387,7 @@ validate_lightspeed_mcp_integration() {
 
     # 2) MCP server entry should exist and use streamableHTTP / URL.
     local has_server_entry server_url streamable_url
-    has_server_entry=$("${ols_cmd[@]}" \
+    has_server_entry=$("${OLS_CMD[@]}" \
         -o jsonpath="{range .spec.mcpServers[*]}{.name}{'\n'}{end}" 2>/dev/null | grep -x "${LIGHTSPEED_MCP_SERVER_NAME}" || true)
     if [ -z "${has_server_entry}" ]; then
         print_error "spec.mcpServers does not contain '${LIGHTSPEED_MCP_SERVER_NAME}' in olsconfig/${LIGHTSPEED_OLSCONFIG_NAME}."
@@ -214,9 +395,9 @@ validate_lightspeed_mcp_integration() {
         return 1
     fi
 
-    server_url=$("${ols_cmd[@]}" \
+    server_url=$("${OLS_CMD[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.url}{end}" 2>/dev/null || true)
-    streamable_url=$("${ols_cmd[@]}" \
+    streamable_url=$("${OLS_CMD[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.url}{end}" 2>/dev/null || true)
     local configured_url
     configured_url="${streamable_url:-$server_url}"
@@ -237,10 +418,10 @@ validate_lightspeed_mcp_integration() {
     # 3) Auth consistency: static MCP auth should have header-based auth in OLSConfig.
     local has_auth_header
     has_auth_header=""
-    has_auth_header=$("${ols_cmd[@]}" \
+    has_auth_header=$("${OLS_CMD[@]}" \
         -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')]}{.streamableHTTP.headers.authorization}{end}" 2>/dev/null || true)
     if [ -z "${has_auth_header}" ]; then
-        has_auth_header=$("${ols_cmd[@]}" \
+        has_auth_header=$("${OLS_CMD[@]}" \
             -o jsonpath="{range .spec.mcpServers[?(@.name=='${LIGHTSPEED_MCP_SERVER_NAME}')].headers[*]}{.name}:{.valueFrom.type}:{.valueFrom.secretRef.name}{'\n'}{end}" 2>/dev/null || true)
     fi
     if [ "${USE_STATIC_AUTH}" = true ] && [ -z "${has_auth_header}" ]; then
@@ -287,7 +468,7 @@ validate_lightspeed_mcp_integration() {
         else
             print_warn "lightspeed-app-server not ready (${ls_ready}/${ls_desired})."
         fi
-        print_info "If OLSConfig (${ols_scope}-scoped) was updated, restart to pick up changes:"
+        print_info "If OLSConfig (${OLS_SCOPE}-scoped) was updated, restart to pick up changes:"
         print_info "  oc rollout restart deployment/lightspeed-app-server -n ${LIGHTSPEED_NAMESPACE}"
     fi
 }
@@ -403,6 +584,7 @@ main() {
     print_info "✓ StackRox MCP server deployed"
     echo ""
 
+    patch_lightspeed_olsconfig
     validate_lightspeed_mcp_integration
     echo ""
 
