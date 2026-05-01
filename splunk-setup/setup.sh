@@ -22,7 +22,12 @@
 #   SPLUNK_SKIP_CLI_READY_WAIT   Set to 1 to skip the operational wait (default: 0).
 #   SPLUNK_RECYCLE_POD_AFTER_APP_CHANGE  After add-on install/settings, delete the Splunk pod instead of
 #       blocking in-container "splunk restart" (default: true; avoids failed exec if the container restarts).
-#   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest)
+#   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest).
+#       On clusters subject to Docker Hub anonymous rate limits, use SPLUNK_IMAGE_PULL_SECRET (below)
+#       or mirror the image to your registry and point SPLUNK_IMAGE there.
+#   SPLUNK_IMAGE_PULL_SECRET  Optional: name of a docker-registry Secret in SPLUNK_NAMESPACE used as
+#       imagePullSecrets (create with: oc create secret docker-registry ... --docker-server=docker.io ...
+#       then oc secrets link splunk-sa <secret> --for=pull -n splunk). Raises Hub pull limits from anonymous.
 #   SPLUNK_ROUTE_TERMINATION Route type: edge|passthrough|reencrypt (default: edge)
 #   SPLUNK_INSTALL_RHACS_ADDON  Install RHACS Splunk add-on tarball (default: true)
 #   SPLUNK_RHACS_ADDON_FILE     Path to add-on package (default: ./red-hat-advanced-cluster-security-splunk-technology-add-on_300.spl)
@@ -1142,6 +1147,10 @@ main() {
     local storage_size="${SPLUNK_STORAGE_SIZE:-20Gi}"
     local etc_storage_size="${SPLUNK_ETC_STORAGE_SIZE:-5Gi}"
     local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
+    local image_pull_secret_block=""
+    if [ -n "${SPLUNK_IMAGE_PULL_SECRET:-}" ]; then
+        image_pull_secret_block="$(printf '%s\n' "      imagePullSecrets:" "        - name: ${SPLUNK_IMAGE_PULL_SECRET}")"
+    fi
     local route_termination="${SPLUNK_ROUTE_TERMINATION:-edge}"
     local password="${SPLUNK_PASSWORD_DEFAULT:-RhacsSplunkDemo123!}"
     local skip_if_ready="${SPLUNK_SKIP_IF_READY:-true}"
@@ -1251,6 +1260,7 @@ spec:
         # grant anyuid to ${name}-sa so the image can run its intended root→splunk startup.
         fsGroup: 41812
       serviceAccountName: ${name}-sa
+${image_pull_secret_block}
       initContainers:
         # Mounting an empty PVC over /opt/splunk/etc hides the image's factory etc. Seed once from the image.
         - name: seed-splunk-etc
