@@ -22,8 +22,9 @@
 #   SKIP_SPLUNK_SETUP=1 — do not run splunk-setup/install.sh (OpenShift Splunk + RHACS technology add-on)
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
 #
-# Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false when invoked from here so reruns do not
-# wipe the namespace; export SPLUNK_RUN_CLEAN_FIRST=true for a full teardown+reinstall (see splunk-setup/setup.sh).
+# Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false. Parallel Phase 2 assumes the cluster may
+# already have Splunk from an earlier run or manual deploy — skipping clean avoids deleting PVCs and fits additive
+# demos. For greenfield Splunk only: run ./splunk-setup/clean.sh first, or SPLUNK_RUN_CLEAN_FIRST=true bash ./splunk-setup/install.sh.
 # After install: ./verify-all-setup.sh
 #
 # On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.

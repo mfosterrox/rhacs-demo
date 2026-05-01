@@ -6,8 +6,9 @@
 # Uses ROX_CENTRAL_ADDRESS and ROX_API_TOKEN from the environment (e.g. install-all-setup.sh).
 #
 # Optional env:
-#   SPLUNK_RUN_CLEAN_FIRST — passed through (default here: false so install-all does not delete the
-#       splunk namespace on every full-demo run). Set true for a clean reinstall.
+#   SPLUNK_RUN_CLEAN_FIRST — default false when using this wrapper (e.g. from install-all-setup.sh).
+#       Matches “environment already up”: reuse Splunk namespace/PVCs and only reconcile install/settings.
+#       Run splunk-setup/clean.sh yourself first, or export SPLUNK_RUN_CLEAN_FIRST=true here, for full teardown.
 #   Other SPLUNK_* / RHACS_* vars — see splunk-setup/setup.sh header.
 #
 

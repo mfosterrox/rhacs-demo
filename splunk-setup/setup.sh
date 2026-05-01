@@ -797,7 +797,13 @@ ensure_stackrox_input() {
     local sync_intervals="${SPLUNK_SYNC_ADDON_INPUT_INTERVALS:-true}"
     local force_update="${SPLUNK_FORCE_ADDON_INPUTS_UPDATE:-false}"
 
-    local inputs_url="https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs/${stanza}?output_mode=json"
+    # Modular input names contain :// ; path must be URL-encoded or Splunk REST GET misses and POST create → 409.
+    local stanza_enc=""
+    stanza_enc="$(printf '%s' "${stanza}" | jq -sRr @uri 2>/dev/null || true)"
+    if [ -z "${stanza_enc}" ]; then
+        stanza_enc="${stanza}"
+    fi
+    local inputs_url="https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs/${stanza_enc}?output_mode=json"
 
     # curl runs in the pod; capture body+code on stdout (do not rely on pod /tmp on the bastion).
     local combined=""
@@ -847,23 +853,47 @@ ensure_stackrox_input() {
         return 1
     fi
 
-    local create_code
-    create_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -o /tmp/stackrox-input-create.out -w "%{http_code}" \
-        -u "admin:${splunk_password}" \
+    local create_combined=""
+    create_combined="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
+        -w "\n%{http_code}" \
         -X POST \
         "https://127.0.0.1:8089/servicesNS/nobody/TA-stackrox/configs/conf-inputs?output_mode=json" \
         --data-urlencode "name=${stanza}" \
         --data-urlencode "index=${index_name}" \
         --data-urlencode "interval=${interval}" \
         --data-urlencode "disabled=0" 2>/dev/null || true)"
+    local create_code=""
+    create_code="$(echo "${create_combined}" | tail -n1)"
+    local create_body=""
+    create_body="$(echo "${create_combined}" | sed '$d')"
 
-    if ! echo "${create_code}" | grep -qE "^(200|201)$"; then
-        print_warn "Failed to create add-on input ${stanza} (HTTP ${create_code:-n/a})."
-        print_warn "Response: $(cat /tmp/stackrox-input-create.out 2>/dev/null || echo '<empty>')"
+    if echo "${create_code}" | grep -qE "^(200|201)$"; then
+        print_info "Created add-on input: ${stanza}"
+        return 0
+    fi
+
+    # Stale GET (unencoded path) or race: input exists → POST create returns 409 — sync via encoded stanza URL.
+    if echo "${create_code}" | grep -qE "^409$"; then
+        print_info "Add-on input already exists (HTTP 409); applying interval/index: ${stanza}"
+        local sync_code=""
+        sync_code="$(run_splunk_curl "${namespace}" "${pod}" -k -sS -u "admin:${splunk_password}" \
+            -o /dev/null -w "%{http_code}" \
+            -X POST \
+            "${inputs_url}" \
+            --data-urlencode "interval=${interval}" \
+            --data-urlencode "index=${index_name}" \
+            --data-urlencode "disabled=0" 2>/dev/null || true)"
+        if echo "${sync_code}" | grep -qE "^(200|201)$"; then
+            print_info "Updated add-on input (after 409): ${stanza}"
+            return 0
+        fi
+        print_warn "409 then sync failed for ${stanza} (HTTP ${sync_code:-n/a})."
         return 1
     fi
-    print_info "Created add-on input: ${stanza}"
-    return 0
+
+    print_warn "Failed to create add-on input ${stanza} (HTTP ${create_code:-n/a})."
+    print_warn "Response tail: $(echo "${create_body}" | tail -c 600)"
+    return 1
 }
 
 configure_rhacs_addon_inputs() {
