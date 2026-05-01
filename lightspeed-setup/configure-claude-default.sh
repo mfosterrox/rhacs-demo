@@ -2,10 +2,13 @@
 #
 # Configure OpenShift Lightspeed (OLSConfig) to use Claude as the default LLM.
 #
-# OpenShift Lightspeed does not expose a separate "Anthropic API" provider type in OLSConfig.
-# Claude is typically wired either as:
+# Anthropic Console API keys (console.anthropic.com) authenticate requests to api.anthropic.com (e.g. /v1/messages).
+# For arbitrary OpenShift Deployments you might use a Secret key like ANTHROPIC_API_KEY; Lightspeed's operator
+# expects LLM credentials in a Secret data key named "apitoken" per Red Hat docs — this script uses apitoken.
+#
+# OLSConfig does not define a native "anthropic.com / Console key only" provider; Claude is wired as:
 #   - google_vertex_anthropic — Claude on Google Cloud Vertex AI (GCP service account JSON)
-#   - bam — IBM BAM-style endpoint (API URL + token; see your IBM/product docs for the URL)
+#   - bam — BAM-style HTTPS endpoint + token (URL from your environment; not the same as wiring Console key → api.anthropic.com unless documented)
 #
 # Usage:
 #   ./configure-claude-default.sh --backend vertex
@@ -38,14 +41,15 @@ fi
 
 LIGHTSPEED_NAMESPACE="${LIGHTSPEED_NAMESPACE:-openshift-lightspeed}"
 LIGHTSPEED_OLSCONFIG_NAME="${LIGHTSPEED_OLSCONFIG_NAME:-cluster}"
-LIGHTSPEED_SECRET_NAME="${LIGHTSPEED_SECRET_NAME:-lightspeed-claude-credentials}"
+# Red Hat / Anthropic pattern: secret data key must be apitoken (see lightspeed-setup/README.md)
+LIGHTSPEED_SECRET_NAME="${LIGHTSPEED_SECRET_NAME:-anthropic-api-keys}"
 LIGHTSPEED_RESTART="${LIGHTSPEED_RESTART:-true}"
 
 CLAUDE_PROVIDER_NAME="${CLAUDE_PROVIDER_NAME:-claude}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
 
-# vertex | bam
-LIGHTSPEED_CLAUDE_BACKEND="${LIGHTSPEED_CLAUDE_BACKEND:-vertex}"
+# vertex | bam | empty (auto-detect from env when possible)
+LIGHTSPEED_CLAUDE_BACKEND="${LIGHTSPEED_CLAUDE_BACKEND:-}"
 
 # BAM: base URL for your IBM / hosted Claude-compatible endpoint (required for backend=bam)
 LIGHTSPEED_BAM_URL="${LIGHTSPEED_BAM_URL:-}"
@@ -55,6 +59,7 @@ GCP_VERTEX_PROJECT="${GCP_VERTEX_PROJECT:-}"
 GCP_VERTEX_LOCATION="${GCP_VERTEX_LOCATION:-us-central1}"
 
 BACKEND=""
+BACKEND_FROM_CLI=false
 DEFAULTS_ONLY=false
 TOKEN_FILE=""
 TOKEN_ARG=""
@@ -64,7 +69,7 @@ usage() {
     sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
     echo ""
     echo "Options:"
-    echo "  --backend vertex|bam     LLM wiring (default: env LIGHTSPEED_CLAUDE_BACKEND or vertex)"
+    echo "  --backend vertex|bam     LLM wiring (otherwise auto from env, see README)"
     echo "  --defaults-only          Only set spec.ols.defaultProvider / defaultModel (no secret)"
     echo "  --provider-name NAME     Provider name in OLSConfig (default: ${CLAUDE_PROVIDER_NAME})"
     echo "  --model MODEL            Model id (default: ${CLAUDE_MODEL})"
@@ -138,6 +143,7 @@ parse_args() {
         case "$1" in
             --backend)
                 BACKEND="$2"
+                BACKEND_FROM_CLI=true
                 shift 2
                 ;;
             --defaults-only)
@@ -171,6 +177,46 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+# When backend was not set on the CLI and LIGHTSPEED_CLAUDE_BACKEND is empty, pick vertex vs bam from env.
+resolve_backend_auto() {
+    [ "${DEFAULTS_ONLY}" = true ] && return 0
+    if [ "${BACKEND_FROM_CLI}" = true ]; then
+        return 0
+    fi
+    if [ -n "${BACKEND}" ]; then
+        return 0
+    fi
+
+    if [ -n "${GCP_VERTEX_PROJECT}" ] && [ -n "${GOOGLE_APPLICATION_CREDENTIALS}" ] && [ -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+        BACKEND="vertex"
+        print_info "Auto-selected backend: vertex (GCP_VERTEX_PROJECT and GOOGLE_APPLICATION_CREDENTIALS are set)"
+        return 0
+    fi
+    if [ -n "${LIGHTSPEED_BAM_URL}" ]; then
+        BACKEND="bam"
+        print_info "Auto-selected backend: bam (LIGHTSPEED_BAM_URL is set)"
+        return 0
+    fi
+
+    print_error "No backend specified and could not auto-detect from your environment."
+    echo "" >&2
+    echo "OpenShift Lightspeed needs either Google Vertex AI (Claude on GCP) or a BAM-compatible HTTPS endpoint + token." >&2
+    echo "" >&2
+    echo "  Vertex (GCP service account JSON):" >&2
+    echo "    export GCP_VERTEX_PROJECT=my-project" >&2
+    echo "    export GOOGLE_APPLICATION_CREDENTIALS=\"\$HOME/gcp-sa.json\"" >&2
+    echo "    ./lightspeed-setup/configure-claude-default.sh --backend vertex" >&2
+    echo "" >&2
+    echo "  BAM / hosted endpoint + API key:" >&2
+    echo "    export LIGHTSPEED_BAM_URL='https://...'" >&2
+    echo "    export CLAUDE_API_KEY='...'" >&2
+    echo "    ./lightspeed-setup/configure-claude-default.sh --backend bam" >&2
+    echo "" >&2
+    echo "  Or only switch defaults if the provider already exists in OLSConfig:" >&2
+    echo "    ./lightspeed-setup/configure-claude-default.sh --defaults-only --provider-name NAME --model MODEL" >&2
+    exit 1
 }
 
 ensure_secret_bam() {
@@ -309,6 +355,11 @@ main() {
     fi
     print_info "OLSConfig scope: ${OLS_SCOPE}"
 
+    resolve_backend_auto
+    if [ -n "${BACKEND}" ] && [ "${DEFAULTS_ONLY}" != true ]; then
+        print_info "Using LLM backend: ${BACKEND}"
+    fi
+
     local tmpjson patchfile
     tmpjson="$(mktemp)"
     patchfile="$(mktemp)"
@@ -339,7 +390,8 @@ main() {
                 ;;
             vertex)
                 if [ -z "${GCP_VERTEX_PROJECT}" ]; then
-                    print_error "GCP_VERTEX_PROJECT is required for --backend vertex."
+                    print_error "GCP_VERTEX_PROJECT is required for backend=vertex."
+                    echo "Set GCP_VERTEX_PROJECT and GOOGLE_APPLICATION_CREDENTIALS (GCP SA JSON), or use --backend bam with LIGHTSPEED_BAM_URL + CLAUDE_API_KEY." >&2
                     exit 1
                 fi
                 ensure_secret_vertex
