@@ -25,8 +25,9 @@
 # Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false. Parallel Phase 2 assumes the cluster may
 # already have Splunk from an earlier run or manual deploy — skipping clean avoids deleting PVCs and fits additive
 # demos. For greenfield Splunk only: run ./splunk-setup/clean.sh first, or SPLUNK_RUN_CLEAN_FIRST=true bash ./splunk-setup/install.sh.
-# If pulls of splunk/splunk:latest hit Docker Hub rate limits (ErrImagePull / toomanyrequests), create a docker-registry
-# pull secret in namespace splunk, link it to splunk-sa, and export SPLUNK_IMAGE_PULL_SECRET=<secret-name> before install.
+# Splunk defaults to quay.io/mfoster/splunk-mirror:latest (see splunk-setup/setup.sh). For Docker Hub instead,
+# export SPLUNK_IMAGE=docker.io/splunk/splunk:<tag>. If the registry needs auth, create a pull secret in namespace splunk,
+# link it to splunk-sa, and export SPLUNK_IMAGE_PULL_SECRET=<secret-name> before install.
 # After install: ./verify-all-setup.sh
 #
 # On failure, the error output includes a copy-paste "To rerun" command for the phase or parallel job.

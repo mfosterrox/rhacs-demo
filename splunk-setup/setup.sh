@@ -22,9 +22,9 @@
 #   SPLUNK_SKIP_CLI_READY_WAIT   Set to 1 to skip the operational wait (default: 0).
 #   SPLUNK_RECYCLE_POD_AFTER_APP_CHANGE  After add-on install/settings, delete the Splunk pod instead of
 #       blocking in-container "splunk restart" (default: true; avoids failed exec if the container restarts).
-#   SPLUNK_IMAGE            Splunk container image (default: splunk/splunk:latest).
-#       On clusters subject to Docker Hub anonymous rate limits, use SPLUNK_IMAGE_PULL_SECRET (below)
-#       or mirror the image to your registry and point SPLUNK_IMAGE there.
+#   SPLUNK_IMAGE            Splunk container image (default: quay.io/mfoster/splunk-mirror:latest).
+#       Override for your own mirror, e.g. export SPLUNK_IMAGE=docker.io/splunk/splunk:10.2.3
+#       If the default Quay repo is private, create a pull secret and set SPLUNK_IMAGE_PULL_SECRET.
 #   SPLUNK_IMAGE_PULL_SECRET  Optional: name of a docker-registry Secret in SPLUNK_NAMESPACE used as
 #       imagePullSecrets (create with: oc create secret docker-registry ... --docker-server=docker.io ...
 #       then oc secrets link splunk-sa <secret> --for=pull -n splunk). Raises Hub pull limits from anonymous.
@@ -1146,7 +1146,7 @@ main() {
     local name="${SPLUNK_NAME:-splunk}"
     local storage_size="${SPLUNK_STORAGE_SIZE:-20Gi}"
     local etc_storage_size="${SPLUNK_ETC_STORAGE_SIZE:-5Gi}"
-    local image="${SPLUNK_IMAGE:-splunk/splunk:latest}"
+    local image="${SPLUNK_IMAGE:-quay.io/mfoster/splunk-mirror:latest}"
     local image_pull_secret_block=""
     if [ -n "${SPLUNK_IMAGE_PULL_SECRET:-}" ]; then
         image_pull_secret_block="$(printf '%s\n' "      imagePullSecrets:" "        - name: ${SPLUNK_IMAGE_PULL_SECRET}")"
@@ -1253,7 +1253,7 @@ spec:
         app: ${name}
     spec:
       securityContext:
-        # Official splunk/splunk image runs Ansible provisioning as root (see pod logs: PLAY ...
+        # Splunk Enterprise image (upstream splunk/splunk on Docker Hub) runs Ansible provisioning as root (see pod logs: PLAY ...
         # splunk_common ... change_splunk_directory_owner). Setting runAsUser: 41812 breaks that
         # phase (cannot chown / finish provisioning). Do NOT pin UID here.
         # OpenShift "restricted" SCC assigns a random UID → Permission denied on /opt/splunk/* —
