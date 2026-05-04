@@ -56,6 +56,8 @@ OUTPUT:
   ✓ No failed checks (0 warning(s))
 ----
 
+WARNING: ACS Scanner v4 may take a 5-20 minutes to complete the initial scan. This is normal and expected.
+
 == Accessing the Consoles
 
 With a proper installation, you should be able to access the following consoles:
