@@ -29,13 +29,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: 22
       - name: install antora
-        run: npm i -g @antora/cli@3.1 @antora/site-generator@3.1 @sntke/antora-mermaid-extension@0.0.9 @antora/lunr-extension
+        run: npm i -g @antora/cli@3.1 @antora/site-generator@3.1 @sntke/antora-mermaid-extension @antora/lunr-extension
+      - name: patch antora-mermaid-extension
+        run: >-
+          sed -i
+          's/this\.getLogger/context.getLogger/'
+          "$(npm root -g)/@sntke/antora-mermaid-extension/lib/extension.js"
       - name: override ui bundle for gh-pages
         run: >-
           sed -i 's|url: .*ui-bundle.zip|url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/showroom-template/ui-bundle.zip|'
@@ -47,7 +52,7 @@ jobs:
         run: antora --fetch site.yml
       - name: upload pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: www
   deploy:
@@ -60,4 +65,4 @@ jobs:
     steps:
     - name: deploy github pages
       id: deployment
-      uses: actions/deploy-pages@v4
+      uses: actions/deploy-pages@v5
