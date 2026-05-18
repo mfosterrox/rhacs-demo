@@ -1,4 +1,4 @@
-= Module 06: Network graph
+= Module 05: Network graph
 :source-highlighter: rouge
 
 include::partial$_attributes.adoc[]
@@ -63,7 +63,7 @@ The Network Graph functions simultaneously as a flow diagram (what is talking to
 **Presenter tip:** For platform engineers who have tried to diagram their own microservices topology manually, the automatic graph is immediately compelling. The common reaction is "we have been trying to get this view for months." Emphasize that it requires zero manual configuration -- RHACS derives it entirely from observed network activity.
 ====
 
-image::06-network-graph-overview.png[Network Graph showing deployment-level traffic flows across Payments and other namespaces,link=self,window=blank,width=700,title="Network Graph with multiple namespaces selected"]
+image::05-network-graph-overview.png[Network Graph showing deployment-level traffic flows across Payments and other namespaces,link=self,window=blank,width=700,title="Network Graph with multiple namespaces selected"]
 
 // TODO: Capture screenshot of the Network Graph with Payments namespace visible
 
@@ -118,7 +118,7 @@ _Context: The aggregate traffic view shows the topology. Drilling into a specifi
 **Presenter tip:** The anomalous flow is a good entry point for a discussion about incident response. If this were a real lateral movement event, the next step would be to correlate with the Violations page (is there a runtime violation for this deployment?) and the Risk view (does this connection appear in the process activity timeline?). RHACS provides the data to connect those dots.
 ====
 
-image::06-network-deployment-flows.png[Deployment detail panel for visa-processor showing one anomalous flow and three baseline flows,link=self,window=blank,width=700,title="Deployment network flows showing anomalous connection"]
+image::05-network-deployment-flows.png[Deployment detail panel for visa-processor showing one anomalous flow and three baseline flows,link=self,window=blank,width=700,title="Deployment network flows showing anomalous connection"]
 
 // TODO: Capture screenshot of the visa-processor deployment flows panel
 
@@ -190,12 +190,12 @@ The Network Policy Simulator is the clearest illustration of the RHACS design ph
 **Transition:** Next we will cover Integrations -- how RHACS connects to image registries, notification systems, CI/CD tools, and security platforms to fit into the tooling your organization already uses.
 ====
 
-image::06-network-policy-generator.png[Network Policy Simulator showing generated Kubernetes Network Policy YAML for the Payments namespace,link=self,window=blank,width=700,title="Network Policy Simulator output"]
+image::05-network-policy-generator.png[Network Policy Simulator showing generated Kubernetes Network Policy YAML for the Payments namespace,link=self,window=blank,width=700,title="Network Policy Simulator output"]
 
 // TODO: Capture screenshot of the Network Policy generator with YAML output visible
 
 == Assets needed
 
-. `content/modules/ROOT/assets/images/06-network-graph-overview.png` -- Network Graph with Payments and other namespaces selected, showing deployment-level traffic flows
-. `content/modules/ROOT/assets/images/06-network-deployment-flows.png` -- visa-processor deployment detail panel showing anomalous and baseline flows
-. `content/modules/ROOT/assets/images/06-network-policy-generator.png` -- Network Policy Simulator with generated Kubernetes Network Policy YAML
+. `content/modules/ROOT/assets/images/05-network-graph-overview.png` -- Network Graph with Payments and other namespaces selected, showing deployment-level traffic flows
+. `content/modules/ROOT/assets/images/05-network-deployment-flows.png` -- visa-processor deployment detail panel showing anomalous and baseline flows
+. `content/modules/ROOT/assets/images/05-network-policy-generator.png` -- Network Policy Simulator with generated Kubernetes Network Policy YAML

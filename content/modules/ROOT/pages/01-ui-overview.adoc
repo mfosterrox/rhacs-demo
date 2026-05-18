@@ -113,7 +113,7 @@ Security incidents and audits often start with a question: "Are we running this 
 
 . Hover over the left-hand navigation menu and walk through the top-level sections:
 +
-"Each item here represents a core security workflow. We will cover Vulnerability Management, Compliance, Violations, Policy Management, CI/CD integration, and the Network Graph. Platform Configuration at the bottom is where you manage policies, integrations, and access control."
+"Each item here represents a core security workflow. We will cover Vulnerability Management, Compliance, Violations, Policy Management, the Network Graph, and Integrations. Platform Configuration at the bottom is where you manage policies, integrations, and access control."
 
 . Click the *Search* icon in the top bar to open Global Search.
 

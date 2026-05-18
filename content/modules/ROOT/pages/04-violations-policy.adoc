@@ -178,7 +178,7 @@ _Context: Informing teams about policy violations is the starting point. For hig
 
 **Build-time enforcement:**
 
-Enforcement does not have to wait for deploy time. When integrated with a CI/CD pipeline, RHACS can evaluate images against policies during the build stage using `roxctl`. A build that includes a CVE that violates an enforced policy fails the pipeline step, preventing the image from being promoted at all. This is covered in detail in the CI/CD module.
+Enforcement does not have to wait for deploy time. When integrated with a CI/CD pipeline, RHACS can evaluate images against policies during the build stage using `roxctl`. A build that includes a CVE that violates an enforced policy fails the pipeline step, preventing the image from being promoted at all.
 
 === Show
 
@@ -230,7 +230,7 @@ Enforcement does not have to wait for deploy time. When integrated with a CI/CD 
 
 [NOTE]
 ====
-**Transition:** With violations and policy management covered, we move to the CI/CD integration -- showing how RHACS enforcement extends into the development pipeline itself and how developers interact with security findings without leaving their tooling.
+**Transition:** With violations and policy management covered, we move to the Network Graph -- showing how RHACS visualizes observed traffic between deployments and generates Kubernetes Network Policies from the traffic baseline.
 ====
 
 image::04-policy-enforcement-actions.png[Policy behavior edit screen showing Inform and Enforce options with Build and Deploy enforcement switches,link=self,window=blank,width=700,title="Policy enforcement configuration"]
