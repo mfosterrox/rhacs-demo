@@ -6,6 +6,7 @@
 * xref:01-ui-overview.adoc[Module 01: UI overview]
 ** xref:01-ui-overview.adoc#part-1-dashboard-and-top-bar[Dashboard and top bar]
 ** xref:01-ui-overview.adoc#part-2-navigation-and-global-search[Navigation and global search]
+** xref:01-ui-overview.adoc#part-3-openshift-console-security-plugin[OpenShift console security plugin]
 
 * xref:02-vulnerability-management.adoc[Module 02: Vulnerability management and risk]
 ** xref:02-vulnerability-management.adoc#part-1-vulnerability-results-overview[Vulnerability results overview]

@@ -3,9 +3,9 @@
 
 include::partial$_attributes.adoc[]
 
-This module introduces the Red Hat Advanced Cluster Security {rhacs_version} console. Presenters walk through the dashboard, navigation, and global search to establish the full scope of the platform before diving into individual use cases.
+This module introduces the Red Hat Advanced Cluster Security {rhacs_version} console. Presenters walk through the PatternFly-updated dashboard, navigation, global search, and the OpenShift console security plugin to establish the full scope of the platform before diving into individual use cases.
 
-*Estimated time*: 5-8 minutes
+*Estimated time*: 8-12 minutes
 
 == Part 1: Dashboard and top bar
 
@@ -25,6 +25,12 @@ _Context: Securing containerized workloads at scale requires visibility across t
 * Centralized visibility into vulnerabilities, policy violations, network flows, and runtime activity across all connected clusters
 * Actionable data organized by risk priority, not raw alert volume
 
+**What is new in RHACS {rhacs_version} for the portal UI:**
+
+* The RHACS portal uses an updated PatternFly interface across views, pages, and menus. Workflows are unchanged; the experience is modernized and more consistent with Red Hat OpenShift.
+* Central URLs automatically redirect from `HTTP` to `HTTPS`, aligning with OpenShift platform standards.
+* Dashboard policy categories no longer appear duplicated. Casing validation is synchronized between the controller and the UI so you see one clean list.
+
 **Key message for this audience:**
 
 For platform teams, RHACS integrates with OpenShift natively. No agents to manage, no separate infrastructure to run. For security teams, it surfaces Kubernetes-native risk signals that traditional tools miss entirely.
@@ -35,13 +41,15 @@ For platform teams, RHACS integrates with OpenShift natively. No agents to manag
 
 **What I say**:
 
-"Let me start by orienting you to the RHACS console. This is your security operations view for everything running in OpenShift. I'll show you how it's organized before we go deeper into each use case."
+"Let me start by orienting you to the RHACS {rhacs_version} console. This is your security operations view for everything running in OpenShift. The UI was refreshed in PatternFly for this release -- same capabilities, updated experience. I'll show you how it's organized before we go deeper into each use case."
 
 **What I do**:
 
 . Open the RHACS console.
 +
 Access it from the *RHACS Console* tab in the right panel, or navigate directly to {acs_route}[window=blank].
++
+NOTE: If you enter an `http://` Central URL, RHACS {rhacs_version} automatically redirects to `https://`.
 
 . Log in using:
 +
@@ -57,7 +65,7 @@ NOTE: Choose the standard *username and password* option, not the monitoring log
 
 . Walk through the dashboard sections:
 +
-"The dashboard is the security overview for the platform -- risk categories, violation counts, and compliance posture all in one place. Every element is clickable for deeper detail, and the categories are customizable."
+"The dashboard is the security overview for the platform -- risk categories, violation counts, and compliance posture all in one place. Every element is clickable for deeper detail, and the categories are customizable. In {rhacs_version}, policy categories on the dashboard are deduplicated so you see a single, consistent list."
 
 . Hover over the top bar and highlight:
 +
@@ -71,9 +79,10 @@ NOTE: Choose the standard *username and password* option, not the monitoring log
 
 **What they should notice:**
 
+* The PatternFly-updated UI presents the same security workflows with a cleaner, more consistent layout
 * The dashboard aggregates risk signals without requiring manual correlation
 * Cluster and node counts are visible at a glance
-* The UI is organized around security workflows, not raw event streams
+* Policy categories on the dashboard are unified without duplicate entries
 
 [NOTE]
 ====
@@ -82,7 +91,7 @@ NOTE: Choose the standard *username and password* option, not the monitoring log
 
 image::01-rhacs-dashboard.png[RHACS dashboard showing violation counts, risk categories, and compliance posture,link=self,window=blank,width=700,title="RHACS security dashboard"]
 
-// TODO: Capture screenshot of the RHACS dashboard
+// TODO: Capture screenshot of the RHACS 4.10 PatternFly dashboard
 
 == Part 2: Navigation and global search
 
@@ -92,12 +101,18 @@ _Context: The breadth of what RHACS monitors often surprises teams new to the pl
 
 **What RHACS tracks across your environment:**
 
-* Vulnerabilities in container images, running deployments, and cluster nodes
+* Vulnerabilities in container images, running deployments, cluster nodes, and (Technology Preview) virtual machines on OpenShift Virtualization
 * Deployment configuration risk: privileged containers, exposed ports, missing resource limits
 * Network traffic flows between deployments: both observed baseline and anomalous connections
 * Runtime process activity inside pods: what is running and what deviates from the established baseline
 * Policy violations across build, deploy, and runtime lifecycle stages
 * Compliance posture against standards including PCI-DSS, HIPAA, CIS Benchmarks, and NIST SP 800-190
+
+**Navigation changes worth noting in {rhacs_version}:**
+
+* The *Risk* view uses the PatternFly redesign. It remains the place to rank deployments by exploit likelihood and to drill into risk indicators, process discovery, and network activity.
+* The legacy *Configuration Management* dashboard and sub-menus are deprecated. Secrets, RBAC, and deployment inventory remain available through APIs and integrated risk and policy workflows rather than a separate configuration dashboard.
+* *Platform Configuration* at the bottom of the menu is where you manage policies, integrations, collections, and access control.
 
 **Why global search matters for security and platform teams:**
 
@@ -113,7 +128,7 @@ Security incidents and audits often start with a question: "Are we running this 
 
 . Hover over the left-hand navigation menu and walk through the top-level sections:
 +
-"Each item here represents a core security workflow. We will cover Vulnerability Management, Compliance, Violations, Policy Management, the Network Graph, and Integrations. Platform Configuration at the bottom is where you manage policies, integrations, and access control."
+"Each item here represents a core security workflow. We will cover *Risk*, *Vulnerability Management*, *Compliance*, *Violations*, the *Network Graph*, and *Integrations* under *Platform Configuration*. Configuration Management as a standalone dashboard is deprecated in {rhacs_version}; that data now surfaces in Risk and policy workflows."
 
 . Click the *Search* icon in the top bar to open Global Search.
 
@@ -129,15 +144,20 @@ Security incidents and audits often start with a question: "Are we running this 
 
 . Close the search.
 
+. Navigate to *Risk* from the left side menu.
++
+"The Risk page was redesigned in PatternFly for {rhacs_version}. This is where RHACS ranks every deployment by likelihood of successful exploit, combining vulnerability, configuration, and runtime signals."
+
 . Point to the *Create Policy* button in the upper right of the Risk page:
 +
-"Once you have a search that identifies interesting criteria, you can create a policy directly from that filter. That policy then runs continuously, automatically identifying this same criteria going forward."
+"Once you have a search or filter that identifies interesting criteria, you can create a policy directly from that context. That policy then runs continuously, automatically identifying this same criteria going forward."
 
 **What they should notice:**
 
 * Search spans all tracked data: CVEs, images, deployments, runtime process activity
 * Results are cross-referenced so a CVE query returns affected deployments, not just a finding list
 * No query language to learn; search uses structured keys with auto-complete
+* The PatternFly Risk view is the hub for prioritizing remediation, not just listing CVEs
 
 [NOTE]
 ====
@@ -146,14 +166,83 @@ Security incidents and audits often start with a question: "Are we running this 
 
 [NOTE]
 ====
-**Transition:** From here, we go into the individual security workflows. We will start with Vulnerability Management, which is the first area most teams want to explore.
+**Transition:** From here, we go into the individual security workflows. We will start with Vulnerability Management, which is the first area most teams want to explore. First, a quick look at how {rhacs_version} brings vulnerability context into the OpenShift console itself.
 ====
 
 image::01-rhacs-global-search.png[RHACS global search showing process name filter results for bash across production deployments,link=self,window=blank,width=700,title="Global search filtering by process name"]
 
 // TODO: Capture screenshot of global search with bash filter applied
 
+image::01-rhacs-risk-patternfly.png[RHACS Risk page showing PatternFly redesign with ranked deployments,link=self,window=blank,width=700,title="PatternFly Risk view"]
+
+// TODO: Capture screenshot of the PatternFly Risk page
+
+== Part 3: OpenShift console security plugin
+
+=== Know
+
+_Context: Security teams want findings where developers and platform engineers already work. Switching between the OpenShift console and a separate security portal slows triage and remediation._
+
+**What RHACS {rhacs_version} adds (Technology Preview):**
+
+* A dynamic plugin for the OpenShift web console on secured clusters, delivered with the RHACS Operator
+* A *Security* navigation entry with a *Vulnerabilities* view scoped to the selected project or namespace
+* A *Security* tab on project, namespace, deployment, and daemonset detail pages with workload vulnerability context
+* The same vulnerability data as the RHACS portal, without context switching for namespace-scoped triage
+
+**Lab note:**
+
+This demo environment enables the console plugin during installation. On a fresh {rhacs_version} install, the plugin is enabled by default. After upgrading from an earlier RHACS version, you must enable the *Console plugin* when installing or updating the RHACS Operator.
+
+For more information, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.10/html/configuring/accessing-vulnerability-information-in-web-console[Accessing vulnerability information in the OpenShift web console] documentation.
+
+=== Show
+
+**What I say**:
+
+"RHACS {rhacs_version} also meets your teams in the OpenShift console. Operators and developers can see vulnerability context on the resources they already manage, without opening the RHACS portal."
+
+**What I do**:
+
+. Switch to the *OpenShift Console* tab, or open {openshift_cluster_console_url}[window=blank].
+
+. Log in if prompted using the cluster admin credentials from the lab setup page.
+
+. Select a project that contains demo workloads, such as the application namespace used in later modules.
+
+. In the OpenShift navigation menu, click *Security* > *Vulnerabilities*.
++
+"This view is scoped to the project you selected. You can pivot by CVEs, images, or deployments -- the same workload-centric model as the RHACS portal, but inside OpenShift."
+
+. Open a *Deployment* (or *DaemonSet*) in that project and click the *Security* tab.
++
+"The Security tab on resource detail pages shows vulnerability information for that specific workload. That is the zero-context-switching story for {rhacs_version}: triage where you deploy, enforce where you operate."
+
+. Return to the RHACS console tab to continue the demo modules.
+
+**What they should notice:**
+
+* Vulnerability data is available in both the RHACS portal and the OpenShift console
+* Project-scoped views respect OpenShift RBAC; users only see data for namespaces they can access
+* The plugin complements the central RHACS console rather than replacing it
+
+[NOTE]
+====
+**Presenter tip:** If the *Security* menu or tab is missing, confirm the RHACS Operator *Console plugin* is enabled (`ConsolePlugin` resource in the `rhacs-operator` namespace). The lab `01-verify-rhacs-install.sh` script enables it automatically.
+====
+
+image::01-openshift-security-vulnerabilities.png[OpenShift console Security Vulnerabilities view scoped to a project,link=self,window=blank,width=700,title="OpenShift console Security Vulnerabilities view"]
+
+// TODO: Capture screenshot of OpenShift Security > Vulnerabilities
+
+image::01-openshift-security-tab.png[OpenShift deployment detail page showing RHACS Security tab,link=self,window=blank,width=700,title="Security tab on a deployment in OpenShift console"]
+
+// TODO: Capture screenshot of Security tab on a deployment
+
 == Assets needed
 
-. `content/modules/ROOT/assets/images/01-rhacs-dashboard.png` -- RHACS dashboard showing violation counts, risk categories, and compliance posture
+. `content/modules/ROOT/assets/images/01-rhacs-dashboard.png` -- RHACS dashboard showing violation counts, risk categories, and compliance posture (PatternFly {rhacs_version} UI)
 . `content/modules/ROOT/assets/images/01-rhacs-global-search.png` -- Global search results for bash process name filter across production deployments
+. `content/modules/ROOT/assets/images/01-rhacs-risk-patternfly.png` -- PatternFly Risk page with ranked deployments
+. `content/modules/ROOT/assets/images/01-openshift-security-vulnerabilities.png` -- OpenShift console *Security* > *Vulnerabilities* view for a demo project
+. `content/modules/ROOT/assets/images/01-openshift-security-tab.png` -- *Security* tab on a deployment or daemonset detail page in the OpenShift console
