@@ -121,6 +121,23 @@ verify_basic() {
         WARNINGS=$((WARNINGS + 1))
     fi
 
+    if oc get ds collector -n "${RHACS_NAMESPACE}" &>/dev/null; then
+        local collector_networks
+        collector_networks=$(oc get ds collector -n "${RHACS_NAMESPACE}" -o json 2>/dev/null | jq -r '
+            .spec.template.spec.containers[]
+            | select(.name == "collector")
+            | .env[]?
+            | select(.name == "ROX_NON_AGGREGATED_NETWORKS")
+            | .value
+        ' 2>/dev/null | head -1 || echo "")
+        if [ -n "${collector_networks}" ]; then
+            print_ok "Collector ROX_NON_AGGREGATED_NETWORKS=${collector_networks}"
+        else
+            print_warn "Collector ROX_NON_AGGREGATED_NETWORKS not set (network graph may miss non-RFC1918 CIDRs)"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+
     return "${failed}"
 }
 

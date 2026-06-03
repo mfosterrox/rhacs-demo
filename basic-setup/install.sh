@@ -532,7 +532,7 @@ main() {
                 print_error "Token generation returned invalid output"
                 print_error ""
                 print_error "API token generation is REQUIRED for setup to continue"
-                print_error "Scripts 04, 05, and 06 require ROX_API_TOKEN"
+                print_error "Scripts 05, 06, and 07 require ROX_API_TOKEN"
                 print_error ""
                 print_error "Please verify:"
                 print_error "  1. RHACS Central is running and accessible"
@@ -550,7 +550,7 @@ main() {
             print_error "Failed to generate API token"
             print_error ""
             print_error "API token generation is REQUIRED for setup to continue"
-            print_error "Scripts 04, 05, and 06 require ROX_API_TOKEN for:"
+            print_error "Scripts 05, 06, and 07 require ROX_API_TOKEN for:"
             print_error "  - Configuring RHACS metrics and settings"
             print_error "  - Creating compliance scan schedules"
             print_error "  - Triggering compliance scans"
@@ -589,21 +589,6 @@ main() {
         if [ -f "${script}" ]; then
             local script_name=$(basename "${script}")
             
-            # Script 07 requires email parameter - use default
-            if [[ "${script_name}" =~ ^07- ]]; then
-                print_info "Executing: ${script_name}"
-                print_info "  (Using default email: mfoster@redhat.com)"
-                if bash "${script}" --email mfoster@redhat.com; then
-                    print_info "✓ Successfully completed: ${script_name}"
-                else
-                    print_error "✗ Failed: ${script_name}"
-                    print_info "To rerun: bash \"${script}\" --email mfoster@redhat.com"
-                    exit 1
-                fi
-                print_info ""
-                continue
-            fi
-            
             print_info "Executing: ${script_name}"
             if bash "${script}"; then
                 print_info "✓ Successfully completed: ${script_name}"
@@ -630,11 +615,11 @@ main() {
         print_info "  ✓ ROX_API_TOKEN generated and saved to ~/.bashrc"
     fi
     print_info "  ✓ RHACS installation verified"
+    print_info "  ✓ Collector network CIDRs configured"
     print_info "  ✓ Compliance Operator installed"
     print_info "  ✓ Demo applications deployed"
     print_info "  ✓ RHACS settings configured"
     print_info "  ✓ Compliance scan schedules created"
-    print_info "  ✓ Custom TLS with passthrough route configured"
     print_info ""
     
     # Display important connection information

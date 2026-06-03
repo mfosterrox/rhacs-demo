@@ -117,18 +117,24 @@ The following scripts are executed in numerical order:
 |--------|-------------|----------------|----------|
 | `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-07 | N/A | N/A |
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, checks/updates version (e.g. 4.10), then ensures Console plugin is enabled | No | ✓ |
-| `02-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
-| `03-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
-| `04-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
-| `05-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** | ✓ |
-| `06-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
-| `07-configure-custom-tls.sh` | Configures passthrough route and custom TLS certificate with Let's Encrypt | No | ✓ |
-
-**Note:** Script 07 automatically uses `mfoster@redhat.com` for Let's Encrypt certificate registration.
+| `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
+| `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
+| `04-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
+| `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
+| `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** | ✓ |
+| `07-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
 
 ## What Gets Configured
 
-### RHACS Settings (Script 04)
+### Collector Networks (Script 02)
+
+On clusters where pod or service CIDRs are not RFC 1918 private ranges (common on RHDP/showroom environments), RHACS may treat internal traffic as external in the network graph. Script 02 patches the SecuredCluster CR to set `ROX_NON_AGGREGATED_NETWORKS` on the Collector DaemonSet.
+
+- **Auto-detection**: Reads `clusterNetwork` and `serviceNetwork` from `network.config.openshift.io/cluster` and configures any non-RFC1918 CIDRs
+- **Manual override**: `export ROX_NON_AGGREGATED_NETWORKS="34.228.224.0/24"` (comma-separated for multiple subnets)
+- **Skip**: `export SKIP_COLLECTOR_NETWORK_CONFIG=1`
+
+### RHACS Settings (Script 05)
 - **Telemetry**: Enabled for product improvement
 - **Metrics Collection**: 1-minute gathering period for:
   - Image vulnerabilities (CVE, deployment, namespace severity)
@@ -142,7 +148,7 @@ The following scripts are executed in numerical order:
 - **Platform Components**: Red Hat layered products properly recognized
 - **Vulnerability Exceptions**: Configurable expiry options (14, 30, 60, 90 days)
 
-### Compliance Scanning (Script 05)
+### Compliance Scanning (Script 06)
 - Daily compliance scans at 12:00 PM
 - Multiple compliance profiles:
   - ocp4-cis, ocp4-cis-node
@@ -152,7 +158,7 @@ The following scripts are executed in numerical order:
   - ocp4-nerc-cip, ocp4-nerc-cip-node
   - ocp4-e8, ocp4-stig-node
 
-### Custom TLS Configuration (Script 07) - Optional
+### Custom TLS Configuration (Optional, not included in install.sh)
 This optional script configures Central with a custom TLS certificate and passthrough routing:
 - **Operator-Based**: Installs Red Hat cert-manager Operator for OpenShift v1.18.1
 - **Certificate Management**: Creates Let's Encrypt certificates via cert-manager
@@ -237,7 +243,7 @@ The install script checks for required variables in this order:
 - `ROX_API_TOKEN` - API token for RHACS operations
   - Automatically generated during installation
   - Saved to `~/.bashrc` for persistence
-  - Used by scripts 04, 05, and 06
+  - Used by scripts 05, 06, and 07
 
 ## Individual Script Execution
 
@@ -250,25 +256,28 @@ source ~/.bashrc  # Load ROX_API_TOKEN if previously generated
 # Verify RHACS (no token needed)
 bash basic-setup/01-verify-rhacs-install.sh
 
+# Configure collector networks for non-RFC1918 CIDRs (no token needed)
+bash basic-setup/02-configure-collector-networks.sh
+
 # Install Compliance Operator (no token needed)
-bash basic-setup/02-compliance-operator-install.sh
+bash basic-setup/03-compliance-operator-install.sh
 
 # Deploy applications (no token needed)
-bash basic-setup/03-deploy-applications.sh
+bash basic-setup/04-deploy-applications.sh
 
 # Configure RHACS settings (REQUIRES ROX_API_TOKEN)
-bash basic-setup/04-configure-rhacs-settings.sh
+bash basic-setup/05-configure-rhacs-settings.sh
 
 # Setup compliance scanning (REQUIRES ROX_API_TOKEN)
-bash basic-setup/05-setup-co-scan-schedule.sh
+bash basic-setup/06-setup-co-scan-schedule.sh
 
 # Trigger compliance scan (REQUIRES ROX_API_TOKEN)
-bash basic-setup/06-trigger-compliance-scan.sh
+bash basic-setup/07-trigger-compliance-scan.sh
 ```
 
 **Important Notes:**
 - Individual scripts assume RHACS is already installed and accessible
-- Scripts 04, 05, and 06 **require** `ROX_API_TOKEN` to be set
+- Scripts 05, 06, and 07 **require** `ROX_API_TOKEN` to be set
 - Run the main `install.sh` once to generate and save the token
 - Or manually generate: see "API Token Generation" section below
 

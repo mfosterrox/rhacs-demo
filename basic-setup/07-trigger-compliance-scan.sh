@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script: 06-trigger-compliance-scan.sh
+# Script: 07-trigger-compliance-scan.sh
 # Description: Trigger compliance scans for multiple standards in RHACS
 
 set -euo pipefail
