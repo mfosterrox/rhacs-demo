@@ -130,9 +130,17 @@ The following scripts are executed in numerical order:
 
 On clusters where pod or service CIDRs are not RFC 1918 private ranges (common on RHDP/showroom environments), RHACS may treat internal traffic as external in the network graph. Script 02 patches the SecuredCluster CR to set `ROX_NON_AGGREGATED_NETWORKS` on the Collector DaemonSet.
 
-- **Auto-detection**: Reads `clusterNetwork` and `serviceNetwork` from `network.config.openshift.io/cluster` and configures any non-RFC1918 CIDRs
-- **Manual override**: `export ROX_NON_AGGREGATED_NETWORKS="34.228.224.0/24"` (comma-separated for multiple subnets)
+- **Auto-detection**: Reads `clusterNetwork`, `serviceNetwork`, and `machineNetwork` from OpenShift `network.config`, then samples live **pod IPs**, **service ClusterIPs**, and **node InternalIPs**. Non-RFC1918 addresses (e.g. `172.231.x.x` pseudo-private ranges outside `172.16–172.31`) are aggregated into covering prefixes such as `172.231.0.0/16`.
+- **Manual override** (if auto-detect misses a range): `export ROX_NON_AGGREGATED_NETWORKS="172.231.0.0/16"`
+- **SecuredCluster name override**: `export SECURED_CLUSTER_NAME=stackrox-secured-cluster-services`
 - **Skip**: `export SKIP_COLLECTOR_NETWORK_CONFIG=1`
+
+After applying, allow a few minutes for the network graph to refresh. Verify with:
+
+```bash
+oc get ds collector -n stackrox -o jsonpath='{.spec.template.spec.containers[?(@.name=="collector")].env[?(@.name=="ROX_NON_AGGREGATED_NETWORKS")].value}{"\n"}'
+oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
+```
 
 ### RHACS Settings (Script 05)
 - **Telemetry**: Enabled for product improvement
