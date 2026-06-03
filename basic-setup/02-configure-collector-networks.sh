@@ -32,6 +32,7 @@ trap 'error_handler $? $LINENO' ERR
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 SECURED_CLUSTER_NAME="${SECURED_CLUSTER_NAME:-}"
 COLLECTOR_ROLLOUT_TIMEOUT="${COLLECTOR_ROLLOUT_TIMEOUT:-300}"
+SCRIPT_VERSION="2026-06-03"
 
 ensure_jq() {
     command -v jq >/dev/null 2>&1 || {
@@ -49,157 +50,80 @@ is_standard_private_ip() {
     return 1
 }
 
-is_standard_private_cidr() {
-    is_standard_private_ip "${1%%/*}"
+# Add a unique CIDR to a comma-separated list (mutates _detected_cidrs).
+_detected_cidrs=""
+add_detected_cidr() {
+    local cidr="$1"
+    [ -z "${cidr}" ] && return 0
+    is_standard_private_ip "${cidr%%/*}" && return 0
+    if [ -z "${_detected_cidrs}" ]; then
+        _detected_cidrs="${cidr}"
+        return 0
+    fi
+    local existing
+    IFS=',' read -ra existing <<< "${_detected_cidrs}"
+    local c
+    for c in "${existing[@]}"; do
+        [ "${c}" = "${cidr}" ] && return 0
+    done
+    _detected_cidrs="${_detected_cidrs},${cidr}"
 }
 
-# Collect IPv4 addresses from pods, services, and nodes; merge with network.config CIDRs;
-# aggregate non-standard (pseudo-private) ranges such as 172.231.0.0/16.
+# Non-RFC1918 /16 for pseudo-private IPs such as 172.231.x.x (outside 172.16–172.31).
+ip_to_pseudo_private_cidr() {
+    local ip="$1"
+    [[ "${ip}" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+\.[0-9]+$ ]] || return 1
+    echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0.0/16"
+}
+
+# jq-only detection — handles serviceNetwork as string or list (RHDP uses ["172.231.0.0/16"]).
 detect_non_aggregated_networks() {
     if [ -n "${ROX_NON_AGGREGATED_NETWORKS:-}" ]; then
         echo "${ROX_NON_AGGREGATED_NETWORKS}"
         return 0
     fi
 
-    local net_json pod_ips svc_ips node_ips result
+    local net_json config_cidr ip cidr
+    _detected_cidrs=""
 
     net_json=$(oc get network.config.openshift.io cluster -o json 2>/dev/null || echo "{}")
-    pod_ips=$(oc get pods -A -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}' 2>/dev/null \
-        | grep -E '^([0-9]+\.){3}[0-9]+$' | sort -u || true)
-    svc_ips=$(oc get svc -A -o jsonpath='{range .items[*]}{.spec.clusterIP}{"\n"}{end}' 2>/dev/null \
-        | grep -E '^([0-9]+\.){3}[0-9]+$' | sort -u || true)
-    node_ips=$(oc get nodes -o jsonpath='{range .items[*]}{range .status.addresses[?(@.type=="InternalIP")]}{.address}{"\n"}{end}{end}' 2>/dev/null \
-        | grep -E '^([0-9]+\.){3}[0-9]+$' | sort -u || true)
 
-    result=$(NET_JSON="${net_json}" POD_IPS="${pod_ips}" SVC_IPS="${svc_ips}" NODE_IPS="${node_ips}" python3 <<'PY'
-import ipaddress
-import json
-import os
-from collections import defaultdict
+    while IFS= read -r config_cidr; do
+        [ -n "${config_cidr}" ] && add_detected_cidr "${config_cidr}"
+    done < <(echo "${net_json}" | jq -r '
+        def cidr_values(v):
+            if v == null then empty
+            elif (v | type) == "string" then v
+            elif (v | type) == "array" then v[] | if type == "string" then . else .cidr // empty end
+            else empty end;
+        [
+            (.spec.clusterNetwork[]?.cidr // empty),
+            (.status.clusterNetwork[]?.cidr // empty),
+            cidr_values(.spec.serviceNetwork),
+            cidr_values(.status.serviceNetwork),
+            (.spec.machineNetwork[]?.cidr // empty),
+            (.status.machineNetwork[]?.cidr // empty)
+        ] | map(select(. != null and . != "")) | unique | .[]
+    ' 2>/dev/null)
 
-def is_standard_private(ip_str: str) -> bool:
-    """True for RFC 1918 ranges RHACS already treats as internal."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return True
-    if ip.version != 4:
-        return True
-    octets = ip_str.split(".")
-    if octets[0] == "10":
-        return True
-    if octets[0] == "192" and octets[1] == "168":
-        return True
-    if octets[0] == "172" and 16 <= int(octets[1]) <= 31:
-        return True
-    return False
+    # Live service ClusterIPs (172.231.x.x on RHDP) and any other pseudo-private workload IPs
+    while IFS= read -r ip; do
+        [ -z "${ip}" ] && continue
+        is_standard_private_ip "${ip}" && continue
+        cidr=$(ip_to_pseudo_private_cidr "${ip}") || continue
+        add_detected_cidr "${cidr}"
+    done < <(
+        {
+            oc get svc -A -o jsonpath='{range .items[*]}{.spec.clusterIP}{"\n"}{end}' 2>/dev/null || true
+            oc get pods -A -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}' 2>/dev/null || true
+            oc get nodes -o jsonpath='{range .items[*]}{range .status.addresses[?(@.type=="InternalIP")]}{.address}{"\n"}{end}{end}' 2>/dev/null || true
+        } | grep -E '^([0-9]+\.){3}[0-9]+$' | sort -u
+    )
 
-def normalize_cidr_values(value) -> list[str]:
-    """serviceNetwork may be a string or a list depending on OpenShift version."""
-    if not value:
-        return []
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        out = []
-        for item in value:
-            if isinstance(item, str):
-                out.append(item)
-            elif isinstance(item, dict) and item.get("cidr"):
-                out.append(item["cidr"])
-        return out
-    return []
-
-def configured_cidrs(net: dict) -> list[str]:
-    cidrs: list[str] = []
-    for block in ("spec", "status"):
-        data = net.get(block, {})
-        for entry in data.get("clusterNetwork") or []:
-            if c := entry.get("cidr"):
-                cidrs.append(c)
-        for c in normalize_cidr_values(data.get("serviceNetwork")):
-            cidrs.append(c)
-        for entry in data.get("machineNetwork") or []:
-            if c := entry.get("cidr"):
-                cidrs.append(c)
-    # Preserve order, drop duplicates
-    seen: set[str] = set()
-    unique: list[str] = []
-    for c in cidrs:
-        if c not in seen:
-            seen.add(c)
-            unique.append(c)
-    return unique
-
-def host_prefix_for_ip(net: dict, ip_str: str):
-    for block in ("spec", "status"):
-        for entry in net.get(block, {}).get("clusterNetwork") or []:
-            cidr = entry.get("cidr")
-            if not cidr:
-                continue
-            try:
-                network = ipaddress.ip_network(cidr, strict=False)
-                if ipaddress.ip_address(ip_str) in network:
-                    return int(entry.get("hostPrefix") or network.prefixlen)
-            except ValueError:
-                continue
-    return None
-
-def aggregate_observed_ips(ips: list[str], net: dict) -> set[str]:
-    """Group pseudo-private workload/node IPs into covering prefixes (/16 by default)."""
-    by_slash16: dict[str, list[str]] = defaultdict(list)
-    result: set[str] = set()
-
-    for ip_str in ips:
-        if not ip_str or ip_str == "None" or is_standard_private(ip_str):
-            continue
-        prefix = host_prefix_for_ip(net, ip_str)
-        if prefix is not None:
-            try:
-                net_addr = ipaddress.ip_network(f"{ip_str}/{prefix}", strict=False)
-                result.add(str(net_addr))
-                continue
-            except ValueError:
-                pass
-        parts = ip_str.split(".")
-        if len(parts) == 4:
-            by_slash16[f"{parts[0]}.{parts[1]}"].append(ip_str)
-
-    for key, group in by_slash16.items():
-        a, b = key.split(".")
-        # One or more non-RFC1918 addresses in the same /16 → cover the whole /16
-        # (e.g. 172.231.x.x pseudo-private ranges used on RHDP/cloud clusters).
-        result.add(f"{a}.{b}.0.0/16")
-
-    return result
-
-net = json.loads(os.environ.get("NET_JSON") or "{}")
-pod_ips = [x for x in os.environ.get("POD_IPS", "").splitlines() if x.strip()]
-svc_ips = [x for x in os.environ.get("SVC_IPS", "").splitlines() if x.strip()]
-node_ips = [x for x in os.environ.get("NODE_IPS", "").splitlines() if x.strip()]
-
-cidrs: set[str] = set()
-
-# 1. Non-standard CIDRs declared in OpenShift network.config
-for cidr in configured_cidrs(net):
-    if not is_standard_private(cidr.split("/")[0]):
-        try:
-            cidrs.add(str(ipaddress.ip_network(cidr, strict=False)))
-        except ValueError:
-            cidrs.add(cidr)
-
-# 2. Aggregate live pod, service, and node InternalIP addresses
-observed = aggregate_observed_ips(pod_ips + svc_ips + node_ips, net)
-cidrs.update(observed)
-
-if not cidrs:
-    raise SystemExit(1)
-
-print(",".join(sorted(cidrs, key=lambda c: ipaddress.ip_network(c, strict=False))))
-PY
-) || return 1
-
-    echo "${result}"
+    if [ -z "${_detected_cidrs}" ]; then
+        return 1
+    fi
+    echo "${_detected_cidrs}"
 }
 
 securedcluster_name() {
@@ -240,46 +164,39 @@ apply_securedcluster_overlay() {
     local sc_name="$1"
     local ns="$2"
     local networks="$3"
-    local ds_has_env patch_path patch_value env_block existing_overlays new_overlays
+    local env_block existing_overlays new_overlays
 
-    ds_has_env=$(collector_env_value "${ns}")
-    if [ -n "${ds_has_env}" ]; then
-        patch_path="spec.template.spec.containers[name:collector].env[name:ROX_NON_AGGREGATED_NETWORKS].value"
-        patch_value="${networks}"
-    else
-        patch_path="spec.template.spec.containers[name:collector].env[-1]"
-        env_block=$(printf 'name: ROX_NON_AGGREGATED_NETWORKS\nvalue: "%s"' "${networks}")
-        patch_value="${env_block}"
-    fi
+    # KCS format — always use env[-1] append when (re)building the collector overlay patch
+    env_block=$(printf 'name: ROX_NON_AGGREGATED_NETWORKS\nvalue: "%s"' "${networks}")
 
-    existing_overlays=$(oc get securedcluster "${sc_name}" -n "${ns}" -o json | jq '.spec.overlays // []')
+    existing_overlays=$(oc get "securedcluster/${sc_name}" -n "${ns}" -o json | jq '.spec.overlays // []')
 
     new_overlays=$(echo "${existing_overlays}" | jq \
-        --arg path "${patch_path}" \
-        --arg value "${patch_value}" \
+        --arg envblock "${env_block}" \
         '
-        def collector_patch:
-            {path: $path, value: $value};
-        if any(.[]; .kind == "DaemonSet" and .name == "collector") then
-            map(
-                if .kind == "DaemonSet" and .name == "collector" then
-                    .patches = [collector_patch]
-                else .
-                end
-            )
-        else
-            . + [{
+        def collector_overlay:
+            {
                 apiVersion: "apps/v1",
                 kind: "DaemonSet",
                 name: "collector",
-                patches: [collector_patch]
-            }]
+                patches: [{
+                    path: "spec.template.spec.containers[name:collector].env[-1]",
+                    value: $envblock
+                }]
+            };
+        if any(.[]; .kind == "DaemonSet" and .name == "collector") then
+            map(if .kind == "DaemonSet" and .name == "collector" then collector_overlay else . end)
+        else
+            . + [collector_overlay]
         end
         ')
 
     print_info "Patching SecuredCluster/${sc_name} spec.overlays..."
     oc patch "securedcluster/${sc_name}" -n "${ns}" --type=merge \
         -p "$(jq -n --argjson overlays "${new_overlays}" '{spec: {overlays: $overlays}}')"
+
+    print_info "Waiting for RHACS operator to reconcile SecuredCluster..."
+    sleep 10
 }
 
 wait_for_collector_rollout() {
@@ -401,7 +318,7 @@ configure_collector_non_aggregated_networks() {
 
 main() {
     print_info "=========================================="
-    print_info "Collector Network Configuration"
+    print_info "Collector Network Configuration (v${SCRIPT_VERSION})"
     print_info "=========================================="
     print_info ""
 
