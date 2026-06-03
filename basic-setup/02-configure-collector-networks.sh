@@ -94,19 +94,42 @@ def is_standard_private(ip_str: str) -> bool:
         return True
     return False
 
+def normalize_cidr_values(value) -> list[str]:
+    """serviceNetwork may be a string or a list depending on OpenShift version."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, str):
+                out.append(item)
+            elif isinstance(item, dict) and item.get("cidr"):
+                out.append(item["cidr"])
+        return out
+    return []
+
 def configured_cidrs(net: dict) -> list[str]:
-    cidrs = []
+    cidrs: list[str] = []
     for block in ("spec", "status"):
         data = net.get(block, {})
         for entry in data.get("clusterNetwork") or []:
             if c := entry.get("cidr"):
                 cidrs.append(c)
-        if c := data.get("serviceNetwork"):
+        for c in normalize_cidr_values(data.get("serviceNetwork")):
             cidrs.append(c)
         for entry in data.get("machineNetwork") or []:
             if c := entry.get("cidr"):
                 cidrs.append(c)
-    return list(dict.fromkeys(cidrs))
+    # Preserve order, drop duplicates
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in cidrs:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique
 
 def host_prefix_for_ip(net: dict, ip_str: str):
     for block in ("spec", "status"):
@@ -283,10 +306,10 @@ print_network_diagnostics() {
     print_info "network.config.openshift.io/cluster:"
     oc get network.config.openshift.io cluster -o json 2>/dev/null | jq -r '
         "  clusterNetwork (spec): \(.spec.clusterNetwork // [] | map(.cidr) | join(", "))",
-        "  serviceNetwork (spec): \(.spec.serviceNetwork // "n/a")",
+        "  serviceNetwork (spec): \(.spec.serviceNetwork // "n/a" | if type == "array" then map(if type == "string" then . else .cidr end) | join(", ") else . end)",
         "  machineNetwork (spec): \(.spec.machineNetwork // [] | map(.cidr) | join(", "))",
         "  clusterNetwork (status): \(.status.clusterNetwork // [] | map(.cidr) | join(", "))",
-        "  serviceNetwork (status): \(.status.serviceNetwork // "n/a")"
+        "  serviceNetwork (status): \(.status.serviceNetwork // "n/a" | if type == "array" then map(if type == "string" then . else .cidr end) | join(", ") else . end)"
     ' 2>/dev/null || print_warn "  Could not read network.config"
 
     local sample_pods sample_svcs sample_nodes
@@ -340,12 +363,14 @@ configure_collector_non_aggregated_networks() {
     print_info "ROX_NON_AGGREGATED_NETWORKS: ${networks}"
 
     current=$(collector_env_value "${RHACS_NAMESPACE}")
-    if [ "${current}" = "${networks}" ] && securedcluster_has_rox_overlay "${sc_name}" "${RHACS_NAMESPACE}"; then
+    if [ "${current}" = "${networks}" ]; then
         print_info "✓ Collector already configured with ROX_NON_AGGREGATED_NETWORKS=${networks}"
         return 0
     fi
 
-    if [ -n "${current}" ] && [ "${current}" != "${networks}" ]; then
+    if securedcluster_has_rox_overlay "${sc_name}" "${RHACS_NAMESPACE}" && [ -z "${current}" ]; then
+        print_warn "SecuredCluster overlay exists but collector env is unset — re-applying overlay"
+    elif [ -n "${current}" ] && [ "${current}" != "${networks}" ]; then
         print_info "Updating collector env (current value: ${current})"
     elif [ -z "${current}" ]; then
         print_info "Adding ROX_NON_AGGREGATED_NETWORKS to collector via SecuredCluster overlay"
