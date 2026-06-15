@@ -1,7 +1,6 @@
 {
     "policies": [
         {
-            "id": "15aeb057-cd3a-4f2a-9af6-b6bc79f85e5e",
             "name": "fam-basic-node-monitoring",
             "description": "Monitors /etc/passwd and /etc/sudoers for unauthorized ownership changes or modifications. Detects privilege escalation attempts via chown or other file alterations.",
             "rationale": "Ownership changes to /etc/passwd or /etc/sudoers can indicate privilege escalation or persistence attacks. These files must remain root-owned; any chown or modification should be investigated.",
@@ -28,7 +27,7 @@
                     "sectionName": "Rule 1",
                     "policyGroups": [
                         {
-                            "fieldName": "Actual Path",
+                            "fieldName": "File Path",
                             "booleanOperator": "OR",
                             "negate": false,
                             "values": [

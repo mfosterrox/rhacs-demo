@@ -27,22 +27,7 @@
                     "sectionName": "Rule 1",
                     "policyGroups": [
                         {
-                            "fieldName": "Effective Path",
-                            "booleanOperator": "OR",
-                            "negate": false,
-                            "values": [
-                                {
-                                    "value": "/etc/passwd"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "sectionName": "Rule 2",
-                    "policyGroups": [
-                        {
-                            "fieldName": "Actual Path",
+                            "fieldName": "File Path",
                             "booleanOperator": "OR",
                             "negate": false,
                             "values": [

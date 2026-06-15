@@ -54,7 +54,7 @@ touch /etc/passwd    # Triggers fam-basic-node-monitoring
 
 ## Note on Policy-as-Code
 
-These policies use `eventSource: NODE_EVENT` (node-level) or `DEPLOYMENT_EVENT` (deployment-level). The SecurityPolicy CR only supports `NOT_APPLICABLE`, `DEPLOYMENT_EVENT`, and `AUDIT_LOG_EVENT`. Policies that rely on node-level file activity must be submitted via the RHACS API (as this script does).
+These policies use `eventSource: NODE_EVENT` (node-level) or `DEPLOYMENT_EVENT` (deployment-level) with the **`File Path`** criterion (RHACS 4.11+; replaces separate Effective/Actual Path fields). The SecurityPolicy CR only supports `NOT_APPLICABLE`, `DEPLOYMENT_EVENT`, and `AUDIT_LOG_EVENT`. Policies that rely on node-level file activity must be submitted via the RHACS API (as this script does).
 
 ## Files
 
