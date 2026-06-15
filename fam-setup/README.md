@@ -8,7 +8,7 @@ This setup enables file activity monitoring on the SecuredCluster, submits FAM p
 - `oc` logged in
 - `ROX_API_TOKEN` set (from basic-setup or RHACS UI → Platform Configuration → Integrations → API Token)
 - `jq` installed
-- Namespace/project for the demo app (default **`payments`**) and deployment **`mastercard-processor`** if you want the automated runner loop and one-shot exec to succeed
+- Namespace/project for the demo app (default **`payments`**) and deployment **`visa-processor`** (privileged **`visa-processor-sidecar`** container) if you want the automated runner loop and one-shot exec to succeed. **`mastercard-processor`** runs non-root and cannot `touch /etc/passwd`.
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ For **`verify-all-setup.sh`**, **`Deployment/rhacs-fam-exec-runner`** is expecte
 2. **Submits FAM policies** – Creates or updates:
    - `fam-basic-node-monitoring` – monitors `/etc/passwd` for node-level modifications (NODE_EVENT)
    - `fam-basic-deploy-monitoring` – monitors deployments for changes to `/etc/passwd`
-3. **Applies the exec runner Deployment** – **`fam-cron-exec-target.yaml`**: ServiceAccount, Role, RoleBinding, and **`rhacs-fam-exec-runner`**, which loops: **`oc exec`** into **`deployment/mastercard-processor`** (defaults), **`touch /etc/passwd`**, then sleeps **`FAM_LOOP_SLEEP_SEC`** (default **600**). Failures are logged and the pod stays Running (no CrashLoop from denied `touch`). Override interval: **`FAM_LOOP_SLEEP_SEC=300 ./install.sh`**. Legacy **`CronJob/rhacs-fam-exec-trigger`** is deleted on apply if present.
+3. **Applies the exec runner Deployment** – **`fam-cron-exec-target.yaml`**: ServiceAccount, Role, RoleBinding, and **`rhacs-fam-exec-runner`**, which loops: **`oc exec`** into **`deployment/visa-processor`** container **`visa-processor-sidecar`** (defaults), **`touch /etc/passwd`**, then sleeps **`FAM_LOOP_SLEEP_SEC`** (default **600**). Failures are logged and the pod stays Running (no CrashLoop from denied `touch`). Override interval: **`FAM_LOOP_SLEEP_SEC=300 ./install.sh`**. Legacy **`CronJob/rhacs-fam-exec-trigger`** is deleted on apply if present.
 4. **One-shot `oc exec`** – Same target as above, once at install time, if the deployment exists.
 
 ## Trigger violations (run after install)

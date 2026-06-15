@@ -19,8 +19,8 @@
 #   FAM_DEPLOY_POLICY_NAME    — policy to check via API (default fam-basic-deploy-monitoring)
 #   FAM_INITIAL_ROLLOUT_TIMEOUT_SEC — oc rollout status for rhacs-fam-exec-runner (default 180)
 #   FAM_EXEC_NAMESPACE        — default payments (also rewrites the runner manifest on apply)
-#   FAM_EXEC_WORKLOAD         — default deployment/mastercard-processor
-#   FAM_EXEC_CONTAINER        — optional -c name for multi-container pods
+#   FAM_EXEC_WORKLOAD         — default deployment/visa-processor (privileged sidecar can touch /etc/passwd)
+#   FAM_EXEC_CONTAINER        — default visa-processor-sidecar (mastercard-processor runs non-root)
 #   FAM_LOOP_SLEEP_SEC        — optional; sets Deployment env (default in YAML: 600)
 
 set -euo pipefail
@@ -48,8 +48,8 @@ FAM_POLICIES=(
 FAM_CRON_MANIFEST="${SCRIPT_DIR}/fam-cron-exec-target.yaml"
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 FAM_EXEC_NAMESPACE="${FAM_EXEC_NAMESPACE:-payments}"
-FAM_EXEC_WORKLOAD="${FAM_EXEC_WORKLOAD:-deployment/mastercard-processor}"
-FAM_EXEC_CONTAINER="${FAM_EXEC_CONTAINER:-}"
+FAM_EXEC_WORKLOAD="${FAM_EXEC_WORKLOAD:-deployment/visa-processor}"
+FAM_EXEC_CONTAINER="${FAM_EXEC_CONTAINER:-visa-processor-sidecar}"
 FAM_DEPLOY_POLICY_NAME="${FAM_DEPLOY_POLICY_NAME:-fam-basic-deploy-monitoring}"
 
 # Get Central URL
@@ -292,10 +292,11 @@ else
     # Remove legacy CronJob from older installs so only the Deployment runs.
     oc delete cronjob rhacs-fam-exec-trigger -n "${FAM_EXEC_NAMESPACE}" --ignore-not-found &>/dev/null || true
 
-    # Rewrite placeholders in the checked-in manifest to match FAM_EXEC_* (defaults: payments / mastercard-processor)
+    # Rewrite placeholders in the checked-in manifest to match FAM_EXEC_* (defaults: payments / visa-processor-sidecar)
     if ! sed \
         -e "s/namespace: payments/namespace: ${FAM_EXEC_NAMESPACE}/g" \
-        -e "s#value: \"deployment/mastercard-processor\"#value: \"${FAM_EXEC_WORKLOAD}\"#g" \
+        -e "s#value: \"deployment/visa-processor\"#value: \"${FAM_EXEC_WORKLOAD}\"#g" \
+        -e "s#value: \"visa-processor-sidecar\"#value: \"${FAM_EXEC_CONTAINER}\"#g" \
         -e "s#value: \"payments\"#value: \"${FAM_EXEC_NAMESPACE}\"#g" \
         "${FAM_CRON_MANIFEST}" | oc apply -f -; then
         print_error "Failed to apply FAM exec runner (is namespace ${FAM_EXEC_NAMESPACE} present? image pull ok?)"
@@ -342,16 +343,14 @@ else
         print_warn "Resource not found: ${FAM_EXEC_WORKLOAD} in ${FAM_EXEC_NAMESPACE} — skipping oc exec"
         print_warn "Set FAM_EXEC_NAMESPACE / FAM_EXEC_WORKLOAD or deploy your app first."
     else
-        print_info "Running oc exec into ${FAM_EXEC_WORKLOAD} (ns ${FAM_EXEC_NAMESPACE}) ..."
-        if [ -n "${FAM_EXEC_CONTAINER}" ]; then
-            oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -c "${FAM_EXEC_CONTAINER}" -- touch /etc/passwd)
-        else
-            oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -- touch /etc/passwd)
-        fi
+        print_info "Running oc exec into ${FAM_EXEC_WORKLOAD} (ns ${FAM_EXEC_NAMESPACE}, container ${FAM_EXEC_CONTAINER}) ..."
+        oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -c "${FAM_EXEC_CONTAINER}" -- touch /etc/passwd)
         if "${oc_cmd[@]}"; then
             print_info "✓ touch completed inside workload (check RHACS: fam-basic-deploy-monitoring)"
         else
-            print_warn "oc exec failed (permissions, read-only FS, or default container) — run manually or set FAM_EXEC_CONTAINER"
+            print_warn "oc exec failed (permissions, read-only FS, or missing container) — try:"
+            print_warn "  oc exec -n ${FAM_EXEC_NAMESPACE} ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} -- touch /etc/passwd"
+            print_warn "  Or set FAM_EXEC_WORKLOAD / FAM_EXEC_CONTAINER to a root-capable or privileged pod"
         fi
     fi
 fi

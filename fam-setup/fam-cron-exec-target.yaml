@@ -93,7 +93,8 @@ spec:
                 if [ -n "${CONTAINER}" ]; then
                   oc exec -n "${NS}" "${WORKLOAD}" -c "${CONTAINER}" -- touch /etc/passwd || rc=$?
                 else
-                  oc exec -n "${NS}" "${WORKLOAD}" -- touch /etc/passwd || rc=$?
+                  echo "[$(date -Is)] TARGET_CONTAINER not set — skipping (need a root-capable or privileged container)"
+                  rc=1
                 fi
                 if [ "${rc}" -eq 0 ]; then
                   echo "[$(date -Is)] touch ok"
@@ -106,8 +107,8 @@ spec:
             - name: TARGET_NAMESPACE
               value: "payments"
             - name: TARGET_WORKLOAD
-              value: "deployment/mastercard-processor"
+              value: "deployment/visa-processor"
             - name: TARGET_CONTAINER
-              value: ""
+              value: "visa-processor-sidecar"
             - name: FAM_LOOP_SLEEP_SEC
               value: "600"
