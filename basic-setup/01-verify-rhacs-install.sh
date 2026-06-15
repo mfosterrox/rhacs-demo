@@ -36,8 +36,8 @@ RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 RHACS_ROUTE_NAME="${RHACS_ROUTE_NAME:-central}"
 RHACS_OPERATOR_NAMESPACE="${RHACS_OPERATOR_NAMESPACE:-rhacs-operator}"
 
-# Default target version when not set (script will upgrade to this version)
-RHACS_VERSION="${RHACS_VERSION:-4.10}"
+# Optional pin: export RHACS_VERSION="4.10.3" to override auto-detect from operator catalog.
+# When unset, the script upgrades to the newest rhacs-X.Y channel in openshift-marketplace.
 
 # Function to check if a resource exists
 check_resource_exists() {
@@ -81,8 +81,58 @@ get_installed_version() {
     fi
 }
 
-# Function to get latest available RHACS version from operator (CSV).
-# Returns the version the operator can provide (e.g. from CSV metadata).
+# Newest RHACS minor release from the operator catalog (e.g. 4.11 from channel rhacs-4.11).
+get_latest_catalog_minor_version() {
+    local channels latest_channel=""
+    if ! oc get packagemanifest rhacs-operator -n openshift-marketplace &>/dev/null; then
+        echo ""
+        return
+    fi
+    channels=$(oc get packagemanifest rhacs-operator -n openshift-marketplace -o jsonpath='{.status.channels[*].name}' 2>/dev/null || echo "")
+    latest_channel=$(echo "${channels}" | tr ' ' '\n' | grep -E '^rhacs-[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    if [ -n "${latest_channel}" ]; then
+        echo "${latest_channel#rhacs-}"
+    fi
+}
+
+# Full semver for the newest catalog channel (e.g. 4.11.0 from currentCSV on rhacs-4.11).
+get_latest_catalog_version() {
+    local latest_minor latest_channel csv_name
+    latest_minor=$(get_latest_catalog_minor_version)
+    if [ -z "${latest_minor}" ]; then
+        echo ""
+        return
+    fi
+    latest_channel="rhacs-${latest_minor}"
+    if command -v jq &>/dev/null; then
+        csv_name=$(oc get packagemanifest rhacs-operator -n openshift-marketplace -o json 2>/dev/null | \
+            jq -r --arg ch "${latest_channel}" '.status.channels[] | select(.name == $ch) | .currentCSV' 2>/dev/null || echo "")
+    else
+        csv_name=$(oc get packagemanifest rhacs-operator -n openshift-marketplace -o jsonpath="{.status.channels[?(@.name==\"${latest_channel}\")].currentCSV}" 2>/dev/null || echo "")
+    fi
+    if [[ "${csv_name}" =~ \.v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    elif [ -n "${latest_minor}" ]; then
+        echo "${latest_minor}"
+    fi
+}
+
+# Resolve target version: explicit RHACS_VERSION, else newest catalog minor, else installed CSV.
+resolve_target_version() {
+    if [ -n "${RHACS_VERSION:-}" ]; then
+        echo "${RHACS_VERSION}"
+        return
+    fi
+    local catalog_minor
+    catalog_minor=$(get_latest_catalog_minor_version)
+    if [ -n "${catalog_minor}" ]; then
+        echo "${catalog_minor}"
+        return
+    fi
+    get_latest_available_version
+}
+
+# Version from the installed operator CSV (reflects current channel, not necessarily catalog latest).
 get_latest_available_version() {
     local csv_name
     csv_name=$(get_rhacs_csv_name)
@@ -284,14 +334,28 @@ ensure_csv_deploy_version() {
 }
 
 # Function to check and update RHACS version
-# Uses RHACS_VERSION as target (default 4.10). Only reports "up to date" when installed equals target.
+# Uses RHACS_VERSION when set; otherwise newest rhacs-X.Y channel from the operator catalog.
 # Uses subscription channel update when subscription exists; otherwise falls back to CSV deploy-details.
 check_and_update_version() {
     print_step "Checking RHACS version..."
     
-    # Single target: user-set or default 4.10 (so we always try to reach 4.10 when not set)
-    local target_version="${RHACS_VERSION:-4.10}"
-    print_info "Target version: ${target_version}"
+    local target_version
+    target_version=$(resolve_target_version)
+    if [ -z "${target_version}" ]; then
+        print_warn "Could not determine a target RHACS version (catalog unavailable and no RHACS_VERSION set); skipping version update"
+        return 0
+    fi
+    if [ -n "${RHACS_VERSION:-}" ]; then
+        print_info "Target version (RHACS_VERSION): ${target_version}"
+    else
+        local catalog_version
+        catalog_version=$(get_latest_catalog_version)
+        if [ -n "${catalog_version}" ]; then
+            print_info "Target version (newest catalog): ${target_version} (catalog CSV: ${catalog_version})"
+        else
+            print_info "Target version (auto-detect): ${target_version}"
+        fi
+    fi
     
     # Prefer subscription channel update (subscriptions.operators.coreos.com); fall back to CSV when no subscription
     if [ -n "$(get_rhacs_subscription_name)" ]; then
@@ -314,10 +378,15 @@ check_and_update_version() {
         print_info "Installed RHACS version: ${installed_version}"
     fi
     
-    # Latest from operator (after channel switch; informational)
-    local latest_version=$(get_latest_available_version)
-    if [ -n "${latest_version}" ]; then
-        print_info "Latest available version from operator: ${latest_version}"
+    # Catalog vs installed CSV (informational)
+    local catalog_version installed_csv_version
+    catalog_version=$(get_latest_catalog_version)
+    installed_csv_version=$(get_latest_available_version)
+    if [ -n "${catalog_version}" ]; then
+        print_info "Newest version in operator catalog: ${catalog_version}"
+    fi
+    if [ -n "${installed_csv_version}" ]; then
+        print_info "Installed operator CSV version: ${installed_csv_version}"
     fi
     
     # Extract major.minor for comparison (4.10 and 4.10.0 are same minor = stable)
@@ -352,7 +421,7 @@ check_and_update_version() {
     update_rhacs_version "${target_version}"
 }
 
-# Map target minor version to operator channel (e.g. 4.10 -> rhacs-4.10)
+# Map target minor version to operator channel (e.g. 4.11 -> rhacs-4.11)
 # Red Hat catalog uses rhacs-4.x channel names.
 get_channel_for_version() {
     local ver=$1
@@ -361,7 +430,14 @@ get_channel_for_version() {
         major_minor="${BASH_REMATCH[1]}"
         echo "rhacs-${major_minor}"
     else
-        echo "rhacs-4.10"
+        local catalog_minor
+        catalog_minor=$(get_latest_catalog_minor_version)
+        if [ -n "${catalog_minor}" ]; then
+            echo "rhacs-${catalog_minor}"
+        else
+            print_warn "Could not map version '${ver}' to a channel; using rhacs-${ver}"
+            echo "rhacs-${ver}"
+        fi
     fi
 }
 
@@ -585,7 +661,7 @@ main() {
     
     print_info ""
     
-    # Check and update version (e.g. to 4.10) before enabling Console plugin
+    # Check and update version to newest catalog release (or RHACS_VERSION pin) before Console plugin
     check_and_update_version
     
     print_info ""

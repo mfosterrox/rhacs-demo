@@ -453,11 +453,11 @@ main() {
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
     
-    # RHACS version is optional - if not set, no version enforcement will occur
+    # RHACS version is optional - if not set, script auto-detects newest catalog channel
     if [ -n "${RHACS_VERSION:-}" ]; then
         print_info "Target RHACS version specified: ${RHACS_VERSION}"
     else
-        print_info "No target RHACS version specified - will use currently installed version"
+        print_info "No RHACS_VERSION set - will upgrade to newest version from operator catalog"
     fi
     
     echo ""  # Ensure output is flushed
