@@ -2,7 +2,7 @@
     "policies": [
         {
             "name": "fam-basic-deploy-monitoring",
-            "description": "Monitors demo app containers in the payments namespace for changes to /etc/passwd. Scoped to payments so openshift-debug pods from oc debug node do not match this policy.",
+            "description": "Monitors demo app containers in the payments namespace for changes to /etc/passwd. Scoped to payments so openshift-debug pods from oc debug node do not match.",
             "rationale": "Modifications to system files like /etc/passwd inside application containers can indicate image tampering or misconfiguration. Scoping to the demo namespace avoids false positives from debug tooling.",
             "remediation": "Review the affected deployment and container image for unauthorized or unexpected changes to system files. Rebuild the image from a trusted source if necessary, and investigate any deployment pipelines or automation that could have introduced the modification.",
             "disabled": false,
@@ -13,14 +13,7 @@
                 "RUNTIME"
             ],
             "eventSource": "DEPLOYMENT_EVENT",
-            "exclusions": [
-                {
-                    "name": "openshift-debug namespace",
-                    "deployment": {
-                        "namespace": "openshift-debug"
-                    }
-                }
-            ],
+            "exclusions": [],
             "scope": [
                 {
                     "namespace": "payments"

@@ -46,7 +46,7 @@ For **`verify-all-setup.sh`**, **`Deployment/rhacs-fam-exec-runner`** is expecte
 | `fam-basic-deploy-monitoring` | `DEPLOYMENT_EVENT` | **Violations UI** | `oc exec` into privileged app pod in **payments** |
 | `fam-basic-node-monitoring` | `NODE_EVENT` | **API / notifiers only** (not Violations UI) | `oc debug node/... -- nsenter -t 1 ... touch /etc/passwd` on bastion |
 
-`oc debug node` creates a pod in **openshift-debug**. Even with `chroot /host`, RHACS classifies that activity as a **deployment** event — which is why debug pods showed up under the deploy policy. The deploy policy is now **scoped to `payments`** and excludes **openshift-debug**.
+`oc debug node` creates a pod in **openshift-debug**. RHACS classifies that as **DEPLOYMENT_EVENT**, not NODE_EVENT. The deploy policy is **scoped to `payments` only**, so debug pods are not evaluated.
 
 Node FAM requires a **host process** (SSH, systemd, or `nsenter` into PID 1). The install script uses `nsenter`, not `chroot`, for the node trigger.
 
