@@ -46,6 +46,10 @@ trap 'error_handler $? $LINENO' ERR
 # Default values
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 ROX_CENTRAL_ADDRESS="${ROX_CENTRAL_ADDRESS:-}"
+# Base image for layer filtering (matches demo-apps payment-processor / frontend Dockerfiles)
+RHACS_BASE_IMAGE_REPO_PATH="${RHACS_BASE_IMAGE_REPO_PATH:-docker.io/library/python}"
+RHACS_BASE_IMAGE_TAG_PATTERN="${RHACS_BASE_IMAGE_TAG_PATTERN:-3.12-alpine}"
+SKIP_RHACS_BASE_IMAGES="${SKIP_RHACS_BASE_IMAGES:-0}"
 # Function to check if jq is installed
 ensure_jq() {
     if command -v jq >/dev/null 2>&1; then
@@ -255,6 +259,71 @@ EOF
     return 0
 }
 
+# Register base images via v2 API so RHACS separates base-layer vs application-layer CVEs.
+# Requires ImageAdministration permission on the API token.
+configure_base_images() {
+    local token=$1
+    local api_v2_base=$2
+
+    if [ "${SKIP_RHACS_BASE_IMAGES}" = "1" ]; then
+        print_info "Skipping base image configuration (SKIP_RHACS_BASE_IMAGES=1)"
+        return 0
+    fi
+
+    print_step "Configuring RHACS base image references..."
+
+    local existing
+    existing=$(make_api_call "GET" "baseimages" "${token}" "${api_v2_base}" "" 2>/dev/null || echo "")
+
+    local existing_id
+    existing_id=$(echo "${existing}" | jq -r --arg repo "${RHACS_BASE_IMAGE_REPO_PATH}" --arg tag "${RHACS_BASE_IMAGE_TAG_PATTERN}" '
+        .baseImageReferences[]? | select(.baseImageRepoPath == $repo and .baseImageTagPattern == $tag) | .id
+    ' 2>/dev/null | head -1)
+
+    if [ -n "${existing_id}" ] && [ "${existing_id}" != "null" ]; then
+        print_info "✓ Base image already registered: ${RHACS_BASE_IMAGE_REPO_PATH}:${RHACS_BASE_IMAGE_TAG_PATTERN} (id: ${existing_id})"
+        return 0
+    fi
+
+    local payload
+    payload=$(jq -n \
+        --arg repo "${RHACS_BASE_IMAGE_REPO_PATH}" \
+        --arg tag "${RHACS_BASE_IMAGE_TAG_PATTERN}" \
+        '{baseImageRepoPath: $repo, baseImageTagPattern: $tag}')
+
+    print_info "Creating base image reference: ${RHACS_BASE_IMAGE_REPO_PATH}:${RHACS_BASE_IMAGE_TAG_PATTERN}"
+
+    local response
+    response=$(curl -k -s -w "\n%{http_code}" \
+        -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        -d "${payload}" \
+        "${api_v2_base}/baseimages" 2>&1)
+
+    local http_code
+    http_code=$(echo "${response}" | tail -n1)
+    local body
+    body=$(echo "${response}" | sed '$d')
+
+    if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+        print_error "Failed to create base image reference (HTTP ${http_code})"
+        print_error "Response: ${body:0:300}"
+        print_error "Ensure the API token has ImageAdministration permission (Admin or Analyst role)"
+        return 1
+    fi
+
+    local created_id
+    created_id=$(echo "${body}" | jq -r '.baseImageReference.id // empty' 2>/dev/null)
+    if [ -n "${created_id}" ]; then
+        print_info "✓ Base image registered (id: ${created_id})"
+    else
+        print_info "✓ Base image registered"
+    fi
+    print_info "RHACS refreshes base image metadata from the registry every 4 hours"
+    return 0
+}
+
 # Function to validate configuration
 validate_configuration() {
     local token=$1
@@ -313,6 +382,7 @@ main() {
     local api_host="${central_url#https://}"
     api_host="${api_host#http://}"
     local api_base="https://${api_host}/v1"
+    local api_v2_base="https://${api_host}/v2"
     
     # Use API token from environment (required)
     local token="${ROX_API_TOKEN:-}"
@@ -336,6 +406,13 @@ main() {
     fi
     
     print_info "✓ RHACS configuration applied successfully"
+
+    print_info ""
+
+    # Register base images for vulnerability layer filtering (v2 API)
+    if ! configure_base_images "${token}" "${api_v2_base}"; then
+        print_warn "Base image configuration failed; continuing with other settings"
+    fi
     
     # Verify configuration (optional, non-fatal)
     verify_configuration "${token}" "${api_base}" || true
@@ -357,6 +434,7 @@ main() {
     print_info "    • 7-day alert retention"
     print_info "    • 30-day runtime retention"
     print_info "    • 90-day vulnerability request retention"
+    print_info "  - Base image reference: ${RHACS_BASE_IMAGE_REPO_PATH}:${RHACS_BASE_IMAGE_TAG_PATTERN}"
     print_info "  - Configuration validated successfully"
     print_info ""
 }
