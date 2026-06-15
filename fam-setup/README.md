@@ -37,11 +37,36 @@ For **`verify-all-setup.sh`**, **`Deployment/rhacs-fam-exec-runner`** is expecte
    - `fam-basic-node-monitoring` – monitors `/etc/passwd` for node-level modifications (NODE_EVENT)
    - `fam-basic-deploy-monitoring` – monitors deployments for changes to `/etc/passwd`
 3. **Applies the exec runner Deployment** – **`fam-cron-exec-target.yaml`**: ServiceAccount, Role, RoleBinding, and **`rhacs-fam-exec-runner`**, which loops: **`oc exec`** into **`deployment/visa-processor`** container **`visa-processor-sidecar`** (defaults), **`touch /etc/passwd`**, then sleeps **`FAM_LOOP_SLEEP_SEC`** (default **600**). Failures are logged and the pod stays Running (no CrashLoop from denied `touch`). Override interval: **`FAM_LOOP_SLEEP_SEC=300 ./install.sh`**. Legacy **`CronJob/rhacs-fam-exec-trigger`** is deleted on apply if present.
-4. **One-shot `oc exec`** – Same target as above, once at install time, if the deployment exists.
+4. **Triggers FAM violations** – One-shot **container** trigger (`oc exec` into **`visa-processor-sidecar`**, privileged) and **host** trigger (`oc debug node/... -- chroot /host touch /etc/passwd`), then polls for both policies.
 
-## Trigger violations (run after install)
+## Trigger violations manually
 
-**Node-level** FAM:
+**Deploy FAM** (container — must run as root or privileged):
+
+```bash
+oc exec -n payments deployment/visa-processor -c visa-processor-sidecar -- touch /etc/passwd
+```
+
+**Node FAM** (host):
+
+```bash
+NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
+oc debug "node/${NODE}" -- chroot /host touch /etc/passwd
+```
+
+Check alerts:
+
+```bash
+curl -k -G "${ROX_CENTRAL_ADDRESS}/v1/alerts/summary/groups" \
+  -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+  --data-urlencode 'query=Policy:"fam-basic-deploy-monitoring"' | jq .
+
+curl -k -G "${ROX_CENTRAL_ADDRESS}/v1/alerts/summary/groups" \
+  -H "Authorization: Bearer ${ROX_API_TOKEN}" \
+  --data-urlencode 'query=Policy:"fam-basic-node-monitoring"' | jq .
+```
+
+## Trigger violations (legacy interactive node debug)
 
 ```bash
 # 1. Start a debug session on a worker node

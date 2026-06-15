@@ -8,11 +8,14 @@
 #
 # Optional env:
 #   FAM_SKIP_CRONJOB=1        — do not apply the exec CronJob manifest
-#   FAM_SKIP_WORKLOAD_EXEC=1  — do not run one-shot oc exec into the demo workload
-#   FAM_SKIP_INITIAL_ROLLOUT_WAIT=1 — do not wait for rhacs-fam-exec-runner Deployment after apply
-#   FAM_LOOP_SLEEP_SEC        — seconds between touch attempts in the runner pod (default 600)
-#   FAM_SKIP_VIOLATION_WAIT=1 — do not poll RHACS for a deploy FAM violation (groups API + fallbacks)
-#   FAM_REQUIRE_VIOLATION=1   — exit non-zero if no alert for the deploy policy before wait timeout
+#   FAM_SKIP_WORKLOAD_EXEC=1  — do not run one-shot deploy/node FAM triggers
+#   FAM_SKIP_NODE_TRIGGER=1   — skip host/node FAM trigger (oc debug node)
+#   FAM_SKIP_VIOLATION_WAIT=1 — do not poll RHACS for FAM violations
+#   FAM_REQUIRE_VIOLATION=1     — exit non-zero if deploy policy has no alert before timeout
+#   FAM_REQUIRE_NODE_VIOLATION=1 — exit non-zero if node policy has no alert before timeout
+#   FAM_NODE_POLICY_NAME        — default fam-basic-node-monitoring
+#   FAM_NODE_NAME               — worker node for oc debug (auto-detected if unset)
+#   FAM_NODE_DEBUG_TIMEOUT_SEC  — timeout for oc debug node (default 180)
 #   FAM_POST_POLICY_SLEEP_SEC — sleep after policies before triggers (default 15; sensor/policy propagation)
 #   FAM_VIOLATION_WAIT_SEC    — max time to poll APIs (default 420)
 #   FAM_VIOLATION_POLL_SEC    — interval between polls (default 15)
@@ -51,6 +54,7 @@ FAM_EXEC_NAMESPACE="${FAM_EXEC_NAMESPACE:-payments}"
 FAM_EXEC_WORKLOAD="${FAM_EXEC_WORKLOAD:-deployment/visa-processor}"
 FAM_EXEC_CONTAINER="${FAM_EXEC_CONTAINER:-visa-processor-sidecar}"
 FAM_DEPLOY_POLICY_NAME="${FAM_DEPLOY_POLICY_NAME:-fam-basic-deploy-monitoring}"
+FAM_NODE_POLICY_NAME="${FAM_NODE_POLICY_NAME:-fam-basic-node-monitoring}"
 
 # Get Central URL
 get_central_url() {
@@ -190,7 +194,7 @@ alert_count_fallback_list() {
     echo "${body}" | jq -r --arg p "${policy}" '[.alerts[]? | select(.policy.name == $p)] | length' 2>/dev/null || echo "0"
 }
 
-fam_deploy_violation_count() {
+fam_violation_count() {
     local policy="$1"
     local c
     c=$(alert_count_from_groups "${policy}" 2>/dev/null | tr -d '\n\r ') || c=""
@@ -201,6 +205,133 @@ fam_deploy_violation_count() {
         c=$(alert_count_fallback_list "${policy}" 2>/dev/null | tr -d '\n\r ') || c="0"
     fi
     echo "${c:-0}"
+}
+
+# Backward-compatible alias
+fam_deploy_violation_count() { fam_violation_count "$1"; }
+
+pick_worker_node() {
+    oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null \
+        || oc get nodes -o jsonpath='{.items[?(@.spec.unschedulable!=true)].metadata.name}' 2>/dev/null \
+        | awk '{print $1}'
+}
+
+# Prefer visa-processor-sidecar (privileged); mastercard-processor runs non-root and cannot touch /etc/passwd.
+resolve_fam_exec_target() {
+    local ns="${FAM_EXEC_NAMESPACE}"
+    local candidates=(
+        "deployment/visa-processor:visa-processor-sidecar"
+        "deployment/visa-processor:visa-processor"
+    )
+    local entry dep container
+
+    if oc get "${FAM_EXEC_WORKLOAD}" -n "${ns}" &>/dev/null; then
+        if oc get "${FAM_EXEC_WORKLOAD}" -n "${ns}" -o jsonpath="{.spec.template.spec.containers[?(@.name==\"${FAM_EXEC_CONTAINER}\")].name}" 2>/dev/null | grep -q .; then
+            print_info "FAM deploy target: ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} (ns ${ns})"
+            return 0
+        fi
+        print_warn "Container '${FAM_EXEC_CONTAINER}' not found on ${FAM_EXEC_WORKLOAD}; scanning fallbacks..."
+    else
+        print_warn "Workload '${FAM_EXEC_WORKLOAD}' not found in ${ns}; scanning fallbacks..."
+    fi
+
+    for entry in "${candidates[@]}"; do
+        dep="${entry%%:*}"
+        container="${entry##*:}"
+        if oc get "${dep}" -n "${ns}" &>/dev/null \
+            && oc get "${dep}" -n "${ns}" -o jsonpath="{.spec.template.spec.containers[?(@.name==\"${container}\")].name}" 2>/dev/null | grep -q .; then
+            FAM_EXEC_WORKLOAD="${dep}"
+            FAM_EXEC_CONTAINER="${container}"
+            print_info "FAM deploy target (auto): ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} (ns ${ns})"
+            return 0
+        fi
+    done
+
+    print_error "No FAM deploy target found in ${ns}. Deploy demo apps (visa-processor) or set FAM_EXEC_WORKLOAD / FAM_EXEC_CONTAINER."
+    return 1
+}
+
+trigger_deploy_fam_touch() {
+    local rc=0
+    print_info "Deploy FAM trigger: oc exec -n ${FAM_EXEC_NAMESPACE} ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} -- touch /etc/passwd"
+    if ! oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -c "${FAM_EXEC_CONTAINER}" -- touch /etc/passwd; then
+        rc=1
+        print_warn "Deploy FAM trigger failed (non-root or read-only rootfs). Try a privileged container, e.g.:"
+        print_warn "  FAM_EXEC_WORKLOAD=deployment/visa-processor FAM_EXEC_CONTAINER=visa-processor-sidecar ./fam-setup/install.sh"
+    else
+        print_info "✓ Container touch /etc/passwd succeeded (${FAM_DEPLOY_POLICY_NAME})"
+    fi
+    return "${rc}"
+}
+
+trigger_node_fam_touch() {
+    local node="${FAM_NODE_NAME:-$(pick_worker_node)}"
+    local timeout_sec="${FAM_NODE_DEBUG_TIMEOUT_SEC:-180}"
+    if [ -z "${node}" ]; then
+        print_warn "Could not detect a worker node for node FAM trigger"
+        return 1
+    fi
+    print_info "Node FAM trigger: oc debug node/${node} -- chroot /host touch /etc/passwd (timeout ${timeout_sec}s)"
+    local rc=0
+    if command -v timeout &>/dev/null; then
+        timeout "${timeout_sec}" oc debug "node/${node}" -- chroot /host touch /etc/passwd || rc=1
+    else
+        oc debug "node/${node}" -- chroot /host touch /etc/passwd || rc=1
+    fi
+    if [ "${rc}" -eq 0 ]; then
+        print_info "✓ Host touch /etc/passwd succeeded (${FAM_NODE_POLICY_NAME})"
+    else
+        print_warn "Node FAM trigger failed — ensure you have permission for oc debug node/${node}"
+    fi
+    return "${rc}"
+}
+
+wait_for_fam_violations() {
+    local _deadline="${FAM_VIOLATION_WAIT_SEC:-420}"
+    local _every="${FAM_VIOLATION_POLL_SEC:-15}"
+    local _start _now
+    local deploy_count=0 node_count=0
+    _start=$(date +%s)
+
+    while true; do
+        deploy_count=$(fam_violation_count "${FAM_DEPLOY_POLICY_NAME}")
+        node_count=$(fam_violation_count "${FAM_NODE_POLICY_NAME}")
+        deploy_count=${deploy_count:-0}
+        node_count=${node_count:-0}
+
+        if [ "${deploy_count}" -ge 1 ] && [ "${node_count}" -ge 1 ]; then
+            print_info "✓ Deploy policy '${FAM_DEPLOY_POLICY_NAME}': numAlerts=${deploy_count}"
+            print_info "✓ Node policy '${FAM_NODE_POLICY_NAME}': numAlerts=${node_count}"
+            return 0
+        fi
+
+        _now=$(date +%s)
+        if [ $((_now - _start)) -ge "${_deadline}" ]; then
+            break
+        fi
+
+        print_info "  Waiting for FAM alerts — deploy=${deploy_count}, node=${node_count}; polling every ${_every}s (max ${_deadline}s)..."
+        sleep "${_every}"
+    done
+
+    if [ "${deploy_count}" -lt 1 ]; then
+        print_warn "No alert yet for '${FAM_DEPLOY_POLICY_NAME}' (count=${deploy_count})"
+    fi
+    if [ "${node_count}" -lt 1 ]; then
+        print_warn "No alert yet for '${FAM_NODE_POLICY_NAME}' (count=${node_count}) — node alerts may take longer; query /v1/alerts API"
+    fi
+
+    if [ "${FAM_REQUIRE_VIOLATION:-0}" = "1" ] && [ "${deploy_count}" -lt 1 ]; then
+        print_error "FAM_REQUIRE_VIOLATION=1 but deploy policy has no alert."
+        setup_rerun_hint_print
+        exit 1
+    fi
+    if [ "${FAM_REQUIRE_NODE_VIOLATION:-0}" = "1" ] && [ "${node_count}" -lt 1 ]; then
+        print_error "FAM_REQUIRE_NODE_VIOLATION=1 but node policy has no alert."
+        setup_rerun_hint_print
+        exit 1
+    fi
+    return 1
 }
 
 #================================================================
@@ -281,6 +412,11 @@ if [ "${FAM_SKIP_POST_POLICY_SLEEP:-0}" != "1" ]; then
 fi
 echo ""
 
+# Pick a container that can touch /etc/passwd before applying the exec runner.
+if [ "${FAM_SKIP_CRONJOB:-0}" != "1" ] || [ "${FAM_SKIP_WORKLOAD_EXEC:-0}" != "1" ]; then
+    resolve_fam_exec_target || print_warn "Could not resolve deploy FAM target — ensure visa-processor is deployed in ${FAM_EXEC_NAMESPACE}"
+fi
+
 #================================================================
 # Step 3: Deployment — loop: oc exec into target workload → touch /etc/passwd, then sleep
 #================================================================
@@ -304,12 +440,12 @@ else
         exit 1
     fi
     if [ -n "${FAM_EXEC_CONTAINER}" ]; then
-        if oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
-            "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" --overwrite &>/dev/null; then
-            print_info "✓ Deployment env TARGET_CONTAINER=${FAM_EXEC_CONTAINER}"
-        else
-            print_warn "Could not patch Deployment TARGET_CONTAINER — set manually if needed"
-        fi
+        oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
+            "TARGET_WORKLOAD=${FAM_EXEC_WORKLOAD}" \
+            "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" \
+            "TARGET_NAMESPACE=${FAM_EXEC_NAMESPACE}" \
+            --overwrite &>/dev/null || print_warn "Could not patch rhacs-fam-exec-runner env"
+        print_info "✓ Runner env: ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER}"
     fi
     if [ -n "${FAM_LOOP_SLEEP_SEC:-}" ]; then
         if oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
@@ -317,7 +453,7 @@ else
             print_info "✓ Deployment env FAM_LOOP_SLEEP_SEC=${FAM_LOOP_SLEEP_SEC}"
         fi
     fi
-    print_info "✓ Deployment rhacs-fam-exec-runner in ${FAM_EXEC_NAMESPACE} (loop → oc exec ${FAM_EXEC_WORKLOAD} -- touch /etc/passwd; sleep FAM_LOOP_SLEEP_SEC)"
+    print_info "✓ Deployment rhacs-fam-exec-runner in ${FAM_EXEC_NAMESPACE} (loop → oc exec ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} → touch /etc/passwd)"
 
     if [ "${FAM_SKIP_INITIAL_ROLLOUT_WAIT:-0}" != "1" ]; then
         _ijt="${FAM_INITIAL_ROLLOUT_TIMEOUT_SEC:-180}"
@@ -332,93 +468,64 @@ fi
 echo ""
 
 #================================================================
-# Step 4: One-shot oc exec — touch /etc/passwd inside target workload (deploy FAM demo)
+# Step 4: Trigger deploy FAM (container) + node FAM (host)
 #================================================================
-print_step "4. FAM demo workload: oc exec → touch /etc/passwd (fam-basic-deploy-monitoring)..."
+print_step "4. Triggering FAM demo events (container + host)..."
+
+DEPLOY_TRIGGER_OK=0
+NODE_TRIGGER_OK=0
 
 if [ "${FAM_SKIP_WORKLOAD_EXEC:-0}" = "1" ]; then
-    print_info "Skipping (FAM_SKIP_WORKLOAD_EXEC=1)"
+    print_info "Skipping deploy/node triggers (FAM_SKIP_WORKLOAD_EXEC=1)"
 else
-    if ! oc get "${FAM_EXEC_WORKLOAD}" -n "${FAM_EXEC_NAMESPACE}" &>/dev/null; then
-        print_warn "Resource not found: ${FAM_EXEC_WORKLOAD} in ${FAM_EXEC_NAMESPACE} — skipping oc exec"
-        print_warn "Set FAM_EXEC_NAMESPACE / FAM_EXEC_WORKLOAD or deploy your app first."
-    else
-        print_info "Running oc exec into ${FAM_EXEC_WORKLOAD} (ns ${FAM_EXEC_NAMESPACE}, container ${FAM_EXEC_CONTAINER}) ..."
-        oc_cmd=(oc exec -n "${FAM_EXEC_NAMESPACE}" "${FAM_EXEC_WORKLOAD}" -c "${FAM_EXEC_CONTAINER}" -- touch /etc/passwd)
-        if "${oc_cmd[@]}"; then
-            print_info "✓ touch completed inside workload (check RHACS: fam-basic-deploy-monitoring)"
-        else
-            print_warn "oc exec failed (permissions, read-only FS, or missing container) — try:"
-            print_warn "  oc exec -n ${FAM_EXEC_NAMESPACE} ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} -- touch /etc/passwd"
-            print_warn "  Or set FAM_EXEC_WORKLOAD / FAM_EXEC_CONTAINER to a root-capable or privileged pod"
-        fi
+    print_info "4a. Deploy FAM (${FAM_DEPLOY_POLICY_NAME})..."
+    if resolve_fam_exec_target && trigger_deploy_fam_touch; then
+        DEPLOY_TRIGGER_OK=1
+    fi
+
+    echo ""
+    print_info "4b. Node FAM (${FAM_NODE_POLICY_NAME})..."
+    if [ "${FAM_SKIP_NODE_TRIGGER:-0}" = "1" ]; then
+        print_info "Skipping node trigger (FAM_SKIP_NODE_TRIGGER=1)"
+    elif trigger_node_fam_touch; then
+        NODE_TRIGGER_OK=1
     fi
 fi
 echo ""
 
 #================================================================
-# Step 5: Verify deploy FAM violation via API (GET /v1/alerts/summary/groups → alertsByPolicies / numAlerts; fallbacks: alertscount, list alerts)
+# Step 5: Verify deploy + node FAM violations via API
 #================================================================
-print_step "5. Verifying policy violation (RHACS API: alerts/summary/groups for ${FAM_DEPLOY_POLICY_NAME})..."
+print_step "5. Verifying FAM violations (deploy + node policies)..."
 
 if [ "${FAM_SKIP_VIOLATION_WAIT:-0}" = "1" ]; then
     print_info "Skipping (FAM_SKIP_VIOLATION_WAIT=1)"
 else
-    _deadline="${FAM_VIOLATION_WAIT_SEC:-420}"
-    _every="${FAM_VIOLATION_POLL_SEC:-15}"
-    _start=$(date +%s)
-    _seen=0
-    while true; do
-        _count=$(fam_deploy_violation_count "${FAM_DEPLOY_POLICY_NAME}")
-        _count=${_count:-0}
-        if [ "${_count}" -ge 1 ] 2>/dev/null; then
-            print_info "✓ At least one active alert/violation for policy '${FAM_DEPLOY_POLICY_NAME}' (numAlerts=${_count})"
-            print_info "  API: GET ${CENTRAL_URL}/v1/alerts/summary/groups?query=Policy:%22${FAM_DEPLOY_POLICY_NAME}%22 → check alertsByPolicies[].numAlerts"
-            _seen=1
-            break
+    if wait_for_fam_violations; then
+        print_info "  API: GET ${CENTRAL_URL}/v1/alerts/summary/groups?query=Policy:%22${FAM_DEPLOY_POLICY_NAME}%22"
+        print_info "  API: GET ${CENTRAL_URL}/v1/alerts/summary/groups?query=Policy:%22${FAM_NODE_POLICY_NAME}%22"
+    else
+        print_warn "Timed out or missing alerts. Re-run triggers manually:"
+        if [ "${DEPLOY_TRIGGER_OK}" != "1" ]; then
+            print_warn "  oc exec -n ${FAM_EXEC_NAMESPACE} deployment/visa-processor -c visa-processor-sidecar -- touch /etc/passwd"
         fi
-        _now=$(date +%s)
-        if [ $((_now - _start)) -ge "${_deadline}" ]; then
-            break
+        if [ "${NODE_TRIGGER_OK}" != "1" ]; then
+            print_warn "  oc debug node/\$(oc get nodes -l node-role.kubernetes.io/worker -o name | head -1 | sed 's|node/||') -- chroot /host touch /etc/passwd"
         fi
-        print_info "  No alert yet for '${FAM_DEPLOY_POLICY_NAME}' (count=${_count:-0}); polling every ${_every}s (max ${_deadline}s total)..."
-        sleep "${_every}"
-    done
-    if [ "${_seen}" != "1" ]; then
-        print_warn "Timed out waiting for violation (policy '${FAM_DEPLOY_POLICY_NAME}'). FAM can lag after first exec — check RHACS Violations UI, or:"
-        print_warn "  curl -k -G \"${CENTRAL_URL}/v1/alerts/summary/groups\" -H \"Authorization: Bearer \${ROX_API_TOKEN}\" --data-urlencode 'query=Policy:\"${FAM_DEPLOY_POLICY_NAME}\"' | jq '.alertsByPolicies[] | select(.policy.name==\"${FAM_DEPLOY_POLICY_NAME}\")'"
-        if [ "${FAM_REQUIRE_VIOLATION:-0}" = "1" ]; then
-            print_error "FAM_REQUIRE_VIOLATION=1 but no matching alert was observed."
-            setup_rerun_hint_print
-            exit 1
-        fi
+        print_warn "  curl -k -G \"${CENTRAL_URL}/v1/alerts/summary/groups\" -H \"Authorization: Bearer \${ROX_API_TOKEN}\" --data-urlencode 'query=Policy:\"${FAM_DEPLOY_POLICY_NAME}\"'"
     fi
 fi
 echo ""
 
 #================================================================
-# Next steps: Trigger FAM violations (run manually after install)
+# Summary
 #================================================================
-WORKER_NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
-    oc get nodes -o jsonpath='{.items[1].metadata.name}' 2>/dev/null || echo "worker-0")
+WORKER_NODE=$(pick_worker_node || echo "worker-0")
 
 print_step "File activity monitoring (FAM) setup complete"
 echo ""
-print_info "Deployment rhacs-fam-exec-runner (unless skipped) loops: oc exec into ${FAM_EXEC_WORKLOAD} (${FAM_EXEC_NAMESPACE}), then sleeps FAM_LOOP_SLEEP_SEC (default 600s)."
-print_info "Step 4 runs one immediate oc exec when that workload exists (override with FAM_EXEC_* env)."
-print_info "Step 5 polls GET ${CENTRAL_URL}/v1/alerts/summary/groups?query=Policy:%22${FAM_DEPLOY_POLICY_NAME}%22 (alertsByPolicies / numAlerts), then alertscount / alerts if needed."
-print_info "To trigger node-level FAM manually, run these commands:"
-echo ""
-echo "  1. Debug a worker node (detected: ${WORKER_NODE}):"
-echo "       oc debug node/${WORKER_NODE}"
-echo ""
-echo "  2. In the debug shell, chroot to the host:"
-echo "       chroot /host"
-echo ""
-echo "  3. Trigger a monitored path change:"
-echo "       touch /etc/passwd"
-echo ""
-echo "  4. RHACS UI: Violations → filter by policy fam-basic-node-monitoring"
-echo ""
-echo "  5. Exit: run exit twice (leave chroot, then leave the debug pod)"
+print_info "Deploy target: ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} (${FAM_EXEC_NAMESPACE})"
+print_info "Node target: ${WORKER_NODE} (oc debug → chroot /host → touch /etc/passwd)"
+print_info "Runner pod rhacs-fam-exec-runner re-triggers deploy FAM every FAM_LOOP_SLEEP_SEC (default 600s)."
+print_info "Node violations may not appear in the Violations UI — use the alerts API or notifiers."
 echo ""
