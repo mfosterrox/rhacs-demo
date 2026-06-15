@@ -1,5 +1,6 @@
-# Long-running pod that periodically attempts oc exec into an existing workload and runs:
-#   touch /etc/passwd
+# Long-running pod that periodically triggers:
+#   - Deploy FAM: oc exec into a privileged workload → touch /etc/passwd
+#   - Node FAM:    oc debug node/TARGET_NODE → chroot /host touch /etc/passwd
 #
 # Implemented as a Deployment with a bash loop (sleep between attempts) so failures are logged
 # but the container stays Running — no CrashLoopBackOff when touch is denied (e.g. non-root SCC).
@@ -50,6 +51,34 @@ subjects:
     name: rhacs-fam-exec
     namespace: payments
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rhacs-fam-node-debug
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rhacs-fam-node-debug
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rhacs-fam-node-debug
+subjects:
+  - kind: ServiceAccount
+    name: rhacs-fam-exec
+    namespace: payments
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -80,27 +109,32 @@ spec:
               NS="${TARGET_NAMESPACE}"
               WORKLOAD="${TARGET_WORKLOAD}"
               CONTAINER="${TARGET_CONTAINER}"
+              NODE="${TARGET_NODE}"
               SLEEP_SEC="${FAM_LOOP_SLEEP_SEC:-600}"
-              echo "[$(date -Is)] rhacs-fam-exec-runner starting (sleep ${SLEEP_SEC}s between attempts)"
+              echo "[$(date -Is)] rhacs-fam-exec-runner starting (sleep ${SLEEP_SEC}s between cycles)"
               while true; do
-                if ! oc get "${WORKLOAD}" -n "${NS}" &>/dev/null; then
-                  echo "[$(date -Is)] workload not found: ${WORKLOAD} in ${NS} — sleeping ${SLEEP_SEC}s"
-                  sleep "${SLEEP_SEC}"
-                  continue
-                fi
-                echo "[$(date -Is)] oc exec -n ${NS} ${WORKLOAD} -- touch /etc/passwd"
-                rc=0
-                if [ -n "${CONTAINER}" ]; then
-                  oc exec -n "${NS}" "${WORKLOAD}" -c "${CONTAINER}" -- touch /etc/passwd || rc=$?
+                # --- Deploy FAM (container) ---
+                if oc get "${WORKLOAD}" -n "${NS}" &>/dev/null; then
+                  echo "[$(date -Is)] deploy FAM: oc exec -n ${NS} ${WORKLOAD} -c ${CONTAINER} -- touch /etc/passwd"
+                  rc=0
+                  if [ -n "${CONTAINER}" ]; then
+                    oc exec -n "${NS}" "${WORKLOAD}" -c "${CONTAINER}" -- touch /etc/passwd || rc=$?
+                  else
+                    echo "[$(date -Is)] TARGET_CONTAINER not set — skipping deploy FAM"
+                    rc=1
+                  fi
+                  if [ "${rc}" -eq 0 ]; then
+                    echo "[$(date -Is)] deploy FAM touch ok"
+                  else
+                    echo "[$(date -Is)] deploy FAM touch failed (rc=${rc})"
+                  fi
                 else
-                  echo "[$(date -Is)] TARGET_CONTAINER not set — skipping (need a root-capable or privileged container)"
-                  rc=1
+                  echo "[$(date -Is)] workload not found: ${WORKLOAD} in ${NS}"
                 fi
-                if [ "${rc}" -eq 0 ]; then
-                  echo "[$(date -Is)] touch ok"
-                else
-                  echo "[$(date -Is)] touch failed (rc=${rc}) — non-fatal; sleeping ${SLEEP_SEC}s"
-                fi
+
+                # --- Node FAM (host) — run from install.sh on bastion only; oc debug pods match DEPLOYMENT_EVENT ---
+                # Runner intentionally skips automated node trigger to avoid false deploy violations.
+
                 sleep "${SLEEP_SEC}"
               done
           env:
@@ -110,5 +144,7 @@ spec:
               value: "deployment/visa-processor"
             - name: TARGET_CONTAINER
               value: "visa-processor-sidecar"
+            - name: TARGET_NODE
+              value: ""
             - name: FAM_LOOP_SLEEP_SEC
               value: "600"

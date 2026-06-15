@@ -211,9 +211,26 @@ fam_violation_count() {
 fam_deploy_violation_count() { fam_violation_count "$1"; }
 
 pick_worker_node() {
-    oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null \
-        || oc get nodes -o jsonpath='{.items[?(@.spec.unschedulable!=true)].metadata.name}' 2>/dev/null \
-        | awk '{print $1}'
+    list_fam_nodes | head -1
+}
+
+# Nodes suitable for host FAM demo (prefer workers; fall back to any node on compact clusters).
+list_fam_nodes() {
+    if ! command -v jq &>/dev/null; then
+        local nodes
+        nodes=$(oc get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || echo "")
+        if echo "${nodes}" | grep -Ev 'control-plane|master' | grep -q .; then
+            echo "${nodes}" | grep -Ev 'control-plane|master'
+        else
+            echo "${nodes}"
+        fi
+        return 0
+    fi
+    oc get nodes -o json 2>/dev/null | jq -r '
+        [.items | sort_by(.metadata.name)[] | .metadata.name] as $all |
+        ([$all[] | select(test("control-plane|(^|[-/])master([-/]|$)"; "i") | not)] |
+         if length > 0 then . else $all end) | .[]
+    '
 }
 
 # Prefer visa-processor-sidecar (privileged); mastercard-processor runs non-root and cannot touch /etc/passwd.
@@ -265,31 +282,45 @@ trigger_deploy_fam_touch() {
 }
 
 trigger_node_fam_touch() {
-    local node="${FAM_NODE_NAME:-$(pick_worker_node)}"
-    local timeout_sec="${FAM_NODE_DEBUG_TIMEOUT_SEC:-180}"
-    if [ -z "${node}" ]; then
-        print_warn "Could not detect a worker node for node FAM trigger"
-        return 1
-    fi
-    print_info "Node FAM trigger: oc debug node/${node} -- chroot /host touch /etc/passwd (timeout ${timeout_sec}s)"
-    local rc=0
-    if command -v timeout &>/dev/null; then
-        timeout "${timeout_sec}" oc debug "node/${node}" -- chroot /host touch /etc/passwd || rc=1
+    local node timeout_sec output rc=1 tried=0
+    timeout_sec="${FAM_NODE_DEBUG_TIMEOUT_SEC:-180}"
+    # oc debug creates a pod → RHACS treats chroot/touch as DEPLOYMENT_EVENT, not NODE_EVENT.
+    # nsenter into the host init namespace runs touch as a host process (NODE_EVENT).
+    local node_cmd='nsenter -t 1 -m -u -i -n -p touch /etc/passwd'
+
+    while IFS= read -r node; do
+        [ -z "${node}" ] && continue
+        tried=$((tried + 1))
+        print_info "Node FAM trigger [${tried}]: oc debug node/${node} -- ${node_cmd} (timeout ${timeout_sec}s)"
+        if command -v timeout &>/dev/null; then
+            output=$(timeout "${timeout_sec}" oc debug "node/${node}" --quiet -- bash -c "${node_cmd}" 2>&1) && rc=0 || rc=$?
+        else
+            output=$(oc debug "node/${node}" --quiet -- bash -c "${node_cmd}" 2>&1) && rc=0 || rc=$?
+        fi
+        if [ "${rc}" -eq 0 ]; then
+            print_info "✓ Host touch via nsenter on node/${node} (${FAM_NODE_POLICY_NAME})"
+            print_info "  Node FAM alerts appear in the API/notifiers only — not the Violations UI"
+            FAM_NODE_NAME="${node}"
+            return 0
+        fi
+        print_warn "Node FAM trigger failed on ${node} (rc=${rc})"
+        if [ -n "${output}" ]; then
+            echo "${output}" | head -5 | while IFS= read -r line; do print_warn "  ${line}"; done
+        fi
+    done < <(if [ -n "${FAM_NODE_NAME:-}" ]; then echo "${FAM_NODE_NAME}"; else list_fam_nodes; fi)
+
+    if [ "${tried}" -eq 0 ]; then
+        print_warn "No nodes found for node FAM trigger"
     else
-        oc debug "node/${node}" -- chroot /host touch /etc/passwd || rc=1
+        print_warn "Node FAM trigger failed on all ${tried} node(s) — need cluster-admin or nodes/debug permission"
     fi
-    if [ "${rc}" -eq 0 ]; then
-        print_info "✓ Host touch /etc/passwd succeeded (${FAM_NODE_POLICY_NAME})"
-    else
-        print_warn "Node FAM trigger failed — ensure you have permission for oc debug node/${node}"
-    fi
-    return "${rc}"
+    return 1
 }
 
 wait_for_fam_violations() {
     local _deadline="${FAM_VIOLATION_WAIT_SEC:-420}"
     local _every="${FAM_VIOLATION_POLL_SEC:-15}"
-    local _start _now
+    local _start _now node_retries=0
     local deploy_count=0 node_count=0
     _start=$(date +%s)
 
@@ -303,6 +334,12 @@ wait_for_fam_violations() {
             print_info "✓ Deploy policy '${FAM_DEPLOY_POLICY_NAME}': numAlerts=${deploy_count}"
             print_info "✓ Node policy '${FAM_NODE_POLICY_NAME}': numAlerts=${node_count}"
             return 0
+        fi
+
+        if [ "${node_count}" -lt 1 ] && [ "${node_retries}" -lt 3 ]; then
+            node_retries=$((node_retries + 1))
+            print_info "  Node alert still 0 — re-triggering host FAM (attempt ${node_retries}/3)..."
+            trigger_node_fam_touch && NODE_TRIGGER_OK=1 || true
         fi
 
         _now=$(date +%s)
@@ -412,9 +449,15 @@ if [ "${FAM_SKIP_POST_POLICY_SLEEP:-0}" != "1" ]; then
 fi
 echo ""
 
-# Pick a container that can touch /etc/passwd before applying the exec runner.
+# Pick deploy target and node before applying the exec runner.
+FAM_NODE_NAME="${FAM_NODE_NAME:-$(pick_worker_node)}"
 if [ "${FAM_SKIP_CRONJOB:-0}" != "1" ] || [ "${FAM_SKIP_WORKLOAD_EXEC:-0}" != "1" ]; then
     resolve_fam_exec_target || print_warn "Could not resolve deploy FAM target — ensure visa-processor is deployed in ${FAM_EXEC_NAMESPACE}"
+    if [ -n "${FAM_NODE_NAME}" ]; then
+        print_info "FAM node target: ${FAM_NODE_NAME}"
+    else
+        print_warn "Could not resolve node for host FAM — set FAM_NODE_NAME manually"
+    fi
 fi
 
 #================================================================
@@ -439,14 +482,13 @@ else
         setup_rerun_hint_print
         exit 1
     fi
-    if [ -n "${FAM_EXEC_CONTAINER}" ]; then
-        oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
-            "TARGET_WORKLOAD=${FAM_EXEC_WORKLOAD}" \
-            "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" \
-            "TARGET_NAMESPACE=${FAM_EXEC_NAMESPACE}" \
-            --overwrite &>/dev/null || print_warn "Could not patch rhacs-fam-exec-runner env"
-        print_info "✓ Runner env: ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER}"
-    fi
+    oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
+        "TARGET_WORKLOAD=${FAM_EXEC_WORKLOAD}" \
+        "TARGET_CONTAINER=${FAM_EXEC_CONTAINER}" \
+        "TARGET_NAMESPACE=${FAM_EXEC_NAMESPACE}" \
+        "TARGET_NODE=${FAM_NODE_NAME:-}" \
+        --overwrite &>/dev/null || print_warn "Could not patch rhacs-fam-exec-runner env"
+    print_info "✓ Runner env: deploy=${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER}; node=${FAM_NODE_NAME:-unset}"
     if [ -n "${FAM_LOOP_SLEEP_SEC:-}" ]; then
         if oc set env "deployment/rhacs-fam-exec-runner" -n "${FAM_EXEC_NAMESPACE}" \
             "FAM_LOOP_SLEEP_SEC=${FAM_LOOP_SLEEP_SEC}" --overwrite &>/dev/null; then
@@ -510,7 +552,7 @@ else
             print_warn "  oc exec -n ${FAM_EXEC_NAMESPACE} deployment/visa-processor -c visa-processor-sidecar -- touch /etc/passwd"
         fi
         if [ "${NODE_TRIGGER_OK}" != "1" ]; then
-            print_warn "  oc debug node/\$(oc get nodes -l node-role.kubernetes.io/worker -o name | head -1 | sed 's|node/||') -- chroot /host touch /etc/passwd"
+            print_warn "  oc debug node/\$(oc get nodes -o name | grep -v control-plane | head -1 | sed 's|node/||') -- bash -c 'nsenter -t 1 -m -u -i -n -p touch /etc/passwd'"
         fi
         print_warn "  curl -k -G \"${CENTRAL_URL}/v1/alerts/summary/groups\" -H \"Authorization: Bearer \${ROX_API_TOKEN}\" --data-urlencode 'query=Policy:\"${FAM_DEPLOY_POLICY_NAME}\"'"
     fi
@@ -525,7 +567,7 @@ WORKER_NODE=$(pick_worker_node || echo "worker-0")
 print_step "File activity monitoring (FAM) setup complete"
 echo ""
 print_info "Deploy target: ${FAM_EXEC_WORKLOAD} -c ${FAM_EXEC_CONTAINER} (${FAM_EXEC_NAMESPACE})"
-print_info "Node target: ${WORKER_NODE} (oc debug → chroot /host → touch /etc/passwd)"
-print_info "Runner pod rhacs-fam-exec-runner re-triggers deploy FAM every FAM_LOOP_SLEEP_SEC (default 600s)."
-print_info "Node violations may not appear in the Violations UI — use the alerts API or notifiers."
+print_info "Node target: ${WORKER_NODE} (nsenter via oc debug — alerts in API only, not Violations UI)"
+print_info "Deploy policy is scoped to namespace ${FAM_EXEC_NAMESPACE}; openshift-debug is excluded."
+print_info "Runner pod re-triggers deploy FAM every FAM_LOOP_SLEEP_SEC (default 600s)."
 echo ""

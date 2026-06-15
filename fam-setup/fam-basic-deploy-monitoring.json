@@ -2,8 +2,8 @@
     "policies": [
         {
             "name": "fam-basic-deploy-monitoring",
-            "description": "Monitors deployments for changes to critical files such as /etc/passwd. Detects modifications at deployment time which may indicate image tampering or unauthorized changes to base images.",
-            "rationale": "Modifications to system files like /etc/passwd during deployment can indicate that an image was tampered with or that there is a security misconfiguration. Monitoring for such occurrences reduces the risk of privilege escalation and persistent threats entering production.",
+            "description": "Monitors demo app containers in the payments namespace for changes to /etc/passwd. Scoped to payments so openshift-debug pods from oc debug node do not match this policy.",
+            "rationale": "Modifications to system files like /etc/passwd inside application containers can indicate image tampering or misconfiguration. Scoping to the demo namespace avoids false positives from debug tooling.",
             "remediation": "Review the affected deployment and container image for unauthorized or unexpected changes to system files. Rebuild the image from a trusted source if necessary, and investigate any deployment pipelines or automation that could have introduced the modification.",
             "disabled": false,
             "categories": [
@@ -13,8 +13,19 @@
                 "RUNTIME"
             ],
             "eventSource": "DEPLOYMENT_EVENT",
-            "exclusions": [],
-            "scope": [],
+            "exclusions": [
+                {
+                    "name": "openshift-debug namespace",
+                    "deployment": {
+                        "namespace": "openshift-debug"
+                    }
+                }
+            ],
+            "scope": [
+                {
+                    "namespace": "payments"
+                }
+            ],
             "severity": "LOW_SEVERITY",
             "enforcementActions": [],
             "notifiers": [],

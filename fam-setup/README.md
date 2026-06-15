@@ -39,6 +39,17 @@ For **`verify-all-setup.sh`**, **`Deployment/rhacs-fam-exec-runner`** is expecte
 3. **Applies the exec runner Deployment** – **`fam-cron-exec-target.yaml`**: ServiceAccount, Role, RoleBinding, and **`rhacs-fam-exec-runner`**, which loops: **`oc exec`** into **`deployment/visa-processor`** container **`visa-processor-sidecar`** (defaults), **`touch /etc/passwd`**, then sleeps **`FAM_LOOP_SLEEP_SEC`** (default **600**). Failures are logged and the pod stays Running (no CrashLoop from denied `touch`). Override interval: **`FAM_LOOP_SLEEP_SEC=300 ./install.sh`**. Legacy **`CronJob/rhacs-fam-exec-trigger`** is deleted on apply if present.
 4. **Triggers FAM violations** – One-shot **container** trigger (`oc exec` into **`visa-processor-sidecar`**, privileged) and **host** trigger (`oc debug node/... -- chroot /host touch /etc/passwd`), then polls for both policies.
 
+## Deploy vs node FAM (important)
+
+| Policy | Event source | Where violations appear | Demo trigger |
+|--------|--------------|-------------------------|--------------|
+| `fam-basic-deploy-monitoring` | `DEPLOYMENT_EVENT` | **Violations UI** | `oc exec` into privileged app pod in **payments** |
+| `fam-basic-node-monitoring` | `NODE_EVENT` | **API / notifiers only** (not Violations UI) | `oc debug node/... -- nsenter -t 1 ... touch /etc/passwd` on bastion |
+
+`oc debug node` creates a pod in **openshift-debug**. Even with `chroot /host`, RHACS classifies that activity as a **deployment** event — which is why debug pods showed up under the deploy policy. The deploy policy is now **scoped to `payments`** and excludes **openshift-debug**.
+
+Node FAM requires a **host process** (SSH, systemd, or `nsenter` into PID 1). The install script uses `nsenter`, not `chroot`, for the node trigger.
+
 ## Trigger violations manually
 
 **Deploy FAM** (container — must run as root or privileged):
@@ -47,11 +58,11 @@ For **`verify-all-setup.sh`**, **`Deployment/rhacs-fam-exec-runner`** is expecte
 oc exec -n payments deployment/visa-processor -c visa-processor-sidecar -- touch /etc/passwd
 ```
 
-**Node FAM** (host):
+**Node FAM** (host — check **API**, not Violations UI):
 
 ```bash
-NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
-oc debug "node/${NODE}" -- chroot /host touch /etc/passwd
+NODE=$(oc get nodes -o name | grep -v control-plane | head -1 | sed 's|node/||')
+oc debug "node/${NODE}" --quiet -- bash -c 'nsenter -t 1 -m -u -i -n -p touch /etc/passwd'
 ```
 
 Check alerts:
