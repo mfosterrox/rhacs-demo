@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hi-python-base
+  namespace: hummingbird-demo
+  labels:
+    app: hi-python-base
+    demo: hummingbird-base-only
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hi-python-base
+  template:
+    metadata:
+      labels:
+        app: hi-python-base
+        demo: hummingbird-base-only
+    spec:
+      containers:
+        - name: python
+          image: registry.access.redhat.com/hi/python:3.13
+          command: ["python3", "-c", "import time; print('hi-python-base'); time.sleep(86400)"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

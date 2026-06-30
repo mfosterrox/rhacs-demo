@@ -14,6 +14,10 @@ spec:
     - name: file
       type: string
       description: YAML file in the deployfiles workspace
+    - name: cluster
+      type: string
+      description: Cluster name or ID for policy evaluation context (RHACS 4.11+)
+      default: ""
   results:
     - name: check_output
       description: Output of `roxctl deployment check`
@@ -45,4 +49,8 @@ spec:
         cat /deployfile/deploy.yml
         curl -k -L -H "Authorization: Bearer $ROX_API_TOKEN" https://$ROX_CENTRAL_ENDPOINT/api/cli/download/roxctl-linux --output ./roxctl  > /dev/null; echo "Getting roxctl"
         chmod +x ./roxctl  > /dev/null
-        ./roxctl deployment check --insecure-skip-tls-verify -e $ROX_CENTRAL_ENDPOINT -f /deployfile/$(params.file)
+        CLUSTER_ARG=""
+        if [ -n "$(params.cluster)" ]; then
+          CLUSTER_ARG="--cluster $(params.cluster)"
+        fi
+        ./roxctl deployment check --insecure-skip-tls-verify -e $ROX_CENTRAL_ENDPOINT -f /deployfile/$(params.file) ${CLUSTER_ARG}

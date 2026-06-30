@@ -122,8 +122,10 @@ The following scripts are executed in numerical order:
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
 | `04-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
 | `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
-| `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules | **Yes** | ✓ |
+| `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules (includes TailoredProfiles when present) | **Yes** | ✓ |
 | `07-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
+| `08-configure-rhacs-411-features.sh` | RHACS 4.11 TP flags, CRS limits, attach policy, vuln report, label-scoped policy | **Yes** | ✓ |
+| `09-deploy-hummingbird-demo.sh` | Project Hummingbird hardened images — deploy, scan, base vs app layer demo | **Yes** | ✓ |
 
 ## What Gets Configured
 
@@ -159,6 +161,7 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
 
 ### Compliance Scanning (Script 06)
 - Daily compliance scans at 12:00 PM
+- Stock OpenShift compliance profiles plus any **TailoredProfile** CRs from the Compliance Operator (4.11)
 - Multiple compliance profiles:
   - ocp4-cis, ocp4-cis-node
   - ocp4-moderate, ocp4-moderate-node
@@ -166,6 +169,19 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
   - ocp4-pci-dss, ocp4-pci-dss-node
   - ocp4-nerc-cip, ocp4-nerc-cip-node
   - ocp4-e8, ocp4-stig-node
+
+### RHACS 4.11 Features (Script 08)
+- **Technology Preview (enabled by default):** `ROX_INIT_CONTAINER_SUPPORT`, `ROX_POLICY_FILTERS_UI`
+- CRS max expiration / cluster limits (when supported by config API)
+- Attach to Pod policy verification
+- Label-scoped demo policy
+- Scheduled vulnerability report with exact hour/minute (when API available)
+
+### Hummingbird Hardened Images (Script 09)
+- Deploys `hummingbird-demo` namespace with base-only and layered Python workloads
+- Registers `registry.access.redhat.com/hi/python` as RHACS base image
+- Runs `roxctl image scan` against base and layered images
+- See [hummingbird-demo/README.md](../hummingbird-demo/README.md)
 
 ### Custom TLS Configuration (Optional, not included in install.sh)
 This optional script configures Central with a custom TLS certificate and passthrough routing:

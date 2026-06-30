@@ -46,9 +46,9 @@ trap 'error_handler $? $LINENO' ERR
 # Default values
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 ROX_CENTRAL_ADDRESS="${ROX_CENTRAL_ADDRESS:-}"
-# Base image for layer filtering (matches demo-apps payment-processor / frontend Dockerfiles)
-RHACS_BASE_IMAGE_REPO_PATH="${RHACS_BASE_IMAGE_REPO_PATH:-docker.io/library/python}"
-RHACS_BASE_IMAGE_TAG_PATTERN="${RHACS_BASE_IMAGE_TAG_PATTERN:-3.12-alpine}"
+# Base image for layer filtering (Hummingbird demo; override for legacy alpine demo-apps)
+RHACS_BASE_IMAGE_REPO_PATH="${RHACS_BASE_IMAGE_REPO_PATH:-registry.access.redhat.com/hi/python}"
+RHACS_BASE_IMAGE_TAG_PATTERN="${RHACS_BASE_IMAGE_TAG_PATTERN:-3.13}"
 SKIP_RHACS_BASE_IMAGES="${SKIP_RHACS_BASE_IMAGES:-0}"
 # Function to check if jq is installed
 ensure_jq() {

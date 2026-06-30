@@ -45,5 +45,5 @@ node_modules
 .firebaserc
 .firebase
 
-# RHACS init bundles (contain sensitive TLS certificates)
+# RHACS cluster registration secrets (CRS); init bundles deprecated in 4.11 — use CRS instead
 setup-files/init-bundles/

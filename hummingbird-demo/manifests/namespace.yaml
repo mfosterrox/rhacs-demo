@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hummingbird-demo
+  labels:
+    app.kubernetes.io/part-of: rhacs-demo
+    demo: hummingbird

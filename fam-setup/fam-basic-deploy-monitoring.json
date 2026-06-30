@@ -36,7 +36,7 @@
                             "negate": false,
                             "values": [
                                 {
-                                    "value": "/etc/passwd"
+                                    "value": "/etc/passwd*"
                                 }
                             ]
                         }

@@ -640,6 +640,51 @@ ensure_rhacs_console_plugin_enabled() {
     fi
 }
 
+# Verify RHACS 4.11+ operand images use rhel9 base (release notes 1.10).
+verify_rhel9_operand_images() {
+    print_step "Verifying RHACS operand images (rhel9)..."
+
+    if ! command -v jq &>/dev/null; then
+        print_warn "jq not found; skipping rhel9 image validation"
+        return 0
+    fi
+
+    local installed_version
+    installed_version=$(get_installed_version)
+    local installed_minor="${installed_version}"
+    [[ "${installed_version}" =~ ^([0-9]+\.[0-9]+) ]] && installed_minor="${BASH_REMATCH[1]}"
+
+    if [ -n "${installed_minor}" ] && [ "$(printf '%s\n' "4.11" "${installed_minor}" | sort -V | head -n1)" != "4.11" ]; then
+        print_info "Installed RHACS ${installed_version} is below 4.11; skipping rhel9 image tag check"
+        return 0
+    fi
+
+    local deployments=("central" "sensor" "admission-control")
+    local missing_rhel9=0
+    local dep image
+
+    for dep in "${deployments[@]}"; do
+        if ! oc get deployment "${dep}" -n "${RHACS_NAMESPACE}" &>/dev/null; then
+            continue
+        fi
+        image=$(oc get deployment "${dep}" -n "${RHACS_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+        if [ -z "${image}" ]; then
+            continue
+        fi
+        if echo "${image}" | grep -qE 'rhel9|rhacs-.*-rhel9'; then
+            print_info "✓ ${dep} image uses rhel9: ${image}"
+        else
+            print_warn "⚠ ${dep} image may not be rhel9-based: ${image}"
+            missing_rhel9=$((missing_rhel9 + 1))
+        fi
+    done
+
+    if [ "${missing_rhel9}" -gt 0 ]; then
+        print_warn "Some deployments are not on rhel9 image tags; expected for RHACS 4.11+ (see release notes 1.10)"
+    fi
+    return 0
+}
+
 # Main function
 main() {
     print_info "RHACS Installation Verification"
@@ -668,7 +713,11 @@ main() {
     
     # Ensure Console plugin is enabled after version update (Install Operator page: Console plugin = Enable)
     ensure_rhacs_console_plugin_enabled
-    
+
+    print_info ""
+
+    verify_rhel9_operand_images
+
     print_info ""
     print_info "================================="
     print_info "✓ RHACS verification complete!"

@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: rox-hi-pipeline
+  namespace: pipeline-demo
+spec:
+  description: >-
+    RHACS roxctl scan of a Red Hat Hardened Image (Project Hummingbird).
+    Default image: registry.access.redhat.com/hi/python:3.13
+  params:
+    - name: image
+      type: string
+      description: Hummingbird hardened image to scan
+      default: registry.access.redhat.com/hi/python:3.13
+  tasks:
+  - name: image-scan
+    taskRef:
+      name: rox-image-scan
+    params:
+    - name: image
+      value: $(params.image)
+    - name: rox_api_token
+      value: roxsecrets
+    - name: rox_central_endpoint
+      value: roxsecrets
+    - name: output_format
+      value: json
+  - name: image-check
+    taskRef:
+      name: rox-image-check
+    params:
+    - name: image
+      value: $(params.image)
+    - name: rox_api_token
+      value: roxsecrets
+    - name: rox_central_endpoint
+      value: roxsecrets

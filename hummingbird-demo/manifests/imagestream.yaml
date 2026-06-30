@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: hi-python-demo
+  namespace: hummingbird-demo
+  labels:
+    app.kubernetes.io/part-of: rhacs-demo
+spec:
+  lookupPolicy:
+    local: true

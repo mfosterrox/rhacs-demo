@@ -684,7 +684,7 @@ install_rhacs_splunk_addon() {
             return 1
         fi
     fi
-    print_info "RHACS Splunk add-on installation completed."
+    print_info "RHACS Splunk add-on installation completed (Technology Add-on 3.0.0+ — File Activity violations, RHACS 4.11)."
     print_info "Splunk UI: Settings → Apps → Manage Apps → \"Red Hat Advanced Cluster Security\" (package TA-stackrox)."
 }
 

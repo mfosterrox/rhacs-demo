@@ -620,6 +620,8 @@ main() {
     print_info "  ✓ Demo applications deployed"
     print_info "  ✓ RHACS settings configured"
     print_info "  ✓ Compliance scan schedules created"
+    print_info "  ✓ RHACS 4.11 features configured (script 08)"
+    print_info "  ✓ Hummingbird hardened image demo deployed (script 09)"
     print_info ""
     
     # Display important connection information

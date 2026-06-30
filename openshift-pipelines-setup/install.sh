@@ -172,13 +172,14 @@ main() {
   print_step "Applying Tekton Tasks (rox-image-scan, rox-image-check, rox-deployment-check)..."
   oc apply -f "${MANIFESTS}/tasks/"
 
-  print_step "Applying Pipelines (rox-pipeline, rox-log4shell-pipeline)..."
+  print_step "Applying Pipelines (rox-pipeline, rox-log4shell-pipeline, rox-hi-pipeline)..."
   oc apply -f "${MANIFESTS}/pipeline/"
 
   print_info ""
   print_info "✓ Tekton resources applied in ${PIPELINE_NS}"
   print_info "  Console: Pipelines → Project ${PIPELINE_NS} → PipelineRuns"
   print_info "  Fixed image (log4shell): tkn pipeline start rox-log4shell-pipeline -n ${PIPELINE_NS}"
+  print_info "  Hummingbird HI scan: tkn pipeline start rox-hi-pipeline -n ${PIPELINE_NS}"
   print_info "  Custom image: tkn pipeline start rox-pipeline -n ${PIPELINE_NS} -p image=quay.io/example/app:latest"
   print_info ""
   print_info "Manifest templates (module 05) live under: ${MANIFESTS}"

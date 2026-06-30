@@ -255,6 +255,15 @@ delete_scan_config() {
     return 0
 }
 
+# Function to collect Compliance Operator TailoredProfile names (RHACS 4.11)
+get_tailored_profile_names() {
+    if ! oc get crd tailoredprofiles.compliance.openshift.io &>/dev/null 2>&1; then
+        return 0
+    fi
+    oc get tailoredprofile -n "${COMPLIANCE_NAMESPACE}" -o json 2>/dev/null | \
+        jq -r '.items[]? | select(.metadata.name != null) | .metadata.name' 2>/dev/null || true
+}
+
 # Function to create scan configuration
 create_scan_config() {
     local token=$1
@@ -263,38 +272,44 @@ create_scan_config() {
     local scan_name=$4
     
     print_info "Creating compliance scan configuration '${scan_name}'..."
+
+    local stock_profiles=(
+        "ocp4-cis" "ocp4-cis-node" "ocp4-moderate" "ocp4-moderate-node"
+        "ocp4-e8" "ocp4-high" "ocp4-high-node" "ocp4-nerc-cip"
+        "ocp4-nerc-cip-node" "ocp4-pci-dss" "ocp4-pci-dss-node" "ocp4-stig-node"
+    )
+    local tailored=()
+    local tp name
+    while IFS= read -r tp; do
+        [ -n "${tp}" ] && tailored+=("${tp}")
+    done < <(get_tailored_profile_names)
+
+    if [ ${#tailored[@]} -gt 0 ]; then
+        print_info "Including ${#tailored[@]} TailoredProfile(s) from Compliance Operator (4.11)"
+        for name in "${tailored[@]}"; do
+            print_info "  + ${name}"
+        done
+    fi
+
+    local profiles_json
+    profiles_json=$(printf '%s\n' "${stock_profiles[@]}" "${tailored[@]}" | jq -R . | jq -s .)
     
     # Create JSON payload in a temp file for reliable transmission
     local temp_file=$(mktemp)
-    cat > "${temp_file}" <<EOF
-{
-  "scanName": "${scan_name}",
-  "scanConfig": {
-    "oneTimeScan": false,
-    "profiles": [
-      "ocp4-cis",
-      "ocp4-cis-node",
-      "ocp4-moderate",
-      "ocp4-moderate-node",
-      "ocp4-e8",
-      "ocp4-high",
-      "ocp4-high-node",
-      "ocp4-nerc-cip",
-      "ocp4-nerc-cip-node",
-      "ocp4-pci-dss",
-      "ocp4-pci-dss-node",
-      "ocp4-stig-node"
-    ],
-    "scanSchedule": {
-      "intervalType": "DAILY",
-      "hour": 12,
-      "minute": 0
-    },
-    "description": "Daily compliance scan for all profiles"
-  },
-  "clusters": ["${cluster_id}"]
-}
-EOF
+    jq -n \
+        --arg scanName "${scan_name}" \
+        --arg clusterId "${cluster_id}" \
+        --argjson profiles "${profiles_json}" \
+        '{
+          scanName: $scanName,
+          scanConfig: {
+            oneTimeScan: false,
+            profiles: $profiles,
+            scanSchedule: { intervalType: "DAILY", hour: 12, minute: 0 },
+            description: "Daily compliance scan (stock + tailored profiles)"
+          },
+          clusters: [$clusterId]
+        }' > "${temp_file}"
     
     # Debug: verify JSON is valid
     if ! jq . "${temp_file}" >/dev/null 2>&1; then

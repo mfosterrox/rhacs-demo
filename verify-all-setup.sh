@@ -43,6 +43,7 @@ fi
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 MCP_NAMESPACE="${MCP_NAMESPACE:-stackrox-mcp}"
 PIPELINE_NAMESPACE="${PIPELINE_NAMESPACE:-pipeline-demo}"
+HUMMINGBIRD_NAMESPACE="${HUMMINGBIRD_NAMESPACE:-hummingbird-demo}"
 # Deployment rhacs-fam-exec-runner is created in the app namespace (install.sh default: payments)
 FAM_CRON_NAMESPACE="${FAM_CRON_NAMESPACE:-payments}"
 
@@ -135,6 +136,84 @@ verify_basic() {
         else
             print_warn "Collector ROX_NON_AGGREGATED_NETWORKS not set (network graph may miss non-RFC1918 CIDRs)"
             WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+
+    if oc get consoles.operator.openshift.io cluster &>/dev/null; then
+        local plugins
+        plugins=$(oc get consoles.operator.openshift.io cluster -o jsonpath='{.spec.plugins[*]}' 2>/dev/null || echo "")
+        if echo "${plugins}" | grep -qE '\bacs\b|\brhacs\b'; then
+            print_ok "RHACS Console plugin enabled in OpenShift Console"
+        else
+            print_warn "RHACS Console plugin not in Console spec.plugins"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+
+    local init_support filters_ui
+    init_support=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o json 2>/dev/null | \
+        jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "ROX_INIT_CONTAINER_SUPPORT") | .value' 2>/dev/null | head -1 || echo "")
+    filters_ui=$(oc get deployment central -n "${RHACS_NAMESPACE}" -o json 2>/dev/null | \
+        jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "ROX_POLICY_FILTERS_UI") | .value' 2>/dev/null | head -1 || echo "")
+    if [ "${init_support}" = "true" ]; then
+        print_ok "Central ROX_INIT_CONTAINER_SUPPORT=true"
+    else
+        print_warn "Central ROX_INIT_CONTAINER_SUPPORT not true (run script 08)"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+    if [ "${filters_ui}" = "enabled" ]; then
+        print_ok "Central ROX_POLICY_FILTERS_UI=enabled"
+    else
+        print_warn "Central ROX_POLICY_FILTERS_UI not enabled (run script 08)"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    return "${failed}"
+}
+
+verify_hummingbird() {
+    print_step "hummingbird-demo (script 09)"
+    local failed=0
+
+    if [ "${SKIP_HUMMINGBIRD_DEMO:-0}" = "1" ] || [ "${VERIFY_SKIP_HUMMINGBIRD:-0}" = "1" ]; then
+        print_info "Skipping hummingbird-demo verification"
+        return 0
+    fi
+
+    if ! oc get namespace "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
+        print_fail "Namespace ${HUMMINGBIRD_NAMESPACE} not found"
+        return 1
+    fi
+    print_ok "Namespace ${HUMMINGBIRD_NAMESPACE} exists"
+
+    for dep in hi-python-base hi-python-layered; do
+        if oc get deployment "${dep}" -n "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
+            local ready
+            ready=$(oc get deployment "${dep}" -n "${HUMMINGBIRD_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            if [ "${ready:-0}" -ge 1 ] 2>/dev/null; then
+                print_ok "Deployment ${dep} ready"
+            else
+                print_warn "Deployment ${dep} not ready yet"
+                WARNINGS=$((WARNINGS + 1))
+            fi
+        else
+            print_fail "Deployment ${dep} not found"
+            failed=1
+        fi
+    done
+
+    if [ -n "${ROX_API_TOKEN:-}" ]; then
+        local base api_v2 hi_base
+        base=$(get_central_url)
+        if [ -n "${base}" ]; then
+            api_v2="${base}/v2"
+            hi_base=$(curl -k -s -H "Authorization: Bearer ${ROX_API_TOKEN}" "${api_v2}/baseimages" 2>/dev/null)
+            if echo "${hi_base}" | jq -e '.baseImageReferences[]? | select(.baseImageRepoPath | test("hi/python"))' >/dev/null 2>&1; then
+                print_ok "Hummingbird base image registered in RHACS"
+            else
+                print_warn "Hummingbird base image not found in /v2/baseimages"
+                WARNINGS=$((WARNINGS + 1))
+            fi
         fi
     fi
 
@@ -316,7 +395,7 @@ verify_openshift_pipelines() {
     done
 
     local p
-    for p in rox-pipeline rox-log4shell-pipeline; do
+    for p in rox-pipeline rox-log4shell-pipeline rox-hi-pipeline; do
         if oc get pipeline "${p}" -n "${ns}" &>/dev/null; then
             print_ok "Pipeline ${p} exists"
         else
@@ -324,6 +403,18 @@ verify_openshift_pipelines() {
             failed=1
         fi
     done
+
+    local task_image
+    task_image=$(oc get task rox-image-scan -n "${ns}" -o jsonpath='{.spec.steps[0].image}' 2>/dev/null || echo "")
+    if echo "${task_image}" | grep -qi 'ubi9'; then
+        print_ok "Tekton rox-image-scan uses UBI 9 (${task_image})"
+    elif echo "${task_image}" | grep -qi 'centos:8'; then
+        print_fail "Tekton tasks still use centos:8 — re-apply openshift-pipelines-setup manifests"
+        failed=1
+    else
+        print_warn "Tekton step image: ${task_image}"
+        WARNINGS=$((WARNINGS + 1))
+    fi
 
     if oc get secret roxsecrets -n "${ns}" &>/dev/null; then
         print_ok "Secret roxsecrets exists"
@@ -407,6 +498,15 @@ main() {
         verify_openshift_pipelines || {
             FAILURES=$((FAILURES + 1))
             FAIL_PIPELINES=1
+        }
+    fi
+    echo ""
+
+    if skip_section "hummingbird-demo" "VERIFY_SKIP_HUMMINGBIRD" "SKIP_HUMMINGBIRD_DEMO"; then
+        :
+    else
+        verify_hummingbird || {
+            FAILURES=$((FAILURES + 1))
         }
     fi
 
