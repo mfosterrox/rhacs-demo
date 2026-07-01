@@ -120,12 +120,12 @@ The following scripts are executed in numerical order:
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to newest catalog version (or `RHACS_VERSION` pin), then ensures Console plugin is enabled | No | ✓ |
 | `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
-| `04-deploy-applications.sh` | Deploys demo applications from mfosterrox/demo-applications repo | No | ✓ |
+| `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo; builds Hummingbird layered image on cluster | No | ✓ |
 | `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
 | `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules (includes TailoredProfiles when present) | **Yes** | ✓ |
 | `07-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
-| `08-configure-rhacs-411-features.sh` | RHACS 4.11 TP flags, CRS limits, attach policy, vuln report, label-scoped policy | **Yes** | ✓ |
-| `09-deploy-hummingbird-demo.sh` | Project Hummingbird hardened images — deploy, scan, base vs app layer demo | **Yes** | ✓ |
+| `08-configure-rhacs-411-features.sh` | RHACS 4.11 TP flags and Attach to Pod policy verification | **Yes** | ✓ |
+| `09-deploy-hummingbird-demo.sh` | Build layered HI image, deploy workloads, register base image for RHACS UI | **Yes** | ✓ |
 
 ## What Gets Configured
 
@@ -172,10 +172,9 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
 
 ### RHACS 4.11 Features (Script 08)
 - **Technology Preview (enabled by default):** `ROX_INIT_CONTAINER_SUPPORT`, `ROX_POLICY_FILTERS_UI`
-- CRS max expiration / cluster limits (when supported by config API)
 - Attach to Pod policy verification
-- Label-scoped demo policy
-- Scheduled vulnerability report with exact hour/minute (when API available)
+
+Label-scoped policies and scheduled vulnerability reports are configured manually in the RHACS UI when needed for a demo.
 
 ### Hummingbird Hardened Images (Script 09)
 - Deploys `hummingbird-demo` namespace with base-only and layered Python workloads

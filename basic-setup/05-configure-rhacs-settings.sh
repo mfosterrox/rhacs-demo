@@ -280,6 +280,12 @@ configure_base_images() {
         .baseImageReferences[]? | select(.baseImageRepoPath == $repo and .baseImageTagPattern == $tag) | .id
     ' 2>/dev/null | head -1)
 
+    if [ -z "${existing_id}" ] || [ "${existing_id}" = "null" ]; then
+        existing_id=$(echo "${existing}" | jq -r --arg repo "${RHACS_BASE_IMAGE_REPO_PATH}" '
+            .baseImageReferences[]? | select(.baseImageRepoPath == $repo) | .id
+        ' 2>/dev/null | head -1)
+    fi
+
     if [ -n "${existing_id}" ] && [ "${existing_id}" != "null" ]; then
         print_info "✓ Base image already registered: ${RHACS_BASE_IMAGE_REPO_PATH}:${RHACS_BASE_IMAGE_TAG_PATTERN} (id: ${existing_id})"
         return 0
@@ -307,6 +313,10 @@ configure_base_images() {
     body=$(echo "${response}" | sed '$d')
 
     if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+        if echo "${body}" | grep -qiE 'duplicate key|already exists|23505'; then
+            print_info "✓ Base image already registered: ${RHACS_BASE_IMAGE_REPO_PATH}:${RHACS_BASE_IMAGE_TAG_PATTERN}"
+            return 0
+        fi
         print_error "Failed to create base image reference (HTTP ${http_code})"
         print_error "Response: ${body:0:300}"
         print_error "Ensure the API token has ImageAdministration permission (Admin or Analyst role)"
@@ -415,7 +425,7 @@ main() {
     fi
     
     # Verify configuration (optional, non-fatal)
-    verify_configuration "${token}" "${api_base}" || true
+    validate_configuration "${token}" "${api_base}" || true
     
     print_info ""
     print_info "=========================================="
