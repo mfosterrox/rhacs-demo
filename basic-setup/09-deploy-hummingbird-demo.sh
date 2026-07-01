@@ -1,9 +1,11 @@
 #!/bin/bash
-# Build and deploy Project Hummingbird workloads from demo-applications, then register
-# the base image in RHACS so layer filtering appears in the UI.
+# Register Hummingbird base image in RHACS and verify demo workloads from demo-applications.
 #
-# Requires: ROX_API_TOKEN, oc logged in, demo-applications repo (cloned by script 04)
-# Optional: SKIP_HUMMINGBIRD_DEMO=1, DEMO_APPS_DIR, HUMMINGBIRD_BUILD_ON_CLUSTER=0
+# Workloads deploy with script 04 (k8s-deployment-manifests/hummingbird-demo).
+# Layered image: quay.io/mfoster/hi-python-demo:0.1.0 (build via demo-applications makefile).
+#
+# Requires: ROX_API_TOKEN, oc logged in
+# Optional: SKIP_HUMMINGBIRD_DEMO=1, DEMO_APPS_DIR, HI_LAYERED_IMAGE
 
 set -euo pipefail
 
@@ -40,25 +42,6 @@ get_central_url() {
     oc get route central -n "${RHACS_NAMESPACE}" -o jsonpath='https://{.spec.host}' 2>/dev/null || return 1
 }
 
-ensure_demo_applications() {
-    if [ -d "${DEMO_APPS_DIR}/k8s-deployment-manifests/hummingbird-demo" ]; then
-        return 0
-    fi
-    print_error "demo-applications not found at ${DEMO_APPS_DIR}"
-    print_error "Run: bash basic-setup/04-deploy-applications.sh"
-    return 1
-}
-
-apply_hummingbird_manifests() {
-    local manifests_dir
-    manifests_dir="$(hummingbird_manifests_dir "${DEMO_APPS_DIR}")"
-
-    print_step "Applying Hummingbird demo manifests from demo-applications..."
-    oc apply -f "${DEMO_APPS_DIR}/k8s-deployment-manifests/-namespaces/namespace-hummingbird-demo.yaml" 2>/dev/null || \
-        oc apply -f "${manifests_dir}/../-namespaces/namespace-hummingbird-demo.yaml" 2>/dev/null || true
-    oc apply -f "${manifests_dir}/"
-}
-
 main() {
     if [ "${SKIP_HUMMINGBIRD_DEMO:-0}" = "1" ]; then
         print_info "Skipping Hummingbird demo (SKIP_HUMMINGBIRD_DEMO=1)"
@@ -66,7 +49,7 @@ main() {
     fi
 
     print_info "=========================================="
-    print_info "Project Hummingbird — Build & Deploy"
+    print_info "Project Hummingbird — RHACS Registration"
     print_info "=========================================="
     print_info ""
 
@@ -86,17 +69,11 @@ main() {
         exit 1
     fi
 
-    ensure_demo_applications || exit 1
-
-    apply_hummingbird_manifests
-
-    if [ "${HUMMINGBIRD_BUILD_ON_CLUSTER:-1}" = "1" ]; then
-        build_hummingbird_layered_image "${DEMO_APPS_DIR}" || true
+    if ! oc get namespace "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
+        print_warn "Namespace ${HUMMINGBIRD_NAMESPACE} not found — run basic-setup/04-deploy-applications.sh first"
     else
-        print_info "Skipping in-cluster build (HUMMINGBIRD_BUILD_ON_CLUSTER=0)"
+        wait_for_hummingbird_deployments
     fi
-
-    wait_for_hummingbird_deployments
 
     print_info ""
     local central_url api_host api_v2
@@ -112,7 +89,7 @@ main() {
 
     print_info ""
     print_info "=========================================="
-    print_info "Hummingbird Demo Deployment Complete"
+    print_info "Hummingbird Demo Setup Complete"
     print_info "=========================================="
     print_info ""
 }

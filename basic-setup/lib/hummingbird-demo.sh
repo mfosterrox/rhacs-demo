@@ -1,56 +1,14 @@
 #!/bin/bash
-# Shared helpers for Project Hummingbird demo (build on cluster, deploy, RHACS registration).
-# Sourced by 04-deploy-applications.sh and 09-deploy-hummingbird-demo.sh.
+# Shared helpers for Project Hummingbird demo (deploy via demo-applications, RHACS registration).
+# Sourced by 09-deploy-hummingbird-demo.sh.
 
 HUMMINGBIRD_NAMESPACE="${HUMMINGBIRD_NAMESPACE:-hummingbird-demo}"
-HUMMINGBIRD_BUILD_CONFIG="${HUMMINGBIRD_BUILD_CONFIG:-hi-python-demo}"
-HUMMINGBIRD_BUILD_CONTEXT="${HUMMINGBIRD_BUILD_CONTEXT:-image-builds/hi-python-demo}"
-HUMMINGBIRD_BUILD_TIMEOUT_SEC="${HUMMINGBIRD_BUILD_TIMEOUT_SEC:-1200}"
 HI_BASE_IMAGE="${HI_BASE_IMAGE:-registry.access.redhat.com/hi/python:3.13}"
-
-hummingbird_build_context_dir() {
-    local demo_apps_dir="${1:-${DEMO_APPS_DIR:-${HOME}/demo-applications}}"
-    echo "${demo_apps_dir}/${HUMMINGBIRD_BUILD_CONTEXT}"
-}
+HI_LAYERED_IMAGE="${HI_LAYERED_IMAGE:-quay.io/mfoster/hi-python-demo:0.1.0}"
 
 hummingbird_manifests_dir() {
     local demo_apps_dir="${1:-${DEMO_APPS_DIR:-${HOME}/demo-applications}}"
     echo "${demo_apps_dir}/k8s-deployment-manifests/hummingbird-demo"
-}
-
-build_hummingbird_layered_image() {
-    local demo_apps_dir="${1:-${DEMO_APPS_DIR:-${HOME}/demo-applications}}"
-    local build_context
-    build_context="$(hummingbird_build_context_dir "${demo_apps_dir}")"
-
-    if [ ! -d "${build_context}" ]; then
-        print_warn "Hummingbird build context not found: ${build_context}"
-        return 1
-    fi
-
-    if ! oc get namespace "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
-        print_warn "Namespace ${HUMMINGBIRD_NAMESPACE} not found; apply demo-applications manifests first"
-        return 1
-    fi
-
-    if ! oc get buildconfig "${HUMMINGBIRD_BUILD_CONFIG}" -n "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
-        print_warn "BuildConfig ${HUMMINGBIRD_BUILD_CONFIG} not found in ${HUMMINGBIRD_NAMESPACE}"
-        return 1
-    fi
-
-    print_step "Building layered Hummingbird image on cluster (BuildConfig ${HUMMINGBIRD_BUILD_CONFIG})..."
-    print_info "Build context: ${build_context}"
-
-    if oc start-build "${HUMMINGBIRD_BUILD_CONFIG}" -n "${HUMMINGBIRD_NAMESPACE}" \
-        --from-dir="${build_context}" --wait --timeout="${HUMMINGBIRD_BUILD_TIMEOUT_SEC}s" 2>&1; then
-        print_info "✓ Layered image build complete"
-        return 0
-    fi
-
-    print_warn "In-cluster build failed"
-    print_warn "Ensure the cluster can pull registry.access.redhat.com/hi/python (linked pull secret)"
-    print_warn "Or build locally: cd ${demo_apps_dir} && make build COMPONENT=hi-python-demo"
-    return 1
 }
 
 wait_for_hummingbird_deployments() {
@@ -126,7 +84,7 @@ print_hummingbird_ui_guidance() {
     print_info "Hummingbird demo workloads (view in RHACS UI after sensor scan):"
     print_info "  Namespace: ${HUMMINGBIRD_NAMESPACE}"
     print_info "  Base deployment: hi-python-base → ${HI_BASE_IMAGE}"
-    print_info "  Layered deployment: hi-python-layered → built ImageStreamTag hi-python-demo:latest"
+    print_info "  Layered deployment: hi-python-layered → ${HI_LAYERED_IMAGE}"
     if [ -n "${route_url}" ]; then
         print_info "  Layered app route: ${route_url}"
     fi

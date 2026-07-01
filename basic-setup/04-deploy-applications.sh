@@ -44,10 +44,6 @@ elif [ -d "${PROJECT_ROOT}/../demo-applications/k8s-deployment-manifests" ]; the
 else
     DEMO_APPS_DIR="${HOME}/demo-applications"
 fi
-HUMMINGBIRD_NAMESPACE="${HUMMINGBIRD_NAMESPACE:-hummingbird-demo}"
-
-# shellcheck disable=SC1090
-source "${PROJECT_ROOT}/basic-setup/lib/hummingbird-demo.sh"
 
 # Function to check if repository exists and is valid
 is_repo_valid() {
@@ -141,18 +137,6 @@ deploy_applications() {
     return 0
 }
 
-# Ensure Hummingbird demo manifests are applied (idempotent; runs even when other apps already exist)
-reconcile_hummingbird_manifests() {
-    local manifests_dir
-    manifests_dir="$(hummingbird_manifests_dir "${DEMO_APPS_DIR}")"
-    if [ ! -d "${manifests_dir}" ]; then
-        return 0
-    fi
-    print_step "Reconciling Hummingbird demo manifests..."
-    oc apply -f "${DEMO_APPS_DIR}/k8s-deployment-manifests/-namespaces/namespace-hummingbird-demo.yaml" 2>/dev/null || true
-    oc apply -f "${manifests_dir}/"
-}
-
 # Function to list deployed namespaces
 list_deployed_apps() {
     print_info ""
@@ -205,15 +189,6 @@ main() {
         fi
         
         list_deployed_apps
-    fi
-
-    if [ "${SKIP_HUMMINGBIRD_BUILD:-0}" != "1" ]; then
-        print_info ""
-        reconcile_hummingbird_manifests
-        if oc get namespace "${HUMMINGBIRD_NAMESPACE}" &>/dev/null; then
-            build_hummingbird_layered_image "${DEMO_APPS_DIR}" || true
-            wait_for_hummingbird_deployments || true
-        fi
     fi
     
     print_info ""

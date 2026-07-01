@@ -120,12 +120,12 @@ The following scripts are executed in numerical order:
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to newest catalog version (or `RHACS_VERSION` pin), then ensures Console plugin is enabled | No | ✓ |
 | `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
-| `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo; builds Hummingbird layered image on cluster | No | ✓ |
+| `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo (includes hummingbird-demo) | No | ✓ |
 | `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
 | `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules (includes TailoredProfiles when present) | **Yes** | ✓ |
 | `07-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
 | `08-configure-rhacs-411-features.sh` | RHACS 4.11 TP flags and Attach to Pod policy verification | **Yes** | ✓ |
-| `09-deploy-hummingbird-demo.sh` | Build layered HI image, deploy workloads, register base image for RHACS UI | **Yes** | ✓ |
+| `09-deploy-hummingbird-demo.sh` | Register HI base image in RHACS; verify hummingbird-demo workloads | **Yes** | ✓ |
 
 ## What Gets Configured
 
@@ -177,10 +177,9 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
 Label-scoped policies and scheduled vulnerability reports are configured manually in the RHACS UI when needed for a demo.
 
 ### Hummingbird Hardened Images (Script 09)
-- Deploys `hummingbird-demo` namespace with base-only and layered Python workloads
-- Registers `registry.access.redhat.com/hi/python` as RHACS base image
-- Runs `roxctl image scan` against base and layered images
-- See [hummingbird-demo/README.md](../hummingbird-demo/README.md)
+- Workloads deploy via script 04 from `demo-applications` (`hummingbird-demo` namespace)
+- Layered image: `quay.io/mfoster/hi-python-demo:0.1.0` (build/push from demo-applications makefile)
+- Script 09 registers `registry.access.redhat.com/hi/python` as RHACS base image
 
 ### Custom TLS Configuration (Optional, not included in install.sh)
 This optional script configures Central with a custom TLS certificate and passthrough routing:
