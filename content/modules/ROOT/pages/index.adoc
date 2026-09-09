@@ -9,7 +9,7 @@ Below are the instructions to set up the demo.
 There is a single installation script called *`install-all-setup.sh`*. It runs *basic-setup* first, then runs five other setup scripts in parallel:
 
 * FAM (file activity monitoring)
-* Persus monitoring in the console
+* Perses monitoring in the console
 * MCP server setup
 * OpenShift Pipelines (Tekton) RHACS tasks
 * Policy as Code (GitOps) via Argo CD
@@ -30,7 +30,6 @@ All requirements are configured by the *basic-setup* script and the parallel set
 ----
 source ~/.bashrc
 git clone https://github.com/mfosterrox/rhacs-demo.git || (cd rhacs-demo && git pull)
-cd rhacs-demo
 chmod +x install-all-setup.sh verify-all-setup.sh
 ./install-all-setup.sh -p {acs_portal_password}
 ----
