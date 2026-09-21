@@ -1,0 +1,32 @@
+apiVersion: config.stackrox.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: demo-log4shell-block
+  namespace: stackrox
+spec:
+  policyName: "Demo: Log4Shell CVE-2021-44228"
+  description: "Blocks deployments whose images contain CVE-2021-44228 (Log4Shell)"
+  rationale: "CVE-2021-44228 is a critical RCE vulnerability in Apache Log4j 2.x"
+  remediation: "Upgrade log4j-core to >=2.17.1"
+  severity: CRITICAL_SEVERITY
+  categories:
+    - Vulnerability Management
+  lifecycleStages:
+    - BUILD
+    - DEPLOY
+  eventSource: NOT_APPLICABLE
+  enforcementActions:
+    - FAIL_BUILD_ENFORCEMENT
+  scope:
+    - namespace: "demo-.*"
+  policySections:
+    - sectionName: CVE
+      policyGroups:
+        - fieldName: CVE
+          booleanOperator: OR
+          values:
+            - value: CVE-2021-44228
+            - value: CVE-2021-45046
+  criteriaLocked: false
+  mitreVectorsLocked: false
+  isDefault: false

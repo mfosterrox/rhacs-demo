@@ -33,3 +33,10 @@
 ** xref:06-integrations.adoc#part-1-image-registry-and-vulnerability-scanner-integrations[Image registry and vulnerability scanner integrations]
 ** xref:06-integrations.adoc#part-2-notification-and-siem-integrations[Notification and SIEM integrations]
 ** xref:06-integrations.adoc#part-3-software-supply-chain-and-authentication-integrations[Software supply chain and authentication integrations]
+
+* xref:07-gitops-vulnerability-management.adoc[Module 07: GitOps vulnerability management]
+** xref:07-gitops-vulnerability-management.adoc#part-1-who-owns-this-cve[Who owns this CVE]
+** xref:07-gitops-vulnerability-management.adoc#part-2-false-positive-reduction-with-red-hat-vex[False positive reduction with Red Hat VEX]
+** xref:07-gitops-vulnerability-management.adoc#part-3-persistent-triage-with-openvex[Persistent triage with OpenVEX]
+** xref:07-gitops-vulnerability-management.adoc#part-4-stages-ci-and-cve-impact[Stages, CI, and CVE impact]
+** xref:07-gitops-vulnerability-management.adoc#part-5-dev-teams-and-branch-environments[Dev teams and branch environments]

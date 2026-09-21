@@ -189,7 +189,7 @@ update_rhacs_config() {
             { "numDays": 90, "enabled": true }
           ],
           "fixableCveOptions": { "allFixable": true, "anyFixable": true },
-          "customDate": false,
+          "customDate": true,
           "indefinite": false
         }
       },

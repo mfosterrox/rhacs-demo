@@ -48,7 +48,7 @@ configure_central_tp_flags() {
         return 0
     fi
 
-    local flags=("ROX_INIT_CONTAINER_SUPPORT=true" "ROX_POLICY_FILTERS_UI=enabled")
+    local flags=("ROX_INIT_CONTAINER_SUPPORT=true" "ROX_POLICY_FILTERS_UI=enabled" "ROX_SCANNER_V4_RED_HAT_LAYERS_RED_HAT_VULNS_ONLY=true")
     local flag
     for flag in "${flags[@]}"; do
         local name="${flag%%=*}"
@@ -178,7 +178,7 @@ main() {
     print_info "=========================================="
     print_info "RHACS 4.11 Feature Configuration Complete"
     print_info "=========================================="
-    print_info "  - TP flags: ROX_INIT_CONTAINER_SUPPORT, ROX_POLICY_FILTERS_UI"
+    print_info "  - Flags: ROX_INIT_CONTAINER_SUPPORT, ROX_POLICY_FILTERS_UI, ROX_SCANNER_V4_RED_HAT_LAYERS_RED_HAT_VULNS_ONLY"
     print_info "  - Attach to Pod policy verified"
     print_info ""
     print_info "Configure label-scoped policies and scheduled vulnerability reports in the RHACS UI if needed."

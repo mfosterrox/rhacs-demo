@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/shop-2026-09",
+  "author": "team-a",
+  "timestamp": "2026-09-14T10:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {"name": "CVE-2022-42889"},
+      "products": [{"@id": "pkg:oci/shop-api"}],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "StringSubstitutor not used in shop-api"
+    },
+    {
+      "vulnerability": {"name": "CVE-2021-44228"},
+      "products": [{"@id": "pkg:oci/shop-api"}],
+      "status": "affected",
+      "action_statement": "Upgrade to log4j 2.17.1 in shop 1.1.0 (planned 2026-10-01)"
+    }
+  ]
+}

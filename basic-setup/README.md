@@ -173,7 +173,9 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
 
 ### RHACS 4.11 Features (Script 08)
 - **Technology Preview (enabled by default):** `ROX_INIT_CONTAINER_SUPPORT`, `ROX_POLICY_FILTERS_UI`
+- **Scanner V4 Red Hat VEX filtering:** `ROX_SCANNER_V4_RED_HAT_LAYERS_RED_HAT_VULNS_ONLY=true` (required for Module 07 D3)
 - Attach to Pod policy verification
+- Vulnerability exception `customDate` enabled in script 05 (TIME expiry for OpenVEX deferrals)
 
 Label-scoped policies and scheduled vulnerability reports are configured manually in the RHACS UI when needed for a demo.
 
@@ -181,6 +183,12 @@ Label-scoped policies and scheduled vulnerability reports are configured manuall
 - Workloads deploy via `deploy-hummingbird-applications.sh` (parallel with scripts 05–08) from `demo-applications` (`hummingbird-demo` namespace)
 - Layered image: `quay.io/mfoster/hi-python-demo:0.1.0` (build/push from demo-applications makefile)
 - Script 09 registers RHACS base images (`hi/python:3.13`, `python:3.12-alpine`)
+
+### GitOps vulnerability management (script 10)
+- Deploys `demo-dev` / `demo-stage` / `demo-prod` / `demo-platform` from `demo-applications` (`vulnmgmt/`, outside `k8s-deployment-manifests/` so other workshops do not apply it)
+- Registers shop base images, collections, scoped RBAC, SecurityPolicy CRs, and OpenVEX exceptions
+- Skip with `SKIP_VULNMGMT_DEMO=1`
+- Images: `quay.io/mfoster/shop-api:1.0.0` (and related tags). Build/push from demo-applications: `make build-vulnmgmt && make push-vulnmgmt && make copy-vulnmgmt-prod-mirror`
 
 ### Custom TLS Configuration (Optional, not included in install.sh)
 This optional script configures Central with a custom TLS certificate and passthrough routing:
