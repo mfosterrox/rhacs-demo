@@ -68,11 +68,20 @@ find_vulnmgmt_manifests() {
     return 1
 }
 
+wait_namespace_active() {
+    local ns="$1"
+    local timeout="${2:-90s}"
+    if ! oc wait --for=jsonpath='{.status.phase}'=Active "namespace/${ns}" --timeout="$timeout"; then
+        return 1
+    fi
+    print_info "✓ Namespace ${ns} is Active"
+}
+
 wait_ns_ready() {
     local ns="$1"
     local timeout="${2:-180s}"
-    if ! oc get namespace "$ns" >/dev/null 2>&1; then
-        print_warn "Namespace $ns not found yet"
+    if ! wait_namespace_active "$ns" "60s"; then
+        print_warn "Namespace $ns not Active -- skipping deployment wait"
         return 0
     fi
     if oc get deploy -n "$ns" --no-headers 2>/dev/null | grep -q .; then
@@ -244,11 +253,41 @@ main() {
     fi
     print_info "✓ Manifests: $manifests"
 
-    print_step "Applying vulnmgmt namespaces and workloads..."
-    if ! oc apply -f "${manifests}" --recursive; then
-        print_warn "Some vulnmgmt resources may have failed to apply"
-    else
+    print_step "Applying vulnmgmt namespaces..."
+    if ! oc apply -f "${manifests}/namespaces.yaml"; then
+        print_error "Failed to apply vulnmgmt namespaces"
+        setup_rerun_hint_print
+        exit 1
+    fi
+    print_step "Waiting for namespaces to become Active..."
+    local ns
+    for ns in demo-dev demo-stage demo-prod demo-platform; do
+        if ! wait_namespace_active "$ns" "90s"; then
+            print_error "Namespace ${ns} did not become Active"
+            setup_rerun_hint_print
+            exit 1
+        fi
+    done
+
+    print_step "Applying vulnmgmt workloads..."
+    local apply_ok=0
+    local attempt=1
+    while [ "$attempt" -le 5 ]; do
+        if oc apply -f "${manifests}/demo-dev" \
+            && oc apply -f "${manifests}/demo-stage" \
+            && oc apply -f "${manifests}/demo-prod" \
+            && oc apply -f "${manifests}/demo-platform"; then
+            apply_ok=1
+            break
+        fi
+        print_warn "Workload apply attempt ${attempt} failed (namespace may still be initializing); retrying in 3s..."
+        sleep 3
+        attempt=$((attempt + 1))
+    done
+    if [ "$apply_ok" -eq 1 ]; then
         print_info "✓ Manifest apply finished"
+    else
+        print_warn "Some vulnmgmt resources may have failed to apply"
     fi
 
     print_step "Waiting for demo workloads (timeout ~180s per namespace)..."
@@ -281,6 +320,13 @@ main() {
     print_step "Scanning and watching base images..."
     scan_and_watch "base-eap8:1.0"
     scan_and_watch "base-ubi9-openjdk:1.0"
+
+    print_step "Scanning and watching shop images..."
+    scan_and_watch "shop-api:1.0.0"
+    scan_and_watch "shop-api:1.1.0"
+    scan_and_watch "shop-web:1.0.0"
+    scan_and_watch "prod-mirror-shop-api:1.0.0"
+    scan_and_watch "prod-mirror-shop-web:1.0.0"
 
     print_step "Creating collections..."
     create_collection '{"name":"shop-all","description":"All shop deployments","resourceSelectors":[{"rules":[{"fieldName":"Deployment Label","operator":"OR","values":[{"value":"app=shop"}]}]}]}'
