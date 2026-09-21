@@ -21,6 +21,8 @@
 #   SKIP_OPENSHIFT_PIPELINES_SETUP=1 — do not run openshift-pipelines-setup/install.sh (Tekton / rox-pipeline)
 #   SKIP_SPLUNK_SETUP=1 — do not run splunk-setup/install.sh (OpenShift Splunk + RHACS technology add-on)
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
+#   SKIP_HUMMINGBIRD_DEMO=1: skip Hummingbird workloads in basic-setup
+#   SKIP_VULNMGMT_DEMO=1: skip GitOps shop demo in basic-setup (script 10)
 #
 # Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false. Parallel Phase 2 assumes the cluster may
 # already have Splunk from an earlier run or manual deploy — skipping clean avoids deleting PVCs and fits additive

@@ -12,7 +12,9 @@
 #   # or reuse install-all flags (SKIP_FAM_SETUP; legacy SKIP_FIM_SETUP still honored):
 #   SKIP_FAM_SETUP=1 ./verify-all-setup.sh
 #   VERIFY_SKIP_PIPELINES=1 ./verify-all-setup.sh
-#   SKIP_OPENSHIFT_PIPELINES_SETUP=1 ./verify-all-setup.sh
+#   SKIP_HUMMINGBIRD_DEMO=1 ./verify-all-setup.sh
+#   SKIP_VULNMGMT_DEMO=1 ./verify-all-setup.sh
+#   VERIFY_SKIP_VULNMGMT=1 ./verify-all-setup.sh
 #
 # Exit: 0 = no failures (warnings allowed); 1 = one or more checks failed.
 # --- end help ---
@@ -54,6 +56,7 @@ FAIL_FAM=0
 FAIL_MONITORING=0
 FAIL_MCP=0
 FAIL_PIPELINES=0
+FAIL_VULNMGMT=0
 
 usage() {
     sed -n '2,/^# --- end help ---$/p' "$0" | sed 's/^# \{0,1\}//' | sed '/^--- end help ---$/d'
@@ -221,6 +224,48 @@ verify_hummingbird() {
                 WARNINGS=$((WARNINGS + 1))
             fi
         fi
+    fi
+
+    return "${failed}"
+}
+
+verify_vulnmgmt() {
+    print_step "vulnmgmt-demo (script 10)"
+    local failed=0
+
+    if [ "${SKIP_VULNMGMT_DEMO:-0}" = "1" ] || [ "${VERIFY_SKIP_VULNMGMT:-0}" = "1" ]; then
+        print_info "Skipping vulnmgmt-demo verification"
+        return 0
+    fi
+
+    for ns in demo-dev demo-stage demo-prod demo-platform; do
+        if oc get namespace "${ns}" &>/dev/null; then
+            print_ok "Namespace ${ns} exists"
+        else
+            print_fail "Namespace ${ns} not found"
+            failed=1
+        fi
+    done
+
+    if oc get deployment shop-api -n demo-dev &>/dev/null; then
+        print_ok "Deployment demo-dev/shop-api exists"
+    else
+        print_fail "Deployment demo-dev/shop-api not found"
+        failed=1
+    fi
+
+    local policy_ns
+    policy_ns=""
+    if oc get securitypolicy demo-log4shell-block -n stackrox &>/dev/null; then
+        policy_ns=stackrox
+    elif oc get securitypolicy demo-log4shell-block -n rhacs-operator &>/dev/null; then
+        policy_ns=rhacs-operator
+    fi
+    if [ -n "${policy_ns}" ]; then
+        print_ok "SecurityPolicy demo-log4shell-block exists in ${policy_ns}"
+    else
+        print_fail "SecurityPolicy demo-log4shell-block not found"
+        failed=1
     fi
 
     return "${failed}"
@@ -515,6 +560,16 @@ main() {
             FAILURES=$((FAILURES + 1))
         }
     fi
+    echo ""
+
+    if skip_section "vulnmgmt-demo" "VERIFY_SKIP_VULNMGMT" "SKIP_VULNMGMT_DEMO"; then
+        :
+    else
+        verify_vulnmgmt || {
+            FAILURES=$((FAILURES + 1))
+            FAIL_VULNMGMT=1
+        }
+    fi
 
     echo ""
     print_step "Summary"
@@ -538,6 +593,9 @@ main() {
     fi
     if [ "${FAIL_PIPELINES}" = "1" ]; then
         print_info "  cd \"${REPO_ROOT}\" && bash openshift-pipelines-setup/install.sh"
+    fi
+    if [ "${FAIL_VULNMGMT}" = "1" ]; then
+        print_info "  cd \"${REPO_ROOT}\" && bash basic-setup/10-deploy-vulnmgmt-demo.sh"
     fi
     print_info "To rerun this verifier: cd \"${REPO_ROOT}\" && bash verify-all-setup.sh"
     exit 1

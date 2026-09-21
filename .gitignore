@@ -47,3 +47,7 @@ node_modules
 
 # RHACS cluster registration secrets (CRS); init bundles deprecated in 4.11 — use CRS instead
 setup-files/init-bundles/
+
+# Module 07 vulnmgmt scan output and OpenVEX bridge state
+basic-setup/vulnmgmt/output/*.json
+basic-setup/vulnmgmt/vex/state.json

@@ -669,6 +669,17 @@ main() {
         run_setup_script "${script_path}" || exit 1
         print_info ""
     done
+
+    if [ "${SKIP_VULNMGMT_DEMO:-0}" != "1" ]; then
+        for script_path in "${SETUP_DIR}"/10-*.sh; do
+            [ -f "${script_path}" ] || continue
+            run_setup_script "${script_path}" || exit 1
+            print_info ""
+        done
+    else
+        print_info "Skipping GitOps vulnmgmt demo (SKIP_VULNMGMT_DEMO=1)"
+        print_info ""
+    fi
     
     print_info ""
     print_info "======================================"
@@ -692,6 +703,11 @@ main() {
     print_info "  ✓ Compliance scan schedules created"
     print_info "  ✓ RHACS 4.11 features configured (script 08)"
     print_info "  ✓ Hummingbird hardened image demo deployed (script 09)"
+    if [ "${SKIP_VULNMGMT_DEMO:-0}" != "1" ]; then
+        print_info "  ✓ GitOps vulnmgmt shop demo deployed (script 10)"
+    else
+        print_info "  skipped GitOps vulnmgmt shop demo (SKIP_VULNMGMT_DEMO=1)"
+    fi
     print_info ""
     
     # Display important connection information

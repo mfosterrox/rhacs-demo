@@ -1,0 +1,33 @@
+apiVersion: config.stackrox.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: demo-fixable-critical-app-layer
+  namespace: stackrox
+spec:
+  policyName: "Demo: Fixable Critical CVE in application layer"
+  description: "Alerts on fixable critical CVEs found in application (non-base-image) layers"
+  rationale: "Application teams are responsible for CVEs in their own layers"
+  remediation: "Update the affected library to the fixed version"
+  severity: CRITICAL_SEVERITY
+  categories:
+    - Vulnerability Management
+  lifecycleStages:
+    - BUILD
+    - DEPLOY
+  eventSource: NOT_APPLICABLE
+  scope:
+    - namespace: "demo-.*"
+  policySections:
+    - sectionName: Fixable Critical CVE
+      policyGroups:
+        - fieldName: Severity
+          booleanOperator: OR
+          values:
+            - value: CRITICAL
+        - fieldName: Fixed By
+          booleanOperator: OR
+          values:
+            - value: ".*"
+  criteriaLocked: false
+  mitreVectorsLocked: false
+  isDefault: false
