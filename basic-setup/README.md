@@ -74,14 +74,15 @@ cd basic-setup
 
 The script intelligently handles RHACS version management:
 
-**Default Behavior (No version specified):**
+**Default Behavior:**
 ```bash
 ./install.sh
 ```
-- Auto-detects the **newest RHACS channel** from the operator catalog (`rhacs-X.Y` in openshift-marketplace)
+- Pins RHACS to **5.0.0** (operator channel `rhacs-5.0`)
 - Upgrades if the cluster is on an older minor release
 - If already on that channel, no version change
 - **Never downgrades automatically** (set `RHACS_FORCE_DOWNGRADE=true` to allow)
+- Export `RHACS_VERSION` to pin a different release
 
 **Pin to Specific Version:**
 ```bash
@@ -105,7 +106,7 @@ export RHACS_FORCE_DOWNGRADE=true
 
 | Current Version | Target Version | RHACS_FORCE_DOWNGRADE | Result |
 |-----------------|----------------|----------------------|--------|
-| 4.10.3 | (not set, auto-detect) | - | Upgrades to newest catalog channel (e.g. 4.11) ✓ |
+| 4.11.2 | (not set, default 5.0.0) | - | Upgrades to 5.0.0 ✓ |
 | 4.9.2 | 4.9.3 | - | Upgrades to 4.9.3 ✓ |
 | 4.9.3 | 4.9.2 | false | Refuses, keeps 4.9.3 ✓ |
 | 4.9.3 | 4.9.2 | true | Downgrades to 4.9.2 ⚠️ |
@@ -117,7 +118,7 @@ The following scripts are executed in numerical order:
 | Script | Description | Requires Token | Auto-Run |
 |--------|-------------|----------------|----------|
 | `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-07 | N/A | N/A |
-| `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to newest catalog version (or `RHACS_VERSION` pin), then ensures Console plugin is enabled | No | ✓ |
+| `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to RHACS 5.0.0 (or `RHACS_VERSION`), then ensures Console plugin is enabled | No | ✓ |
 | `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
 | `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo (excludes hummingbird-demo) | No | ✓ |
@@ -233,7 +234,7 @@ This optional script configures Central with a custom TLS certificate and passth
 ## Requirements
 
 ### RHACS Operator installation
-When installing the **RHACS Operator** from OperatorHub (OpenShift Console → Operators → OperatorHub → Red Hat Advanced Cluster Security for Kubernetes), on the **Install Operator** page ensure that the **Console plugin** option is set to **Enable**. This enables the RHACS plugin in the OpenShift web console. The basic-setup script `01-verify-rhacs-install.sh` upgrades RHACS to the newest catalog version (or a pinned `RHACS_VERSION`) first, then ensures the Console plugin is enabled.
+When installing the **RHACS Operator** from OperatorHub (OpenShift Console → Operators → OperatorHub → Red Hat Advanced Cluster Security for Kubernetes), on the **Install Operator** page ensure that the **Console plugin** option is set to **Enable**. This enables the RHACS plugin in the OpenShift web console. The basic-setup script `01-verify-rhacs-install.sh` upgrades RHACS to 5.0.0 (or `RHACS_VERSION` when set) first, then ensures the Console plugin is enabled.
 
 ### Cluster Access
 - Must be logged into OpenShift cluster via `oc login`
@@ -265,10 +266,9 @@ The install script checks for required variables in this order:
 #### Optional
 - `RHACS_NAMESPACE` - RHACS namespace (default: `stackrox`)
 - `RHACS_ROUTE_NAME` - Route name (default: `central`)
-- `RHACS_VERSION` - Pin target RHACS version (optional)
-  - If not set: Auto-detects newest **rhacs-X.Y** channel from the operator catalog and upgrades if needed
-  - If set to older version: Refuses to downgrade unless `RHACS_FORCE_DOWNGRADE=true`
-  - If set to newer version: Upgrades to specified version
+- `RHACS_VERSION` - Pin target RHACS version (default: `5.0.0`, channel `rhacs-5.0`)
+  - If set to an older version: Refuses to downgrade unless `RHACS_FORCE_DOWNGRADE=true`
+  - If set to a newer version: Upgrades to the specified version
 - `RHACS_FORCE_DOWNGRADE` - Allow downgrade to older version (default: `false`)
 
 #### Auto-Generated

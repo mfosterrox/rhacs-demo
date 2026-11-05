@@ -8,9 +8,9 @@ You can preview the guide at link:https://rhpds.github.io/rhacs-demo/modules/ind
 
 == Featured Technology and Products
 
-* Red Hat Advanced Cluster Security 4.11
-* Red Hat OpenShift Container Platform 4.20
-* OpenShift Pipelines 1.21
+* Red Hat Advanced Cluster Security 5.0
+* Red Hat OpenShift Container Platform 5.0
+* OpenShift Pipelines 1.24
 * OpenShift Compliance Operator 1.9
 * Red Hat OpenShift Cluster Observability Operator 1.5 (Perses dashboards)
 * Splunk Enterprise

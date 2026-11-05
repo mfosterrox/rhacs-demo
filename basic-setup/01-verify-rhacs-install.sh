@@ -36,8 +36,8 @@ RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 RHACS_ROUTE_NAME="${RHACS_ROUTE_NAME:-central}"
 RHACS_OPERATOR_NAMESPACE="${RHACS_OPERATOR_NAMESPACE:-rhacs-operator}"
 
-# Optional pin: export RHACS_VERSION="4.10.3" to override auto-detect from operator catalog.
-# When unset, the script upgrades to the newest rhacs-X.Y channel in openshift-marketplace.
+# Default pin is RHACS 5.0.0 (channel rhacs-5.0). Export RHACS_VERSION to override.
+RHACS_VERSION="${RHACS_VERSION:-5.0.0}"
 
 # Function to check if a resource exists
 check_resource_exists() {
@@ -334,7 +334,7 @@ ensure_csv_deploy_version() {
 }
 
 # Function to check and update RHACS version
-# Uses RHACS_VERSION when set; otherwise newest rhacs-X.Y channel from the operator catalog.
+# Uses RHACS_VERSION (default 5.0.0, channel rhacs-5.0).
 # Uses subscription channel update when subscription exists; otherwise falls back to CSV deploy-details.
 check_and_update_version() {
     print_step "Checking RHACS version..."
@@ -706,7 +706,7 @@ main() {
     
     print_info ""
     
-    # Check and update version to newest catalog release (or RHACS_VERSION pin) before Console plugin
+    # Check and update version to RHACS_VERSION (default 5.0.0) before Console plugin
     check_and_update_version
     
     print_info ""

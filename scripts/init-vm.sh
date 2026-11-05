@@ -7,7 +7,7 @@ sudo dnf install -y \
   ghostscript perl nginx tar gzip nmap-ncat bzip2 zip unzip \
   freetype libjpeg-turbo libtiff libpng gnutls 2>/dev/null || true
 # Download the latest roxagent binary; run every 10 minutes via /etc/cron.d (no systemd unit required)
-curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/4.10.0/bin/linux/roxagent
+curl -L -f -o /tmp/roxagent https://mirror.openshift.com/pub/rhacs/assets/5.0.0/bin/linux/roxagent
 chmod +x /tmp/roxagent
 sudo mv /tmp/roxagent /usr/local/bin/roxagent
 sudo restorecon -v /usr/local/bin/roxagent

@@ -149,7 +149,7 @@ _Context: Security teams want findings where developers and platform engineers a
 
 NOTE: This demo environment enables the console plugin during installation. On a fresh {rhacs_version} install, the plugin is enabled by default. After upgrading from an earlier RHACS version, you must enable the *Console plugin* when installing or updating the RHACS Operator.
 
-For more information, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.10/html/configuring/accessing-vulnerability-information-in-web-console[Accessing vulnerability information in the OpenShift web console] documentation.
+For more information, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/5.0/html/configuring/accessing-vulnerability-information-in-web-console[Accessing vulnerability information in the OpenShift web console] documentation.
 
 === Show
 
@@ -202,7 +202,7 @@ Dashboards and ad hoc queries in the RHACS console answer point-in-time question
 
 TIP: This demo environment installs a sample Perses dashboard in the OpenShift console during setup (`monitoring-setup`). RHACS exposes `/metrics` by default; vulnerability and policy violation metrics may need to be enabled under *Platform Configuration → System Configuration → Prometheus metrics*.
 
-For more information, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/4.10/html/configuring/monitor-acs[Monitoring Red Hat Advanced Cluster Security] documentation.
+For more information, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/5.0/html/configuring/monitor-acs[Monitoring Red Hat Advanced Cluster Security] documentation.
 
 === Show
 

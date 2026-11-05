@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Default pin is RHACS 5.0.0 (channel rhacs-5.0). Export RHACS_VERSION to override.
+export RHACS_VERSION="${RHACS_VERSION:-5.0.0}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -453,12 +456,7 @@ main() {
         print_warn "RHACS_ROUTE_NAME not set - will use default: central"
     fi
     
-    # RHACS version is optional - if not set, script auto-detects newest catalog channel
-    if [ -n "${RHACS_VERSION:-}" ]; then
-        print_info "Target RHACS version specified: ${RHACS_VERSION}"
-    else
-        print_info "No RHACS_VERSION set - will upgrade to newest version from operator catalog"
-    fi
+    print_info "Target RHACS version: ${RHACS_VERSION}"
     
     echo ""  # Ensure output is flushed
     
