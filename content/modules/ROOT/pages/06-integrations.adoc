@@ -3,9 +3,9 @@
 
 include::partial$_attributes.adoc[]
 
-This module covers how RHACS {rhacs_version} connects to the systems your organization already uses: image registries, vulnerability management tools, notification and SIEM platforms, and software supply chain infrastructure.
+This module covers how RHACS {rhacs_version} connects to the systems your organization already uses: image registries, vulnerability management tools, notification and SIEM platforms, software supply chain infrastructure, and OpenShift Lightspeed through the RHACS MCP server.
 
-*Estimated time*: 5-8 minutes
+*Estimated time*: 10-14 minutes
 
 == Part 1: Image registry and vulnerability scanner integrations
 
@@ -187,5 +187,79 @@ For enterprise deployments, RHACS integrates with identity providers via OIDC an
 
 [NOTE]
 ====
-**Transition:** That covers the core integration surface. The final module covers Observability -- how RHACS metrics and monitoring data fit into your existing observability stack.
+**Transition:** Registries, notifiers, and tokens are the integration surface security teams already know. The next part is the {rhacs_version} technology preview that lets OpenShift Lightspeed ask RHACS those same questions.
+====
+
+== Part 4: Ask RHACS from OpenShift Lightspeed
+
+=== Know
+
+_Context: Investigating one CVE across clusters means clicking through Results, images, deployments, and nodes. The RHACS MCP server, a technology preview in RHACS {rhacs_version}, exposes those read APIs as tools an assistant can call._
+
+**What the server can answer:**
+
+* Vulnerability questions about CVEs, images, deployments, and nodes
+* Which secured clusters Central is managing
+
+The server does not change policies, delete workloads, or widen the caller's access. It returns whatever the API token is allowed to read. In this environment the token is an Analyst token, and OpenShift Lightspeed is already registered to the server.
+
+**How this environment is wired:**
+
+* The server runs as `stackrox-mcp` in the `stackrox-mcp` project and listens at `http://stackrox-mcp.stackrox-mcp:8080/mcp`
+* `OLSConfig` includes the `MCPServer` feature gate and an MCP entry named `stackrox-mcp`
+* Lightspeed sends the Analyst token. An external client would use the same route with its own token
+
+The setup script `mcp-server-setup/install.sh` creates that wiring. You do not register the server during the demo.
+
+=== Show
+
+**What I say**:
+
+"I am going to ask Lightspeed the question I would otherwise click through in Vulnerability Management. The assistant is calling RHACS. It is not guessing from a document."
+
+**What I do**:
+
+. In the OpenShift console, open *OpenShift Lightspeed*.
++
+If the chat asks you to approve MCP tools, approve the `stackrox-mcp` tools.
+
+. Paste this prompt:
++
+[source,role="copypaste"]
+----
+Use the stackrox-mcp server. List the clusters secured by ACS.
+----
+
+. Paste a CVE prompt that matches the image from the vulnerability module:
++
+[source,role="copypaste"]
+----
+Use the stackrox-mcp server. Which deployments are affected by CVE-2025-6965? Name the namespace for each one.
+----
+
+. Switch to the RHACS console, open *Vulnerability Management > Results*, and find `CVE-2025-6965`.
++
+"The deployments Lightspeed named should be the ones on this CVE. If a name is missing, say so. The point is that the assistant is reading Central, and Central is still the source of truth."
+
+. Paste a node question:
++
+[source,role="copypaste"]
+----
+Use the stackrox-mcp server. Are any cluster nodes affected by CVE-2021-44228?
+----
+
+**What they should notice:**
+
+* The chat names clusters, deployments, and namespaces instead of giving a generic CVE description
+* The token is read-only. The assistant cannot turn off a policy from this chat
+* The same CVE is still visible in the RHACS console
+
+[NOTE]
+====
+**Presenter tip:** If Lightspeed answers without calling a tool, repeat the prompt with the words `Use the stackrox-mcp server`. If the chat icon is missing, OpenShift Lightspeed is not ready yet. Skip this part and stay on the Integrations page. An external client can use the `stackrox-mcp` route and an Analyst API token from *Platform Configuration > Integrations > API Token*. Do not paste a token into the slide or the chat transcript.
+====
+
+[NOTE]
+====
+**Transition:** The last module is the GitOps vulnerability workflow: who owns a CVE, how Red Hat VEX drops findings that are not actionable, and how a pipeline fails a build.
 ====

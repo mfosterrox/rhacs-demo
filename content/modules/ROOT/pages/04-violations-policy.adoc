@@ -3,9 +3,9 @@
 
 include::partial$_attributes.adoc[]
 
-This module covers how RHACS {rhacs_version} records policy violations across the full application lifecycle, what forensic data is captured at runtime, and how the unified policy engine spans build, deploy, and runtime enforcement without requiring separate tooling for each stage.
+This module covers how RHACS {rhacs_version} records policy violations across the full application lifecycle, what forensic data is captured at runtime, and how the unified policy engine spans build, deploy, and runtime enforcement. It also covers two {rhacs_version} policy behaviors: file activity monitoring, and init-container evaluation.
 
-*Estimated time*: 12-15 minutes
+*Estimated time*: 18-22 minutes
 
 == Part 1: Violations and forensic data
 
@@ -212,6 +212,131 @@ The "programming OpenShift to prevent security risk" framing is effective with p
 [NOTE]
 ====
 **Important:** After the demo, undo the enforcement change on this policy to avoid blocking pipeline runs in subsequent sections. Navigate back to the policy, click *Actions > Edit*, set the response method back to *Inform only*, and save.
+====
+
+[NOTE]
+====
+**Transition:** Enforcement is the hard line. The next two parts show runtime file activity, then how build and deploy policies treat init containers.
+====
+
+== Part 4: File activity monitoring
+
+=== Know
+
+_Context: Image scanning cannot see a process rewrite a file after the container starts. File activity monitoring records access, modification, and rename operations on paths you choose, including wildcards, and can combine those events with process name, arguments, and UID._
+
+**How RHACS records file activity:**
+
+* Collector on each node observes file operations for containers and for host processes
+* Sensor evaluates runtime policies against those events
+* Central stores the match. Deployment events appear on the Violations page. Node events appear on the *Nodes* tab and through the API and notifiers
+
+**What a policy needs:**
+
+* File activity monitoring enabled on the secured cluster
+* A runtime policy with a *File Path* criterion and an event source of *Deployment* or *Node*
+* x86_64 nodes. File activity monitoring does not run on other architectures in this release
+
+This environment already has two policies and a runner that keeps producing a deployment event:
+
+* `fam-basic-deploy-monitoring` watches `/etc/passwd` for deployment events. `rhacs-fam-exec-runner` in the `payments` project execs into `visa-processor` and runs `touch /etc/passwd` about every 10 minutes
+* `fam-basic-node-monitoring` watches the same path for host processes
+
+Machine Config Operator writes are not reported as file activity. For the product behavior, see the https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_security_for_kubernetes/5.0/html/operating/index#configuring-file-activity-monitoring_using-policies-to-provide-security[Configuring file activity monitoring] topic.
+
+=== Show
+
+**What I say**:
+
+"A container that is supposed to be immutable just changed `/etc/passwd`. File activity monitoring is the runtime control that catches that, with the process that did it."
+
+**What I do**:
+
+. Go to *Platform Configuration > Policy Management* and search for `fam-basic-deploy-monitoring`.
+
+. Open the policy and point to the lifecycle and criteria:
++
+"Lifecycle is Runtime. The event source is Deployment. The file path is `/etc/passwd`. That is the criterion. The runner in `payments` touches that file inside `visa-processor`."
+
+. Open `fam-basic-node-monitoring`.
++
+"Same path, event source Node. That one is for a host process, such as a shell on the node, not a container."
+
+. Go to *Violations* and filter on the policy name `fam-basic-deploy-monitoring`.
+
+. Open a violation and point to the file path, the process, the deployment, and the timestamp.
++
+"This is the same forensic record as a process violation, plus the file that changed. PCI-DSS file-integrity controls map to this event."
+
+. If the list is empty, trigger one event from the terminal, then refresh Violations:
++
+[source,sh,role=execute]
+----
+oc exec -n payments deployment/visa-processor -c visa-processor-sidecar -- touch /etc/passwd
+----
+
+. Open the *Nodes* tab on Violations and look for `fam-basic-node-monitoring`.
++
+"A plain debug pod is still a deployment event. A node event has to come from a host process. If this tab is empty, stay on the deployment violation. That is the one the audience needs to see."
+
+**What they should notice:**
+
+* The policy names a path, not a CVE
+* The violation names the process that touched the file
+* Deployment events and node events are separate policies
+
+[NOTE]
+====
+**Presenter tip:** `mastercard-processor` cannot `touch /etc/passwd`. Use the privileged `visa-processor-sidecar` container. Do not debug a node and `chroot` if you are trying to show the node policy. That session is classified as a deployment event.
+====
+
+== Part 5: Init container coverage
+
+=== Know
+
+_Context: Init containers run before the application containers and then exit. In earlier RHACS releases, build and deploy policies often ignored them, so a privileged or vulnerable init image never produced a violation. RHACS {rhacs_version} evaluates init container images with the same build and deploy policies as the main containers._
+
+**What changed:**
+
+* When a deployment declares init containers, RHACS scans those images for vulnerabilities
+* Build and deploy policies apply to those images. A fixable high CVE or a privileged init container can violate the same policy as the application container
+* The policy *Filters* step can skip init containers. Teams upgrading from RHACS 4 keep the old behavior on the policies they choose, and leave it off everywhere else
+* Runtime process policies still describe the running application. An init container is gone by the time the application container starts
+
+The useful cases are the ones that look the same in a container list and mean different things to a reviewer:
+
+* A clean init container that only prepares files, and should stay quiet
+* An init image with a fixable high CVE, which should violate the image policy
+* A privileged init container that is justified, which still violates a privileged-container policy until someone excludes it
+* A privileged init container on a vulnerable image, which should violate both
+
+=== Show
+
+**What I say**:
+
+"Init containers are in the policy engine now. The default is to evaluate them. The filter is how you opt a single policy out."
+
+**What I do**:
+
+. Go to *Platform Configuration > Policy Management* and open *Fixable CVSS >= 7*. Click *Actions > Edit*.
+
+. Move through the wizard until you reach *Filters*.
++
+"Skip init containers is off. With it off, this policy scores the init image and the application image. Turn it on only when an init container is allowed to carry a finding the application container is not."
+
+. Leave *Skip init containers* off. Cancel the edit.
++
+"Do not save a skip. This environment is here to show init containers being evaluated, not ignored."
+
+**What they should notice:**
+
+* The filter is per policy, not a cluster-wide switch
+* Image and privilege policies are the ones that change. Runtime process policies still watch the application container
+* Opting out is an explicit filter, so the exception is visible in the policy
+
+[NOTE]
+====
+**Presenter tip:** If you turned on Build or Deploy enforcement for this policy in the previous part, set the response method back to *Inform only* before you leave Policy Management. An enforced fixable-CVE policy blocks later pipeline runs.
 ====
 
 [NOTE]

@@ -11,8 +11,9 @@
 * xref:02-vulnerability-management.adoc[Module 02: Vulnerability management and risk]
 ** xref:02-vulnerability-management.adoc#part-1-vulnerability-results-overview[Vulnerability results overview]
 ** xref:02-vulnerability-management.adoc#part-2-image-details-and-cve-triage[Image details and CVE triage]
-** xref:02-vulnerability-management.adoc#part-3-risk-and-deployment-context[Risk and deployment context]
-** xref:02-vulnerability-management.adoc#part-4-process-discovery-and-runtime-activity[Process discovery and runtime activity]
+** xref:02-vulnerability-management.adoc#part-3-virtual-machine-vulnerability-management[Virtual machine vulnerability management]
+** xref:02-vulnerability-management.adoc#part-4-risk-and-deployment-context[Risk and deployment context]
+** xref:02-vulnerability-management.adoc#part-5-process-discovery-and-runtime-activity[Process discovery and runtime activity]
 
 * xref:03-compliance.adoc[Module 03: Compliance]
 ** xref:03-compliance.adoc#part-1-compliance-dashboard-overview[Compliance dashboard overview]
@@ -23,6 +24,8 @@
 ** xref:04-violations-policy.adoc#part-1-violations-and-forensic-data[Violations and forensic data]
 ** xref:04-violations-policy.adoc#part-2-the-built-in-policy-library[The built-in policy library]
 ** xref:04-violations-policy.adoc#part-3-policy-enforcement-and-the-admission-controller[Policy enforcement and the admission controller]
+** xref:04-violations-policy.adoc#part-4-file-activity-monitoring[File activity monitoring]
+** xref:04-violations-policy.adoc#part-5-init-container-coverage[Init container coverage]
 
 * xref:05-network-graph.adoc[Module 05: Network graph]
 ** xref:05-network-graph.adoc#part-1-network-graph-overview-and-navigation[Network graph overview and navigation]
@@ -33,6 +36,7 @@
 ** xref:06-integrations.adoc#part-1-image-registry-and-vulnerability-scanner-integrations[Image registry and vulnerability scanner integrations]
 ** xref:06-integrations.adoc#part-2-notification-and-siem-integrations[Notification and SIEM integrations]
 ** xref:06-integrations.adoc#part-3-software-supply-chain-and-authentication-integrations[Software supply chain and authentication integrations]
+** xref:06-integrations.adoc#part-4-ask-rhacs-from-openshift-lightspeed[Ask RHACS from OpenShift Lightspeed]
 
 * xref:07-gitops-vulnerability-management.adoc[Module 07: GitOps vulnerability management]
 ** xref:07-gitops-vulnerability-management.adoc#part-1-who-owns-this-cve[Who owns this CVE]
