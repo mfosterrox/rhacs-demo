@@ -1,0 +1,60 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rhacs-central-lightspeed
+  namespace: {{ ocp4_workload_rhacs_preview_lightspeed_namespace }}
+  labels:
+    app.kubernetes.io/part-of: lightspeed-operator
+    app.kubernetes.io/component: rhacs-risk-enrichment
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lightspeed-service-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ ocp4_workload_rhacs_preview_central_namespace }}
+          podSelector:
+            matchLabels:
+              app: central
+      ports:
+        - protocol: TCP
+          port: 8443
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-console
+          podSelector:
+            matchLabels:
+              app: console
+      ports:
+        - protocol: TCP
+          port: 8443
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8443
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-monitoring
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - prometheus
+              - key: prometheus
+                operator: In
+                values:
+                  - k8s
+      ports:
+        - protocol: TCP
+          port: 8443

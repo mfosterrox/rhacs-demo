@@ -1,0 +1,26 @@
+---
+namespace: rhacs_demo
+name: automation
+version: 1.0.0
+readme: README.md
+authors:
+  - Michael Foster <mfoster@redhat.com>
+
+description: Provisioning helpers for the RHACS demo catalog
+
+license:
+  - Apache-2.0
+
+tags:
+  - rhacs
+  - openshift
+  - lightspeed
+
+repository: https://github.com/rhpds/rhacs-demo
+
+dependencies: {}
+
+build_ignore:
+  - .git
+  - .gitignore
+  - .DS_Store

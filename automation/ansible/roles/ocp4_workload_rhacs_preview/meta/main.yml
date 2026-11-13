@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  author: Michael Foster
+  description: Enable RHACS 5.0 technology preview flags and Lightspeed risk enrichment
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  standalone: true
+dependencies: []

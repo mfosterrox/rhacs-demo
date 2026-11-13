@@ -1,0 +1,15 @@
+---
+- name: Remove the Central Lightspeed query binding
+  kubernetes.core.k8s:
+    state: absent
+    api_version: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    name: central-lightspeed-query-access
+
+- name: Remove the Central Lightspeed network policy
+  kubernetes.core.k8s:
+    state: absent
+    api_version: networking.k8s.io/v1
+    kind: NetworkPolicy
+    name: allow-rhacs-central-lightspeed
+    namespace: "{{ ocp4_workload_rhacs_preview_lightspeed_namespace }}"

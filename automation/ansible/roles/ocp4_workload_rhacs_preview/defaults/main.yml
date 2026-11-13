@@ -1,0 +1,21 @@
+---
+ocp4_workload_rhacs_preview_central_name: stackrox-central-services
+ocp4_workload_rhacs_preview_central_namespace: stackrox
+ocp4_workload_rhacs_preview_lightspeed_namespace: openshift-lightspeed
+ocp4_workload_rhacs_preview_lightspeed_endpoint: https://lightspeed-app-server.openshift-lightspeed.svc:8443
+
+# Merged onto Central spec.customize.envVars. Existing entries, including
+# ROX_VIRTUAL_MACHINES from ocp4_workload_rhacs, are kept.
+ocp4_workload_rhacs_preview_central_env_vars:
+  - name: ROX_LIGHTSPEED_RISK_SUMMARY
+    value: "true"
+  - name: ROX_LIGHTSPEED_ENDPOINT
+    value: "{{ ocp4_workload_rhacs_preview_lightspeed_endpoint }}"
+  - name: ROX_INIT_CONTAINER_SUPPORT
+    value: "true"
+  - name: ROX_POLICY_FILTERS_UI
+    value: "enabled"
+  - name: ROX_SCANNER_V4_RED_HAT_LAYERS_RED_HAT_VULNS_ONLY
+    value: "true"
+  - name: ROX_SBOM_SCANNING
+    value: "true"

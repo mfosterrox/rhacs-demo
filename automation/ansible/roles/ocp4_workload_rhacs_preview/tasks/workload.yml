@@ -1,0 +1,67 @@
+---
+- name: Read the RHACS Central custom resource
+  kubernetes.core.k8s_info:
+    api_version: platform.stackrox.io/v1alpha1
+    kind: Central
+    name: "{{ ocp4_workload_rhacs_preview_central_name }}"
+    namespace: "{{ ocp4_workload_rhacs_preview_central_namespace }}"
+  register: r_central
+  retries: 30
+  delay: 10
+  until: r_central.resources | default([]) | length > 0
+
+- name: Merge technology-preview environment variables onto Central
+  ansible.builtin.set_fact:
+    _ocp4_workload_rhacs_preview_env_vars: >-
+      {{
+        (
+          (r_central.resources[0].spec.customize | default({})).envVars | default([])
+          | rejectattr(
+              'name',
+              'in',
+              ocp4_workload_rhacs_preview_central_env_vars | map(attribute='name') | list
+            )
+          | list
+        )
+        + ocp4_workload_rhacs_preview_central_env_vars
+      }}
+
+- name: Apply technology-preview environment variables to Central
+  kubernetes.core.k8s:
+    state: patched
+    merge_type:
+      - merge
+    definition:
+      apiVersion: platform.stackrox.io/v1alpha1
+      kind: Central
+      metadata:
+        name: "{{ ocp4_workload_rhacs_preview_central_name }}"
+        namespace: "{{ ocp4_workload_rhacs_preview_central_namespace }}"
+      spec:
+        customize:
+          envVars: "{{ _ocp4_workload_rhacs_preview_env_vars }}"
+
+- name: Grant Central query access to OpenShift Lightspeed
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: central-lightspeed-query-access
+        labels:
+          app.kubernetes.io/part-of: lightspeed-operator
+          app.kubernetes.io/component: rhacs-risk-enrichment
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: lightspeed-operator-query-access
+      subjects:
+        - kind: ServiceAccount
+          name: central
+          namespace: "{{ ocp4_workload_rhacs_preview_central_namespace }}"
+
+- name: Allow Central to reach the Lightspeed API
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy.yaml.j2') | from_yaml }}"
