@@ -32,7 +32,7 @@ trap 'error_handler $? $LINENO' ERR
 RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 SECURED_CLUSTER_NAME="${SECURED_CLUSTER_NAME:-}"
 COLLECTOR_ROLLOUT_TIMEOUT="${COLLECTOR_ROLLOUT_TIMEOUT:-300}"
-SCRIPT_VERSION="2026-06-03"
+SCRIPT_VERSION="2026-11-19"
 
 ensure_jq() {
     command -v jq >/dev/null 2>&1 || {
@@ -137,12 +137,13 @@ securedcluster_name() {
 collector_env_value() {
     local ns="$1"
     oc get ds collector -n "${ns}" -o json 2>/dev/null | jq -r '
-        .spec.template.spec.containers[]
-        | select(.name == "collector")
-        | .env[]?
-        | select(.name == "ROX_NON_AGGREGATED_NETWORKS")
-        | .value
-    ' 2>/dev/null | head -1
+        [.spec.template.spec.containers[]
+          | select(.name == "collector")
+          | .env[]?
+          | select(.name == "ROX_NON_AGGREGATED_NETWORKS")
+          | .value]
+        | first // empty
+    ' 2>/dev/null || true
 }
 
 securedcluster_has_rox_overlay() {
@@ -194,17 +195,30 @@ apply_securedcluster_overlay() {
     print_info "Patching SecuredCluster/${sc_name} spec.overlays..."
     oc patch "securedcluster/${sc_name}" -n "${ns}" --type=merge \
         -p "$(jq -n --argjson overlays "${new_overlays}" '{spec: {overlays: $overlays}}')"
+}
 
-    print_info "Waiting for RHACS operator to reconcile SecuredCluster..."
-    sleep 10
+wait_for_collector_env() {
+    local ns="$1"
+    local networks="$2"
+    local timeout="$3"
+    local deadline=$((SECONDS + timeout))
+    local current=""
+
+    print_info "Waiting for the RHACS operator to set ROX_NON_AGGREGATED_NETWORKS on the collector DaemonSet (timeout ${timeout}s)..."
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+        current="$(collector_env_value "${ns}")"
+        if [ "${current}" = "${networks}" ]; then
+            print_info "Collector DaemonSet has ROX_NON_AGGREGATED_NETWORKS=${networks}"
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
 }
 
 wait_for_collector_rollout() {
     local ns="$1"
     local timeout="$2"
-
-    print_info "Restarting collector to pick up ROX_NON_AGGREGATED_NETWORKS..."
-    oc rollout restart "ds/collector" -n "${ns}" >/dev/null 2>&1 || true
 
     print_info "Waiting for collector DaemonSet rollout (timeout ${timeout}s)..."
     if oc rollout status "ds/collector" -n "${ns}" --timeout="${timeout}s" >/dev/null 2>&1; then
@@ -213,7 +227,8 @@ wait_for_collector_rollout() {
     fi
 
     print_warn "Collector rollout did not complete within ${timeout}s"
-    return 1
+    print_warn "The DaemonSet spec already has ROX_NON_AGGREGATED_NETWORKS. Pods may still be rolling."
+    return 0
 }
 
 print_network_diagnostics() {
@@ -301,12 +316,8 @@ configure_collector_non_aggregated_networks() {
         return 1
     fi
 
-    wait_for_collector_rollout "${RHACS_NAMESPACE}" "${COLLECTOR_ROLLOUT_TIMEOUT}" || true
-
-    current=$(collector_env_value "${RHACS_NAMESPACE}")
-    if [ "${current}" = "${networks}" ]; then
-        print_info "✓ ROX_NON_AGGREGATED_NETWORKS verified on collector DaemonSet"
-    else
+    if ! wait_for_collector_env "${RHACS_NAMESPACE}" "${networks}" "${COLLECTOR_ROLLOUT_TIMEOUT}"; then
+        current="$(collector_env_value "${RHACS_NAMESPACE}")"
         print_error "Collector env not set after patch (got: '${current:-<unset>}')"
         print_error "Check: oc get securedcluster ${sc_name} -n ${RHACS_NAMESPACE} -o yaml | grep -A5 overlays"
         print_error "Check: oc get ds collector -n ${RHACS_NAMESPACE} -o yaml | grep -A2 ROX_NON_AGGREGATED"
@@ -314,6 +325,9 @@ configure_collector_non_aggregated_networks() {
         print_network_diagnostics
         return 1
     fi
+
+    wait_for_collector_rollout "${RHACS_NAMESPACE}" "${COLLECTOR_ROLLOUT_TIMEOUT}"
+    print_info "✓ ROX_NON_AGGREGATED_NETWORKS verified on collector DaemonSet"
 }
 
 main() {

@@ -143,7 +143,7 @@ The following scripts are executed in this order:
 
 ### Collector Networks (Script 02)
 
-On clusters where pod or service CIDRs are not RFC 1918 private ranges (common on RHDP/showroom environments), RHACS may treat internal traffic as external in the network graph. Script 02 patches the SecuredCluster CR to set `ROX_NON_AGGREGATED_NETWORKS` on the Collector DaemonSet.
+On clusters where pod or service CIDRs are not RFC 1918 private ranges (common on RHDP/showroom environments), RHACS may treat internal traffic as external in the network graph. Script 02 patches the SecuredCluster CR, then waits for the RHACS operator to reconcile `ROX_NON_AGGREGATED_NETWORKS` onto the Collector DaemonSet.
 
 - **Auto-detection**: Reads `clusterNetwork`, `serviceNetwork`, and `machineNetwork` from OpenShift `network.config`, then samples live **pod IPs**, **service ClusterIPs**, and **node InternalIPs**. Non-RFC1918 addresses (e.g. `172.231.x.x` pseudo-private ranges outside `172.16–172.31`) are aggregated into covering prefixes such as `172.231.0.0/16`.
 - **Manual override** (if auto-detect misses a range): `export ROX_NON_AGGREGATED_NETWORKS="172.231.0.0/16"`
