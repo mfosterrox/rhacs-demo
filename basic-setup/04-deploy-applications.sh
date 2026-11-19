@@ -110,7 +110,7 @@ deploy_applications() {
         return 1
     fi
     
-    print_info "Applying k8s-deployment-manifests (excluding hummingbird-demo and vulnmgmt)..."
+    print_info "Applying k8s-deployment-manifests (excluding hummingbird-demo, vulnmgmt, and emojivoto)..."
     local failed=false
     local manifests_root="${DEMO_APPS_DIR}/k8s-deployment-manifests"
     local item base
@@ -125,6 +125,26 @@ deploy_applications() {
         fi
         if [ "${base}" = "vulnmgmt" ]; then
             print_info "Skipping ${base}/ (opt-in; deployed by 10-deploy-vulnmgmt-demo.sh from demo-applications/vulnmgmt/)"
+            continue
+        fi
+        if [ "${base}" = "emojivoto" ]; then
+            print_info "Skipping ${base}/ (workloads crash and are not part of this demo)"
+            continue
+        fi
+        if [ "${base}" = "-namespaces" ]; then
+            local manifest manifest_name
+            for manifest in "${item}"/*.yaml "${item}"/*.yml; do
+                [ -f "${manifest}" ] || continue
+                manifest_name="$(basename "${manifest}")"
+                if [[ "${manifest_name}" == *emojivoto* || "${manifest_name}" == *" copy.yaml" ]]; then
+                    print_info "Skipping ${manifest_name}"
+                    continue
+                fi
+                if ! oc apply -f "${manifest}" 2>&1 | tee -a /tmp/deploy-output.log; then
+                    print_warn "Some resources may have failed to apply for ${manifest_name}"
+                    failed=true
+                fi
+            done
             continue
         fi
         if ! oc apply -f "${item}" --recursive 2>&1 | tee -a /tmp/deploy-output.log; then

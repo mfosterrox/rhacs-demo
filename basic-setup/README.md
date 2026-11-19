@@ -122,7 +122,7 @@ The following scripts are executed in this order:
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to RHACS 5.0.0 (or `RHACS_VERSION`), then ensures Console plugin is enabled | No | ✓ |
 | `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
-| `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo (excludes hummingbird-demo) | No | ✓ |
+| `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo (excludes hummingbird-demo, vulnmgmt, and emojivoto) | No | ✓ |
 | `deploy-hummingbird-applications.sh` | Deploys Hummingbird HI demo workloads (runs in parallel with scripts 05–08) | No | ✓ |
 | `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
 | `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules (includes TailoredProfiles when present) | **Yes** | ✓ |
