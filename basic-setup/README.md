@@ -134,7 +134,7 @@ The following scripts are executed in this order:
 
 ### RHEL virtual machine (`deploy-rhel-webserver.sh`)
 
-`install.sh` runs this before scripts 01–04. It creates `rhel-webserver` in the `rhel-webserver` namespace on a Ready worker that is not a control-plane or master node. The guest uses VSOCK, and cloud-init runs `scripts/init-vm.sh`, which installs the RHACS 5.0.0 `roxagent`.
+`install.sh` runs this before scripts 01–04. It creates `rhel-webserver` in the `rhel-webserver` namespace on a Ready worker that is not a control-plane or master node. The guest uses VSOCK. Cloud-init userdata, including `scripts/init-vm.sh`, is stored in Secret `rhel-webserver-cloudinit` and referenced with `userDataSecretRef`, because KubeVirt rejects inline `userData` larger than 2048 bytes. That cloud-init installs the RHACS 5.0.0 `roxagent`.
 
 - Skip: `export SKIP_RHEL_VM=1`
 - Satellite credentials, in order: Secret `rhacs-vm-satellite`, then `RHACS_VM_SATELLITE_URL`, `RHACS_VM_SATELLITE_ORG`, and `RHACS_VM_SATELLITE_ACTIVATIONKEY`, then cloud-init on an existing `rhel-webserver` virtual machine. If none of those are set, the script uses the previous demosat registration (`demosat-ha.infra.demo.redhat.com`, org `Red_Hat_RHDP_Labs`, activation key `demosat-smt-lb1161-wolfgang`). The script does not print the activation key at runtime.

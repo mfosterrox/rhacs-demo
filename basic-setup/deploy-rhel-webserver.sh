@@ -2,9 +2,12 @@
 # Create the RHACS demo RHEL guest on a worker node.
 #
 # The guest is rhel-webserver in the rhel-webserver namespace. Cloud-init runs
-# scripts/init-vm.sh, which installs the RHACS 5.0.0 roxagent. Scheduling
-# requires a Ready worker that is not a control-plane or master node. This
-# script does not fall back to the control plane.
+# scripts/init-vm.sh, which installs the RHACS 5.0.0 roxagent. That userdata
+# is stored in Secret rhel-webserver-cloudinit. KubeVirt rejects inline
+# cloudInitNoCloud userData larger than 2048 bytes, and the init script
+# exceeds that limit. Scheduling requires a Ready worker that is not a
+# control-plane or master node. This script does not fall back to the
+# control plane.
 #
 # If the guest is already running on a worker, it is left in place. If it is
 # on a control-plane node, it is deleted and created again on a worker.
@@ -52,6 +55,7 @@ trap 'error_handler $? $LINENO' ERR
 VM_NAME="${RHACS_VM_NAME:-rhel-webserver}"
 VM_NAMESPACE="${RHACS_VM_NAMESPACE:-rhel-webserver}"
 SECRET_NAME="${RHACS_VM_SATELLITE_SECRET:-rhacs-vm-satellite}"
+CLOUDINIT_SECRET_NAME="${RHACS_VM_CLOUDINIT_SECRET:-${VM_NAME}-cloudinit}"
 # Temporary fallback when provision did not publish Satellite credentials.
 DEFAULT_SAT_URL="demosat-ha.infra.demo.redhat.com"
 DEFAULT_SAT_ORG="Red_Hat_RHDP_Labs"
@@ -59,6 +63,7 @@ DEFAULT_SAT_KEY="demosat-smt-lb1161-wolfgang"
 DATASOURCE_NAME="${RHACS_VM_DATASOURCE:-rhel10}"
 DATASOURCE_NAMESPACE="${RHACS_VM_DATASOURCE_NAMESPACE:-openshift-virtualization-os-images}"
 MANIFEST=""
+CLOUDINIT_MANIFEST=""
 SAT_URL=""
 SAT_ORG=""
 SAT_KEY=""
@@ -67,6 +72,9 @@ SAT_SOURCE=""
 cleanup() {
     if [ -n "${MANIFEST}" ] && [ -f "${MANIFEST}" ]; then
         rm -f "${MANIFEST}"
+    fi
+    if [ -n "${CLOUDINIT_MANIFEST}" ] && [ -f "${CLOUDINIT_MANIFEST}" ]; then
+        rm -f "${CLOUDINIT_MANIFEST}"
     fi
 }
 trap cleanup EXIT
@@ -188,17 +196,37 @@ load_satellite_from_env() {
     return 1
 }
 
+read_vm_userdata() {
+    local inline="" secret_name=""
+    inline="$(oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" -o json | jq -r '
+        .spec.template.spec.volumes[]?
+        | select(.name == "cloudinitdisk")
+        | .cloudInitNoCloud.userData // empty
+    ')"
+    if [ -n "${inline}" ]; then
+        printf '%s' "${inline}"
+        return 0
+    fi
+    secret_name="$(oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" -o json | jq -r '
+        .spec.template.spec.volumes[]?
+        | select(.name == "cloudinitdisk")
+        | .cloudInitNoCloud.userDataSecretRef.name // empty
+    ')"
+    if [ -z "${secret_name}" ]; then
+        return 1
+    fi
+    oc get secret "${secret_name}" -n "${VM_NAMESPACE}" -o json 2>/dev/null | jq -r '
+        .data.userdata // "" | if . == "" then "" else @base64d end
+    '
+}
+
 load_satellite_from_vm() {
     local userdata=""
     clear_satellite
     if ! vm_exists; then
         return 1
     fi
-    userdata="$(oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" -o json | jq -r '
-        .spec.template.spec.volumes[]?
-        | select(.name == "cloudinitdisk")
-        | .cloudInitNoCloud.userData // empty
-    ')"
+    userdata="$(read_vm_userdata || true)"
     if [ -z "${userdata}" ]; then
         return 1
     fi
@@ -332,10 +360,36 @@ EOF
 EOF
 }
 
-write_manifest() {
+write_cloudinit_secret() {
     local userdata="$1"
     local dest="$2"
-    jq -n --arg userdata "${userdata}" --arg name "${VM_NAME}" --arg ns "${VM_NAMESPACE}" --arg datasource "${DATASOURCE_NAME}" --arg datasource_ns "${DATASOURCE_NAMESPACE}" '
+    jq -n \
+        --arg userdata "${userdata}" \
+        --arg name "${CLOUDINIT_SECRET_NAME}" \
+        --arg ns "${VM_NAMESPACE}" \
+        --arg app "${VM_NAME}" '
+        {
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {
+                name: $name,
+                namespace: $ns,
+                labels: {
+                    app: $app,
+                    "app.kubernetes.io/part-of": "rhacs-demo",
+                    "app.kubernetes.io/component": "vm-cloudinit"
+                }
+            },
+            type: "Opaque",
+            stringData: {userdata: $userdata}
+        }
+    ' > "${dest}"
+    chmod 600 "${dest}"
+}
+
+write_manifest() {
+    local dest="$1"
+    jq -n --arg name "${VM_NAME}" --arg ns "${VM_NAMESPACE}" --arg datasource "${DATASOURCE_NAME}" --arg datasource_ns "${DATASOURCE_NAMESPACE}" --arg cloudinit_secret "${CLOUDINIT_SECRET_NAME}" '
         def worker_affinity:
             {
                 nodeAffinity: {
@@ -410,7 +464,7 @@ write_manifest() {
                         subdomain: "headless",
                         volumes: [
                             {name: "rootdisk", dataVolume: {name: ($name + "-volume")}},
-                            {name: "cloudinitdisk", cloudInitNoCloud: {userData: $userdata}}
+                            {name: "cloudinitdisk", cloudInitNoCloud: {userDataSecretRef: {name: $cloudinit_secret}}}
                         ]
                     }
                 }
@@ -531,8 +585,12 @@ main() {
     userdata="$(build_userdata "${password}" "${SAT_URL}" "${SAT_ORG}" "${SAT_KEY}" "${init_b64}" "${guest_name}")"
 
     ensure_namespace
+    CLOUDINIT_MANIFEST="$(mktemp)"
     MANIFEST="$(mktemp)"
-    write_manifest "${userdata}" "${MANIFEST}"
+    write_cloudinit_secret "${userdata}" "${CLOUDINIT_MANIFEST}"
+    write_manifest "${MANIFEST}"
+    oc apply -f "${CLOUDINIT_MANIFEST}" >/dev/null
+    print_info "Stored cloud-init in Secret ${CLOUDINIT_SECRET_NAME}."
     oc apply -f "${MANIFEST}" >/dev/null
     print_info "Applied VirtualMachine ${VM_NAME} in ${VM_NAMESPACE}."
     wait_for_worker_schedule
