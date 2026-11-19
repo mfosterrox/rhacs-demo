@@ -5,7 +5,8 @@
 # scripts/init-vm.sh, which installs the RHACS 5.0.0 roxagent. That userdata
 # is stored in Secret rhel-webserver-cloudinit. KubeVirt rejects inline
 # cloudInitNoCloud userData larger than 2048 bytes, and the init script
-# exceeds that limit. Scheduling requires a Ready worker that is not a
+# exceeds that limit. OpenShift Virtualization 5.0 references that Secret
+# with secretRef. Scheduling requires a Ready worker that is not a
 # control-plane or master node. This script does not fall back to the
 # control plane.
 #
@@ -210,7 +211,7 @@ read_vm_userdata() {
     secret_name="$(oc get vm "${VM_NAME}" -n "${VM_NAMESPACE}" -o json | jq -r '
         .spec.template.spec.volumes[]?
         | select(.name == "cloudinitdisk")
-        | .cloudInitNoCloud.userDataSecretRef.name // empty
+        | .cloudInitNoCloud.secretRef.name // .cloudInitNoCloud.userDataSecretRef.name // empty
     ')"
     if [ -z "${secret_name}" ]; then
         return 1
@@ -387,9 +388,30 @@ write_cloudinit_secret() {
     chmod 600 "${dest}"
 }
 
+# OpenShift Virtualization 5.0 exposes UserDataSecretRef as secretRef.
+# Upstream KubeVirt later renamed that JSON field to userDataSecretRef.
+cloudinit_secret_field() {
+    local fields=""
+    fields="$(oc get crd virtualmachines.kubevirt.io -o json 2>/dev/null | jq -r '
+        [.. | objects | select(has("cloudInitNoCloud")) | .cloudInitNoCloud.properties // empty | keys[]]
+        | unique
+        | .[]
+    ' || true)"
+    if printf '%s\n' "${fields}" | grep -qx 'secretRef'; then
+        printf '%s' 'secretRef'
+        return 0
+    fi
+    if printf '%s\n' "${fields}" | grep -qx 'userDataSecretRef'; then
+        printf '%s' 'userDataSecretRef'
+        return 0
+    fi
+    printf '%s' 'secretRef'
+}
+
 write_manifest() {
     local dest="$1"
-    jq -n --arg name "${VM_NAME}" --arg ns "${VM_NAMESPACE}" --arg datasource "${DATASOURCE_NAME}" --arg datasource_ns "${DATASOURCE_NAMESPACE}" --arg cloudinit_secret "${CLOUDINIT_SECRET_NAME}" '
+    local secret_field="$2"
+    jq -n --arg name "${VM_NAME}" --arg ns "${VM_NAMESPACE}" --arg datasource "${DATASOURCE_NAME}" --arg datasource_ns "${DATASOURCE_NAMESPACE}" --arg cloudinit_secret "${CLOUDINIT_SECRET_NAME}" --arg secret_field "${secret_field}" '
         def worker_affinity:
             {
                 nodeAffinity: {
@@ -464,7 +486,7 @@ write_manifest() {
                         subdomain: "headless",
                         volumes: [
                             {name: "rootdisk", dataVolume: {name: ($name + "-volume")}},
-                            {name: "cloudinitdisk", cloudInitNoCloud: {userDataSecretRef: {name: $cloudinit_secret}}}
+                            {name: "cloudinitdisk", cloudInitNoCloud: {($secret_field): {name: $cloudinit_secret}}}
                         ]
                     }
                 }
@@ -585,12 +607,14 @@ main() {
     userdata="$(build_userdata "${password}" "${SAT_URL}" "${SAT_ORG}" "${SAT_KEY}" "${init_b64}" "${guest_name}")"
 
     ensure_namespace
+    local secret_field=""
+    secret_field="$(cloudinit_secret_field)"
     CLOUDINIT_MANIFEST="$(mktemp)"
     MANIFEST="$(mktemp)"
     write_cloudinit_secret "${userdata}" "${CLOUDINIT_MANIFEST}"
-    write_manifest "${MANIFEST}"
+    write_manifest "${MANIFEST}" "${secret_field}"
     oc apply -f "${CLOUDINIT_MANIFEST}" >/dev/null
-    print_info "Stored cloud-init in Secret ${CLOUDINIT_SECRET_NAME}."
+    print_info "Stored cloud-init in Secret ${CLOUDINIT_SECRET_NAME} (${secret_field})."
     oc apply -f "${MANIFEST}" >/dev/null
     print_info "Applied VirtualMachine ${VM_NAME} in ${VM_NAMESPACE}."
     wait_for_worker_schedule
