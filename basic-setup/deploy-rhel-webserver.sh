@@ -13,6 +13,7 @@
 #   1. Secret rhacs-vm-satellite in namespace rhel-webserver
 #   2. RHACS_VM_SATELLITE_URL, RHACS_VM_SATELLITE_ORG, RHACS_VM_SATELLITE_ACTIVATIONKEY
 #   3. Cloud-init userData already stored on an existing rhel-webserver VM
+#   4. Built-in demosat registration previously used for this guest
 #
 # Guest password: ROX_PASSWORD, or the central-htpasswd secret when that is unset.
 # Skip: SKIP_RHEL_VM=1
@@ -51,6 +52,10 @@ trap 'error_handler $? $LINENO' ERR
 VM_NAME="${RHACS_VM_NAME:-rhel-webserver}"
 VM_NAMESPACE="${RHACS_VM_NAMESPACE:-rhel-webserver}"
 SECRET_NAME="${RHACS_VM_SATELLITE_SECRET:-rhacs-vm-satellite}"
+# Temporary fallback when provision did not publish Satellite credentials.
+DEFAULT_SAT_URL="demosat-ha.infra.demo.redhat.com"
+DEFAULT_SAT_ORG="Red_Hat_RHDP_Labs"
+DEFAULT_SAT_KEY="demosat-smt-lb1161-wolfgang"
 DATASOURCE_NAME="${RHACS_VM_DATASOURCE:-rhel10}"
 DATASOURCE_NAMESPACE="${RHACS_VM_DATASOURCE_NAMESPACE:-openshift-virtualization-os-images}"
 MANIFEST=""
@@ -215,6 +220,20 @@ load_satellite_from_vm() {
     return 1
 }
 
+load_satellite_defaults() {
+    clear_satellite
+    SAT_URL="${DEFAULT_SAT_URL}"
+    SAT_ORG="${DEFAULT_SAT_ORG}"
+    SAT_KEY="${DEFAULT_SAT_KEY}"
+    normalize_satellite
+    if satellite_complete; then
+        SAT_SOURCE="built-in demosat defaults"
+        return 0
+    fi
+    clear_satellite
+    return 1
+}
+
 resolve_satellite() {
     if load_satellite_from_secret; then
         return 0
@@ -223,6 +242,9 @@ resolve_satellite() {
         return 0
     fi
     if load_satellite_from_vm; then
+        return 0
+    fi
+    if load_satellite_defaults; then
         return 0
     fi
     clear_satellite
