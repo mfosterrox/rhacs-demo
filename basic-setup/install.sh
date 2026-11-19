@@ -12,6 +12,8 @@
 #   ./install.sh                      # Use password from environment or ~/.bashrc
 #   ./install.sh mySecurePassword123  # Provide password as argument
 #
+#   SKIP_RHEL_VM=1  Skip the worker-pinned rhel-webserver guest
+#
 # The script will check for required environment variables in this order:
 #   1. Command-line arguments
 #   2. Current environment variables
@@ -640,6 +642,14 @@ main() {
         [ "${failed}" -eq 0 ]
     }
 
+    if [ "${SKIP_RHEL_VM:-0}" != "1" ]; then
+        run_setup_script "${SETUP_DIR}/deploy-rhel-webserver.sh" || exit 1
+        print_info ""
+    else
+        print_info "Skipping RHEL virtual machine (SKIP_RHEL_VM=1)"
+        print_info ""
+    fi
+
     local script_path
     for script_path in "${SETUP_DIR}"/0[1-4]-*.sh; do
         [ -f "${script_path}" ] || continue
@@ -689,6 +699,11 @@ main() {
     print_info "Setup Summary:"
     print_info "=============="
     print_info "  ✓ roxctl CLI installed"
+    if [ "${SKIP_RHEL_VM:-0}" != "1" ]; then
+        print_info "  ✓ RHEL virtual machine rhel-webserver scheduled onto a worker"
+    else
+        print_info "  skipped RHEL virtual machine (SKIP_RHEL_VM=1)"
+    fi
     if [ -n "${ROX_API_TOKEN:-}" ]; then
         print_info "  ✓ ROX_API_TOKEN generated and saved to ~/.bashrc"
     fi

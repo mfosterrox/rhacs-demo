@@ -1,0 +1,8 @@
+---
+# Namespace and Secret read by basic-setup/deploy-rhel-webserver.sh.
+# This role does not create a VirtualMachine.
+ocp4_workload_rhacs_vm_credentials_namespace: rhel-webserver
+ocp4_workload_rhacs_vm_credentials_secret_name: rhacs-vm-satellite
+ocp4_workload_rhacs_vm_credentials_satellite_url: ""
+ocp4_workload_rhacs_vm_credentials_satellite_org: ""
+ocp4_workload_rhacs_vm_credentials_satellite_activationkey: ""

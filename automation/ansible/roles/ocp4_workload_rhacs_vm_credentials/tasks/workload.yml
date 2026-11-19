@@ -1,0 +1,44 @@
+---
+- name: Create the RHEL guest namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ ocp4_workload_rhacs_vm_credentials_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: rhacs-demo
+          app.kubernetes.io/component: vm-credentials
+
+- name: Require Satellite registration values
+  ansible.builtin.assert:
+    that:
+      - ocp4_workload_rhacs_vm_credentials_satellite_url | default('') | trim | length > 0
+      - ocp4_workload_rhacs_vm_credentials_satellite_org | default('') | trim | length > 0
+      - ocp4_workload_rhacs_vm_credentials_satellite_activationkey | default('') | trim | length > 0
+    fail_msg: >-
+      Satellite URL, org, and activation key must be set before creating
+      secret {{ ocp4_workload_rhacs_vm_credentials_secret_name }}.
+      The setup script reads this secret and does not log the activation key.
+    quiet: true
+  no_log: true
+
+- name: Create the Satellite registration secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ ocp4_workload_rhacs_vm_credentials_secret_name }}"
+        namespace: "{{ ocp4_workload_rhacs_vm_credentials_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: rhacs-demo
+          app.kubernetes.io/component: vm-credentials
+      type: Opaque
+      stringData:
+        url: "{{ ocp4_workload_rhacs_vm_credentials_satellite_url | trim }}"
+        org: "{{ ocp4_workload_rhacs_vm_credentials_satellite_org | trim }}"
+        activationkey: "{{ ocp4_workload_rhacs_vm_credentials_satellite_activationkey | trim }}"
+  no_log: true

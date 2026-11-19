@@ -21,4 +21,6 @@ printf '%s\n' \
 sudo chmod 644 /etc/cron.d/roxagent
 sudo restorecon -vF /etc/cron.d/roxagent
 sudo systemctl restart crond
+# Start one inventory immediately. Cron repeats every 10 minutes.
+sudo /usr/local/bin/roxagent --daemon
  

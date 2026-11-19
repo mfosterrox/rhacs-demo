@@ -15,7 +15,7 @@ There is a single installation script called *`install-all-setup.sh`*. It runs *
 * Policy as Code (GitOps) via Argo CD
 * A Splunk instance with Violations sent to it
 
-The lab environment includes a sample virtual machine for vulnerability-management demos; you do not need to provision or register a VM as part of this install.
+`install-all-setup.sh` creates a RHEL guest named `rhel-webserver` on a worker node for the vulnerability-management demo. The guest installs the RHACS 5.0.0 `roxagent`. You do not start a second virtual machine during the demo.
 
 === Requirements
 

@@ -15,6 +15,7 @@
 #   SKIP_HUMMINGBIRD_DEMO=1 ./verify-all-setup.sh
 #   SKIP_VULNMGMT_DEMO=1 ./verify-all-setup.sh
 #   VERIFY_SKIP_VULNMGMT=1 ./verify-all-setup.sh
+#   SKIP_RHEL_VM=1 ./verify-all-setup.sh
 #
 # Exit: 0 = no failures (warnings allowed); 1 = one or more checks failed.
 # --- end help ---
@@ -169,6 +170,40 @@ verify_basic() {
     else
         print_warn "Central ROX_POLICY_FILTERS_UI not enabled (run script 08)"
         WARNINGS=$((WARNINGS + 1))
+    fi
+
+    if [ "${SKIP_RHEL_VM:-0}" = "1" ] || [ "${VERIFY_SKIP_RHEL_VM:-0}" = "1" ]; then
+        print_info "Skipping rhel-webserver verification"
+    elif ! oc get vm rhel-webserver -n rhel-webserver &>/dev/null; then
+        print_fail "VirtualMachine rhel-webserver not found in rhel-webserver"
+        failed=1
+    else
+        print_ok "VirtualMachine rhel-webserver exists"
+        local vsock vm_node control_plane
+        vsock="$(oc get vm rhel-webserver -n rhel-webserver -o jsonpath='{.spec.template.spec.domain.devices.autoattachVSOCK}' 2>/dev/null || true)"
+        if [ "${vsock}" = "true" ]; then
+            print_ok "rhel-webserver autoattachVSOCK=true"
+        else
+            print_fail "rhel-webserver does not set autoattachVSOCK=true"
+            failed=1
+        fi
+        vm_node="$(oc get vmi rhel-webserver -n rhel-webserver -o jsonpath='{.status.nodeName}' 2>/dev/null || true)"
+        if [ -z "${vm_node}" ]; then
+            print_warn "rhel-webserver is not scheduled yet"
+            WARNINGS=$((WARNINGS + 1))
+        else
+            control_plane="$(oc get node "${vm_node}" -o json | jq -r '
+                if (.metadata.labels["node-role.kubernetes.io/control-plane"] != null
+                    or .metadata.labels["node-role.kubernetes.io/master"] != null)
+                then "yes" else "no" end
+            ')"
+            if [ "${control_plane}" = "yes" ]; then
+                print_fail "rhel-webserver is running on control-plane node ${vm_node}"
+                failed=1
+            else
+                print_ok "rhel-webserver is scheduled on ${vm_node}"
+            fi
+        fi
     fi
 
     return "${failed}"

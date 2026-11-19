@@ -67,7 +67,7 @@ cd basic-setup
 **What happens automatically:**
 1. ✅ Installs `roxctl` CLI (if not already present)
 2. ✅ Generates `ROX_API_TOKEN` and saves to `~/.bashrc`
-3. ✅ Runs all setup scripts 01-07 in sequence
+3. ✅ Creates the `rhel-webserver` guest on a worker, then runs setup scripts 01-10
 4. ✅ Configures complete RHACS demo environment with custom TLS
 
 ### Version Management
@@ -113,11 +113,12 @@ export RHACS_FORCE_DOWNGRADE=true
 
 ## Setup Scripts
 
-The following scripts are executed in numerical order:
+The following scripts are executed in this order:
 
 | Script | Description | Requires Token | Auto-Run |
 |--------|-------------|----------------|----------|
-| `install.sh` | Main orchestrator - installs roxctl, generates token, runs scripts 01-07 | N/A | N/A |
+| `install.sh` | Main orchestrator - installs roxctl, generates token, creates the worker VM, then runs scripts 01-10 | N/A | N/A |
+| `deploy-rhel-webserver.sh` | Creates the RHEL guest `rhel-webserver` on a worker and installs the RHACS 5.0.0 `roxagent`. Skip with `SKIP_RHEL_VM=1` | No | ✓ (before 01–04) |
 | `01-verify-rhacs-install.sh` | Verifies RHACS installation, ensures TLS encryption, upgrades to RHACS 5.0.0 (or `RHACS_VERSION`), then ensures Console plugin is enabled | No | ✓ |
 | `02-configure-collector-networks.sh` | Sets `ROX_NON_AGGREGATED_NETWORKS` on the Collector via SecuredCluster overlay for non-RFC1918 pod/service CIDRs | No | ✓ |
 | `03-compliance-operator-install.sh` | Installs Red Hat Compliance Operator for compliance scanning | No | ✓ |
@@ -130,6 +131,15 @@ The following scripts are executed in numerical order:
 | `09-deploy-hummingbird-demo.sh` | Register HI base image in RHACS; verify hummingbird-demo workloads | **Yes** | ✓ |
 
 ## What Gets Configured
+
+### RHEL virtual machine (`deploy-rhel-webserver.sh`)
+
+`install.sh` runs this before scripts 01–04. It creates `rhel-webserver` in the `rhel-webserver` namespace on a Ready worker that is not a control-plane or master node. The guest uses VSOCK, and cloud-init runs `scripts/init-vm.sh`, which installs the RHACS 5.0.0 `roxagent`.
+
+- Skip: `export SKIP_RHEL_VM=1`
+- Satellite credentials, in order: Secret `rhacs-vm-satellite`, then `RHACS_VM_SATELLITE_URL`, `RHACS_VM_SATELLITE_ORG`, and `RHACS_VM_SATELLITE_ACTIVATIONKEY`, then cloud-init on an existing `rhel-webserver` virtual machine. The script does not print the activation key.
+- Guest password: `ROX_PASSWORD`
+- If the guest is already running on a worker, the script leaves it. If it is running on a control-plane node, the script deletes it and creates it on a worker.
 
 ### Collector Networks (Script 02)
 

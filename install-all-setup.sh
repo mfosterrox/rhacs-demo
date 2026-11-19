@@ -23,6 +23,7 @@
 #   SKIP_CUSTOM_POLICIES_SETUP=1 — do not run custom-policies/install.sh (OpenShift GitOps / Argo CD)
 #   SKIP_HUMMINGBIRD_DEMO=1: skip Hummingbird workloads in basic-setup
 #   SKIP_VULNMGMT_DEMO=1: skip GitOps shop demo in basic-setup (script 10)
+#   SKIP_RHEL_VM=1 — do not create the rhel-webserver guest in basic-setup
 #
 # Splunk: splunk-setup/install.sh defaults SPLUNK_RUN_CLEAN_FIRST=false. Parallel Phase 2 assumes the cluster may
 # already have Splunk from an earlier run or manual deploy — skipping clean avoids deleting PVCs and fits additive
