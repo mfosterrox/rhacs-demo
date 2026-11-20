@@ -28,20 +28,57 @@ register_rhacs_base_image_reference() {
     local tag="$4"
     local existing="${5:-}"
 
-    local existing_id
+    # Tag patterns are Go path globs (* and ?), not regular expressions.
+    # "*" matches every tag. ".*" matches only tags that start with a dot.
+    local existing_id current_pattern
     existing_id=$(echo "${existing}" | jq -r --arg repo "${repo}" --arg tag "${tag}" '
         .baseImageReferences[]? | select(.baseImageRepoPath == $repo and .baseImageTagPattern == $tag) | .id
     ' 2>/dev/null | head -1)
 
-    if [ -z "${existing_id}" ] || [ "${existing_id}" = "null" ]; then
-        existing_id=$(echo "${existing}" | jq -r --arg repo "${repo}" '
-            .baseImageReferences[]? | select(.baseImageRepoPath == $repo) | .id
-        ' 2>/dev/null | head -1)
+    if [ -n "${existing_id}" ] && [ "${existing_id}" != "null" ]; then
+        # PUT resets the repository to CREATED even when the pattern is unchanged,
+        # so a rebuilt tag is indexed on the next watcher pass instead of waiting hours.
+        print_info "Refreshing base image reference: ${repo}:${tag} (id: ${existing_id})"
+        local refresh_body refresh_code
+        refresh_body=$(curl -k -s -w "\n%{http_code}" -X PUT \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            -d "{\"id\":\"${existing_id}\",\"baseImageTagPattern\":\"${tag}\"}" \
+            "${api_v2}/baseimages/${existing_id}" 2>/dev/null || echo "")
+        refresh_code=$(echo "${refresh_body}" | tail -n1)
+        if [ "${refresh_code}" -ge 200 ] && [ "${refresh_code}" -lt 300 ]; then
+            print_info "✓ Base image reference refreshed: ${repo}:${tag}"
+            return 0
+        fi
+        print_warn "Base image reference refresh failed for ${repo}:${tag} (HTTP ${refresh_code}); leaving the existing reference"
+        return 0
     fi
 
+    existing_id=$(echo "${existing}" | jq -r --arg repo "${repo}" '
+        .baseImageReferences[]? | select(.baseImageRepoPath == $repo) | .id
+    ' 2>/dev/null | head -1)
+    current_pattern=$(echo "${existing}" | jq -r --arg repo "${repo}" '
+        .baseImageReferences[]? | select(.baseImageRepoPath == $repo) | .baseImageTagPattern
+    ' 2>/dev/null | head -1)
+
     if [ -n "${existing_id}" ] && [ "${existing_id}" != "null" ]; then
-        print_info "✓ Base image already registered: ${repo}:${tag} (id: ${existing_id})"
-        return 0
+        print_info "Updating base image tag pattern: ${repo} ${current_pattern} -> ${tag}"
+        local update_body update_code
+        update_body=$(curl -k -s -w "\n%{http_code}" -X PUT \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            -d "{\"id\":\"${existing_id}\",\"baseImageTagPattern\":\"${tag}\"}" \
+            "${api_v2}/baseimages/${existing_id}" 2>/dev/null || echo "")
+        update_code=$(echo "${update_body}" | tail -n1)
+        update_body=$(echo "${update_body}" | sed '$d')
+        if [ "${update_code}" -ge 200 ] && [ "${update_code}" -lt 300 ]; then
+            print_info "✓ Base image tag pattern updated: ${repo}:${tag} (id: ${existing_id})"
+            print_info "RHACS base image watcher will re-index this repository on its next pass"
+            return 0
+        fi
+        print_error "Failed to update base image tag pattern ${repo}:${tag} (HTTP ${update_code})"
+        [ -n "${update_body}" ] && print_error "Response: ${update_body:0:300}"
+        return 1
     fi
 
     local payload http_code body created_id

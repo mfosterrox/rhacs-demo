@@ -95,19 +95,29 @@ wait_ns_ready() {
     fi
 }
 
-scan_and_watch() {
+wait_for_base_image_index() {
+    local repo="$1"
+    local attempt line
+    # The base image watcher checks new repositories about once a minute, then pulls tag metadata.
+    # Layer classification uses that index. Watching before it exists leaves every layer as application.
+    print_info "Waiting for base image index: ${repo}"
+    for attempt in $(seq 1 18); do
+        line=$(oc logs -n "${RHACS_NAMESPACE}" deploy/central --since=20m 2>/dev/null \
+            | grep -F "Repository scan completed: repository=\"${repo}\"" \
+            | tail -1 || true)
+        if echo "${line}" | grep -q 'metadata=[1-9]'; then
+            print_info "✓ Base image index ready: ${repo}"
+            return 0
+        fi
+        sleep 10
+    done
+    print_warn "Base image index for ${repo} was not confirmed in Central logs. Layer type may stay empty until the next image reprocess."
+    return 0
+}
+
+watch_image() {
     local img="$1"
-    if ! command -v roxctl >/dev/null 2>&1; then
-        print_warn "roxctl missing -- skip scan of $img"
-        return 0
-    fi
-    print_info "Scanning ${REG}/${img}..."
-    if ! roxctl image scan --endpoint "${ROX_ENDPOINT}" --token-file <(echo "$ROX_API_TOKEN") \
-        --image "${REG}/${img}" --force --insecure-skip-tls-verify -o json >/dev/null 2>&1; then
-        print_warn "Scan failed for ${REG}/${img} -- image may not be in the registry yet"
-    else
-        print_info "✓ Scanned ${img}"
-    fi
+    print_info "Watching ${REG}/${img}..."
     local watch_body
     watch_body=$(rox_api "https://${CENTRAL_ROUTE}/v1/watchedimages" -X POST -H 'Content-Type: application/json' \
         -d "{\"name\":\"${REG}/${img}\"}" || true)
@@ -116,6 +126,26 @@ scan_and_watch() {
     else
         print_info "Watch ${img}: $(echo "$watch_body" | jq -r '.message // "already watched or pending"')"
     fi
+}
+
+# Delegated watches store the scan without base-image layer types. A cached enrich
+# (force=false) reruns that match against the base image index and does not pull layers again.
+classify_base_image_layers() {
+    local img="$1"
+    local body matches
+    print_info "Classifying base image layers for ${REG}/${img}..."
+    body=$(rox_api "https://${CENTRAL_ROUTE}/v1/images/scan" -X POST -H 'Content-Type: application/json' \
+        -d "{\"imageName\":\"${REG}/${img}\",\"force\":false}" || true)
+    matches=$(echo "$body" | jq -r '(.baseImageInfo // []) | length' 2>/dev/null || echo 0)
+    if [ "${matches}" != "0" ] && [ "${matches}" != "null" ] && [ -n "${matches}" ]; then
+        print_info "✓ Base image detected for ${img}"
+        return 0
+    fi
+    if echo "$body" | jq -e '.message' >/dev/null 2>&1; then
+        print_warn "Base image classification failed for ${img}: $(echo "$body" | jq -r '.message')"
+        return 0
+    fi
+    print_info "No base image match for ${img}. RHACS only matches a base when the image has more content layers than that base."
 }
 
 create_collection() {
@@ -310,23 +340,40 @@ main() {
         local existing
         existing=$(rox_api "https://${CENTRAL_ROUTE}/v2/baseimages" || echo "{}")
         register_rhacs_base_image_reference "${ROX_API_TOKEN}" "https://${CENTRAL_ROUTE}/v2" \
-            "${REG}/base-eap8" ".*" "${existing}" || print_warn "base-eap8 registration reported errors"
+            "${REG}/base-eap8" "*" "${existing}" || print_warn "base-eap8 registration reported errors"
         existing=$(rox_api "https://${CENTRAL_ROUTE}/v2/baseimages" || echo "{}")
         register_rhacs_base_image_reference "${ROX_API_TOKEN}" "https://${CENTRAL_ROUTE}/v2" \
-            "${REG}/base-ubi9-openjdk" ".*" "${existing}" || print_warn "base-ubi9-openjdk registration reported errors"
+            "${REG}/base-ubi9-openjdk" "*" "${existing}" || print_warn "base-ubi9-openjdk registration reported errors"
+        existing=$(rox_api "https://${CENTRAL_ROUTE}/v2/baseimages" || echo "{}")
+        register_rhacs_base_image_reference "${ROX_API_TOKEN}" "https://${CENTRAL_ROUTE}/v2" \
+            "registry.redhat.io/ubi9/openjdk-17-runtime" "1.18-4" "${existing}" || print_warn "openjdk-17-runtime registration reported errors"
+        existing=$(rox_api "https://${CENTRAL_ROUTE}/v2/baseimages" || echo "{}")
+        register_rhacs_base_image_reference "${ROX_API_TOKEN}" "https://${CENTRAL_ROUTE}/v2" \
+            "registry.redhat.io/amq-streams/kafka-38-rhel9" "2.8.0" "${existing}" || print_warn "kafka-38-rhel9 registration reported errors"
     fi
     bash "${VULNMGMT_DIR}/scripts/register-baseimages.sh" || print_warn "register-baseimages.sh reported errors (409 is OK)"
 
-    print_step "Scanning and watching base images..."
-    scan_and_watch "base-eap8:1.0"
-    scan_and_watch "base-ubi9-openjdk:1.0"
+    print_step "Waiting for the base image watcher to index tags..."
+    wait_for_base_image_index "${REG}/base-eap8"
+    wait_for_base_image_index "${REG}/base-ubi9-openjdk"
+    wait_for_base_image_index "registry.redhat.io/ubi9/openjdk-17-runtime"
+    wait_for_base_image_index "registry.redhat.io/amq-streams/kafka-38-rhel9"
 
-    print_step "Scanning and watching shop images..."
-    scan_and_watch "shop-api:1.0.0"
-    scan_and_watch "shop-api:1.1.0"
-    scan_and_watch "shop-web:1.0.0"
-    scan_and_watch "prod-mirror-shop-api:1.0.0"
-    scan_and_watch "prod-mirror-shop-web:1.0.0"
+    print_step "Watching images and classifying base image layers..."
+    local img
+    for img in \
+        base-eap8:1.0 \
+        base-ubi9-openjdk:1.0 \
+        base-eap8-repacked:1.0 \
+        shop-api:1.0.0 \
+        shop-api:1.1.0 \
+        shop-web:1.0.0 \
+        prod-mirror-shop-api:1.0.0 \
+        prod-mirror-shop-web:1.0.0
+    do
+        watch_image "${img}"
+        classify_base_image_layers "${img}"
+    done
 
     print_step "Creating collections..."
     create_collection '{"name":"shop-all","description":"All shop deployments","resourceSelectors":[{"rules":[{"fieldName":"Deployment Label","operator":"OR","values":[{"value":"app=shop"}]}]}]}'
