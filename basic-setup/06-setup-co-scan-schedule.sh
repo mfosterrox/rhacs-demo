@@ -36,6 +36,8 @@ RHACS_NAMESPACE="${RHACS_NAMESPACE:-stackrox}"
 COMPLIANCE_NAMESPACE="${COMPLIANCE_NAMESPACE:-openshift-compliance}"
 ROX_CENTRAL_ADDRESS="${ROX_CENTRAL_ADDRESS:-}"
 SCAN_NAME="acs-catch-all"
+# Printed after a successful create. Left empty when an existing schedule is kept.
+SCAN_PROFILE_SUMMARY=""
 
 # Function to ensure jq is installed
 ensure_jq() {
@@ -255,13 +257,136 @@ delete_scan_config() {
     return 0
 }
 
-# Function to collect Compliance Operator TailoredProfile names (RHACS 4.11)
-get_tailored_profile_names() {
-    if ! oc get crd tailoredprofiles.compliance.openshift.io &>/dev/null 2>&1; then
-        return 0
+# Profile names Central has synced for this cluster.
+# Central rejects the scan configuration unless every name exists for the cluster.
+list_synced_profile_names() {
+    local token=$1
+    local api_base=$2
+    local cluster_id=$3
+
+    local response http_code body names
+    response=$(curl -k -s -w "\n%{http_code}" --connect-timeout 15 --max-time 60 \
+        -G \
+        -H "Authorization: Bearer ${token}" \
+        --data-urlencode "cluster_ids=${cluster_id}" \
+        "${api_base}/v2/compliance/profiles/summary" 2>/dev/null || true)
+
+    http_code=$(echo "${response}" | tail -n1)
+    body=$(echo "${response}" | sed '$d')
+
+    if [ "${http_code}" != "200" ]; then
+        print_warn "Profile list request failed (HTTP ${http_code:-none})" >&2
+        return 1
     fi
-    oc get tailoredprofile -n "${COMPLIANCE_NAMESPACE}" -o json 2>/dev/null | \
-        jq -r '.items[]? | select(.metadata.name != null) | .metadata.name' 2>/dev/null || true
+
+    if ! echo "${body}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        print_warn "Profile list response was not JSON" >&2
+        return 1
+    fi
+
+    names=$(echo "${body}" | jq -r '.profiles[]?.name // empty' | sed '/^$/d' | sort -u)
+    printf '%s\n' "${names}"
+    return 0
+}
+
+profile_present() {
+    local synced=$1
+    local name=$2
+    [ -n "${synced}" ] && printf '%s\n' "${synced}" | grep -qx "${name}"
+}
+
+# CIS platform and node are required. Virtualization profiles are included
+# only when Central has already synced them from the Compliance Operator.
+resolve_scan_profiles() {
+    local token=$1
+    local api_base=$2
+    local cluster_id=$3
+
+    local required=("ocp4-cis" "ocp4-cis-node")
+    local virt=("ocp4-cis-vm-extension" "ocp4-cis-vm-extension-node")
+    local desired=("${required[@]}" "${virt[@]}")
+
+    local max_wait=120
+    local interval=10
+    local elapsed=0
+    local synced=""
+    local api_ok=false
+    local name
+
+    while true; do
+        if synced=$(list_synced_profile_names "${token}" "${api_base}" "${cluster_id}"); then
+            api_ok=true
+            local required_ready=true
+            for name in "${required[@]}"; do
+                if ! profile_present "${synced}" "${name}"; then
+                    required_ready=false
+                    break
+                fi
+            done
+            if [ "${required_ready}" = true ]; then
+                break
+            fi
+        fi
+
+        if [ "${elapsed}" -ge "${max_wait}" ]; then
+            break
+        fi
+
+        print_info "Waiting for Compliance Operator profiles to sync to Central... (${elapsed}s/${max_wait}s)" >&2
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+
+    if [ "${api_ok}" != true ]; then
+        print_error "Could not list compliance profiles from Central" >&2
+        return 1
+    fi
+
+    local synced_count=0
+    if [ -n "${synced}" ]; then
+        synced_count=$(printf '%s\n' "${synced}" | sed '/^$/d' | wc -l | tr -d ' ')
+    fi
+    print_info "Central has ${synced_count} compliance profile(s) for this cluster" >&2
+
+    local selected=()
+    for name in "${desired[@]}"; do
+        if profile_present "${synced}" "${name}"; then
+            selected+=("${name}")
+            print_info "  + ${name}" >&2
+        fi
+    done
+
+    local missing_required=()
+    for name in "${required[@]}"; do
+        if ! profile_present "${synced}" "${name}"; then
+            missing_required+=("${name}")
+        fi
+    done
+
+    if [ ${#missing_required[@]} -gt 0 ]; then
+        print_error "Central has not synced required profiles: ${missing_required[*]}" >&2
+        print_error "Profiles currently visible to Central:" >&2
+        if [ -n "${synced}" ]; then
+            printf '%s\n' "${synced}" | sed 's/^/  /' >&2
+        else
+            print_error "  (none)" >&2
+        fi
+        return 1
+    fi
+
+    local missing_virt=()
+    for name in "${virt[@]}"; do
+        if ! profile_present "${synced}" "${name}"; then
+            missing_virt+=("${name}")
+        fi
+    done
+    if [ ${#missing_virt[@]} -gt 0 ]; then
+        print_warn "OpenShift Virtualization profiles are not synced, so they were left out: ${missing_virt[*]}" >&2
+        print_warn "Those profiles ship with Compliance Operator 1.10 (ocp4 ProfileBundle)" >&2
+    fi
+
+    printf '%s\n' "${selected[@]}"
+    return 0
 }
 
 # Function to create scan configuration
@@ -273,32 +398,42 @@ create_scan_config() {
     
     print_info "Creating compliance scan configuration '${scan_name}'..."
 
-    local stock_profiles=(
-        "ocp4-cis" "ocp4-cis-node" "ocp4-moderate" "ocp4-moderate-node"
-        "ocp4-e8" "ocp4-high" "ocp4-high-node" "ocp4-nerc-cip"
-        "ocp4-nerc-cip-node" "ocp4-pci-dss" "ocp4-pci-dss-node" "ocp4-stig-node"
-    )
-    local tailored=()
-    local tp name
-    while IFS= read -r tp; do
-        [ -n "${tp}" ] && tailored+=("${tp}")
-    done < <(get_tailored_profile_names)
-
-    if [ ${#tailored[@]} -gt 0 ]; then
-        print_info "Including ${#tailored[@]} TailoredProfile(s) from Compliance Operator (4.11)"
-        for name in "${tailored[@]}"; do
-            print_info "  + ${name}"
-        done
+    local profiles_file
+    profiles_file=$(mktemp)
+    if ! resolve_scan_profiles "${token}" "${api_base}" "${cluster_id}" > "${profiles_file}"; then
+        rm -f "${profiles_file}"
+        return 1
     fi
 
+    local selected=()
+    local name
+    while IFS= read -r name; do
+        [ -n "${name}" ] && selected+=("${name}")
+    done < "${profiles_file}"
+    rm -f "${profiles_file}"
+
+    if [ ${#selected[@]} -eq 0 ]; then
+        print_error "No compliance profiles available for the scan configuration"
+        return 1
+    fi
+
+    local description="Daily CIS compliance scan"
+    if printf '%s\n' "${selected[@]}" | grep -q 'cis-vm-extension'; then
+        description="Daily CIS and OpenShift Virtualization compliance scan"
+    fi
+
+    SCAN_PROFILE_SUMMARY=$(printf '%s, ' "${selected[@]}")
+    SCAN_PROFILE_SUMMARY="${SCAN_PROFILE_SUMMARY%, }"
+
     local profiles_json
-    profiles_json=$(printf '%s\n' "${stock_profiles[@]}" "${tailored[@]}" | jq -R . | jq -s .)
+    profiles_json=$(printf '%s\n' "${selected[@]}" | jq -R . | jq -s .)
     
     # Create JSON payload in a temp file for reliable transmission
     local temp_file=$(mktemp)
     jq -n \
         --arg scanName "${scan_name}" \
         --arg clusterId "${cluster_id}" \
+        --arg description "${description}" \
         --argjson profiles "${profiles_json}" \
         '{
           scanName: $scanName,
@@ -306,7 +441,7 @@ create_scan_config() {
             oneTimeScan: false,
             profiles: $profiles,
             scanSchedule: { intervalType: "DAILY", hour: 12, minute: 0 },
-            description: "Daily compliance scan (stock + tailored profiles)"
+            description: $description
           },
           clusters: [$clusterId]
         }' > "${temp_file}"
@@ -349,9 +484,11 @@ create_scan_config() {
         print_error "URL: ${api_base}/v2/compliance/scan/configurations"
         print_error "Cluster ID: ${cluster_id}"
         print_error "Response: ${body:0:500}"
+        print_error "Profiles sent: ${selected[*]}"
         print_error ""
         print_error "This may indicate:"
         print_error "  - ProfileBundles not yet ready (wait and retry)"
+        print_error "  - A requested profile is not synced for this cluster"
         print_error "  - Invalid cluster ID"
         print_error "  - API authentication issue"
         return 1
@@ -461,7 +598,11 @@ main() {
     print_info ""
     print_info "Scan Configuration: ${SCAN_NAME}"
     print_info "Schedule: Daily at 12:00 PM"
-    print_info "Profiles: ocp4-cis, ocp4-moderate, ocp4-high, ocp4-pci-dss, etc."
+    if [ -n "${SCAN_PROFILE_SUMMARY}" ]; then
+        print_info "Profiles: ${SCAN_PROFILE_SUMMARY}"
+    else
+        print_info "Profiles: existing scan configuration left unchanged"
+    fi
     print_info ""
 }
 

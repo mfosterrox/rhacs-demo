@@ -125,7 +125,7 @@ The following scripts are executed in this order:
 | `04-deploy-applications.sh` | Deploys demo applications from demo-applications repo (excludes hummingbird-demo, vulnmgmt, and emojivoto) | No | ✓ |
 | `deploy-hummingbird-applications.sh` | Deploys Hummingbird HI demo workloads (runs in parallel with scripts 05–08) | No | ✓ |
 | `05-configure-rhacs-settings.sh` | Configures RHACS via API (metrics, retention, platform components) | **Yes** | ✓ |
-| `06-setup-co-scan-schedule.sh` | Creates automated compliance scan schedules (includes TailoredProfiles when present) | **Yes** | ✓ |
+| `06-setup-co-scan-schedule.sh` | Creates the daily `acs-catch-all` compliance scan (CIS, plus OpenShift Virtualization profiles when Central has synced them) | **Yes** | ✓ |
 | `07-trigger-compliance-scan.sh` | Triggers immediate compliance scans (optional) | **Yes** | ✓ |
 | `08-configure-rhacs-411-features.sh` | RHACS 4.11 TP flags and Attach to Pod policy verification | **Yes** | ✓ |
 | `09-deploy-hummingbird-demo.sh` | Register HI base image in RHACS; verify hummingbird-demo workloads | **Yes** | ✓ |
@@ -172,15 +172,11 @@ oc get securedcluster -n stackrox -o yaml | grep -A10 'overlays:'
 - **Vulnerability Exceptions**: Configurable expiry options (14, 30, 60, 90 days)
 
 ### Compliance Scanning (Script 06)
-- Daily compliance scans at 12:00 PM
-- Stock OpenShift compliance profiles plus any **TailoredProfile** CRs from the Compliance Operator (4.11)
-- Multiple compliance profiles:
-  - ocp4-cis, ocp4-cis-node
-  - ocp4-moderate, ocp4-moderate-node
-  - ocp4-high, ocp4-high-node
-  - ocp4-pci-dss, ocp4-pci-dss-node
-  - ocp4-nerc-cip, ocp4-nerc-cip-node
-  - ocp4-e8, ocp4-stig-node
+- Daily compliance scans at 12:00 PM (`acs-catch-all`)
+- Profiles are limited to names Central has synced for the cluster. Central returns HTTP 400 if any requested profile is missing.
+- Included when synced:
+  - `ocp4-cis`, `ocp4-cis-node`
+  - `ocp4-cis-vm-extension`, `ocp4-cis-vm-extension-node` (CIS OpenShift Virtualization benchmark, Compliance Operator 1.10)
 
 ### RHACS 4.11 Features (Script 08)
 - **Technology Preview (enabled by default):** `ROX_INIT_CONTAINER_SUPPORT`, `ROX_POLICY_FILTERS_UI`
